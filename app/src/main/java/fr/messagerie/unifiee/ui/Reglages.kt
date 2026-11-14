@@ -1,5 +1,8 @@
 package fr.messagerie.unifiee.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -65,15 +68,50 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
     var notifs by remember { mutableStateOf(cfg.notifications) }
     var veille by remember { mutableStateOf(cfg.veilleArrierePlan) }
     var test by remember { mutableStateOf<String?>(null) }
+    var fichier by remember { mutableStateOf<String?>(null) }
 
-    fun enregistrer() {
+    fun recharger() {
+        matrixUrls = cfg.matrixUrls; matrixUser = cfg.matrixUtilisateur; matrixJeton = cfg.matrixJeton; moi = cfg.moiFantome
+        relaisUrls = cfg.relaisUrls; relaisJeton = cfg.relaisJeton
+        ollamaUrls = cfg.ollamaUrls; ollamaModele = cfg.ollamaModele
+        jours = cfg.jours; intervalle = cfg.intervalle; notifs = cfg.notifications; veille = cfg.veilleArrierePlan
+    }
+
+    fun enregistrerSansQuitter() {
         cfg.matrixUrls = matrixUrls; cfg.matrixUtilisateur = matrixUser; cfg.matrixJeton = matrixJeton; cfg.moiFantome = moi
         cfg.relaisUrls = relaisUrls; cfg.relaisJeton = relaisJeton
         cfg.ollamaUrls = ollamaUrls; cfg.ollamaModele = ollamaModele
         cfg.jours = jours; cfg.intervalle = intervalle; cfg.notifications = notifs; cfg.veilleArrierePlan = veille
+    }
+
+    fun enregistrer() {
+        enregistrerSansQuitter()
         Moteur.redemarrer()
         ServiceVeille.mettreAJour(ctx)
         retour?.invoke()
+    }
+
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        fichier = try {
+            val texte = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+            val faits = cfg.importerJson(texte)
+            recharger()
+            if (faits.isEmpty()) "Ce fichier ne contient aucun réglage reconnu."
+            else "Importé : ${faits.joinToString(", ")}. Vérifiez puis touchez « Enregistrer »."
+        } catch (ex: Exception) {
+            "Fichier illisible : ${ex.message ?: ex.javaClass.simpleName}"
+        }
+    }
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        fichier = try {
+            enregistrerSansQuitter()
+            ctx.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(cfg.exporterJson().toByteArray()) }
+            "Configuration exportée. Ce fichier contient vos jetons : gardez-le pour vous."
+        } catch (ex: Exception) {
+            "Export impossible : ${ex.message ?: ex.javaClass.simpleName}"
+        }
     }
 
     Scaffold(topBar = {
@@ -91,6 +129,18 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
                     "et/ou de votre relais Element. Rien n'est envoyé ailleurs que vers ces serveurs.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            Section("Fichier de configuration")
+            Text(
+                "Remplissez tout d'un coup avec un fichier .json (format de messagerie-config.exemple.json, " +
+                    "ou le client.json / element.json de l'app Mac).",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) }) { Text("Importer…") }
+                OutlinedButton(onClick = { exporter.launch("messagerie-config.json") }) { Text("Exporter…") }
+            }
+            fichier?.let { Text(it, fontSize = 13.sp) }
 
             Section("Serveur Matrix (Synapse)")
             Champ("Adresse(s) du serveur", matrixUrls, "http://serveur:8008  (plusieurs : séparées par des virgules)") { matrixUrls = it }

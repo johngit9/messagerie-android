@@ -2,6 +2,7 @@ package fr.messagerie.unifiee
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONObject
 
 /**
  * Réglages et identifiants de connexion, saisis dans l'appli (écran Réglages).
@@ -45,6 +46,72 @@ class Config(context: Context) {
     val relaisConfigure get() = relaisUrls.isNotEmpty() && relaisJeton.isNotEmpty()
     val ollamaConfigure get() = ollamaUrls.isNotEmpty()
     val configure get() = matrixConfigure || relaisConfigure
+
+    /** Exporte tous les réglages dans le format du fichier de configuration (voir messagerie-config.exemple.json). */
+    fun exporterJson(): String = JSONObject()
+        .put("matrix", JSONObject().put("adresses", matrixUrls).put("utilisateur", matrixUtilisateur).put("jeton", matrixJeton).put("moi", moiFantome))
+        .put("relais", JSONObject().put("adresses", relaisUrls).put("jeton", relaisJeton))
+        .put("ollama", JSONObject().put("adresses", ollamaUrls).put("modele", ollamaModele))
+        .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan)
+        .toString(2)
+
+    /**
+     * Importe un fichier de configuration. Accepte :
+     *  - le format de l'appli (messagerie-config.exemple.json) ;
+     *  - le client.json de l'app Mac (homeserver_url…, user_id, access_token, moi_fantome) ;
+     *  - le element.json / relais.json du relais (url, url_ip, url_tailscale, jeton).
+     * Seules les valeurs présentes dans le fichier remplacent les réglages actuels.
+     * Renvoie la liste de ce qui a été importé.
+     */
+    fun importerJson(texte: String): List<String> {
+        val j = JSONObject(texte)
+        val faits = mutableListOf<String>()
+        fun JSONObject.txt(k: String): String? = if (has(k) && !isNull(k)) optString(k).trim().takeIf { it.isNotEmpty() } else null
+        fun adresses(o: JSONObject, vararg cles: String): String? {
+            val l = cles.flatMap { k ->
+                if (!o.has(k) || o.isNull(k)) emptyList()
+                else o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: liste(o.optString(k))
+            }.map { it.trim().trimEnd('/') }.filter { it.isNotEmpty() }.distinct()
+            return l.takeIf { it.isNotEmpty() }?.joinToString(", ")
+        }
+
+        j.optJSONObject("matrix")?.let { m ->
+            adresses(m, "adresses")?.let { matrixUrls = it }
+            m.txt("utilisateur")?.let { matrixUtilisateur = it }
+            m.txt("jeton")?.let { matrixJeton = it }
+            m.txt("moi")?.let { moiFantome = it }
+            faits += "serveur Matrix"
+        }
+        j.optJSONObject("relais")?.let { r ->
+            adresses(r, "adresses")?.let { relaisUrls = it }
+            r.txt("jeton")?.let { relaisJeton = it }
+            faits += "relais Element"
+        }
+        j.optJSONObject("ollama")?.let { o ->
+            adresses(o, "adresses")?.let { ollamaUrls = it }
+            o.txt("modele")?.let { ollamaModele = it }
+            faits += "Ollama"
+        }
+        // client.json de l'app Mac
+        if (j.has("access_token") || j.has("homeserver_url")) {
+            adresses(j, "homeserver_url_tailscale", "homeserver_url_lan", "homeserver_url", "homeserver_url_ip")?.let { matrixUrls = it }
+            j.txt("user_id")?.let { matrixUtilisateur = it }
+            j.txt("access_token")?.let { matrixJeton = it }
+            j.txt("moi_fantome")?.let { moiFantome = it }
+            faits += "serveur Matrix"
+        }
+        // element.json / relais.json du relais
+        if (j.has("jeton") && (j.has("url") || j.has("url_tailscale"))) {
+            adresses(j, "url_tailscale", "url", "url_ip")?.let { relaisUrls = it }
+            j.txt("jeton")?.let { relaisJeton = it }
+            faits += "relais Element"
+        }
+        if (j.has("jours")) { jours = j.optInt("jours", jours); faits += "préférences" }
+        if (j.has("intervalle")) intervalle = j.optInt("intervalle", intervalle)
+        if (j.has("notifications")) notifications = j.optBoolean("notifications", notifications)
+        if (j.has("veille")) veilleArrierePlan = j.optBoolean("veille", veilleArrierePlan)
+        return faits.distinct()
+    }
 
     companion object {
         fun liste(s: String) = s.split(',', ' ', '\n').map { it.trim().trimEnd('/') }.filter { it.isNotEmpty() }

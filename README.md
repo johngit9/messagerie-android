@@ -23,6 +23,11 @@ Aucune adresse, aucun jeton ni aucune donnée personnelle n'est inclus dans l'ap
    - l'adresse et le jeton du relais Element (facultatif) ;
    - l'adresse d'Ollama et le modèle (facultatif, par défaut `qwen3:8b`).
 
+   Plus simple : dans **Réglages → Fichier de configuration → Importer…**, choisissez un fichier `.json` qui contient tout
+   (modèle : [`messagerie-config.exemple.json`](messagerie-config.exemple.json) ; le `client.json` et le `element.json`
+   de l'app Mac sont aussi acceptés). **Exporter…** enregistre vos réglages dans un tel fichier, pour les réimporter plus tard.
+   Ce fichier contient vos jetons : gardez-le sur votre téléphone ou votre cloud privé, jamais dans ce dépôt.
+
 Le téléphone doit pouvoir joindre ces serveurs (même réseau Wi-Fi ou VPN type Tailscale).
 
 ## Fonctions

@@ -9,3 +9,6 @@ local.properties
 *.jks
 captures/
 .kotlin/
+
+# Fichier de configuration personnel (contient des jetons) : ne jamais le publier
+messagerie-config.json

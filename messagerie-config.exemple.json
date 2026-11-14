@@ -1,0 +1,20 @@
+{
+  "matrix": {
+    "adresses": ["http://adresse-vpn-du-serveur:8008", "http://adresse-locale-du-serveur:8008"],
+    "utilisateur": "@utilisateur:domaine",
+    "jeton": "JETON_MATRIX",
+    "moi": ""
+  },
+  "relais": {
+    "adresses": ["http://adresse-vpn-du-serveur:8787", "http://adresse-locale-du-serveur:8787"],
+    "jeton": "JETON_RELAIS"
+  },
+  "ollama": {
+    "adresses": ["http://adresse-vpn-du-serveur:11434"],
+    "modele": "qwen3:8b"
+  },
+  "jours": 3,
+  "intervalle": 60,
+  "notifications": true,
+  "veille": false
+}
