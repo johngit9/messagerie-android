@@ -1,0 +1,210 @@
+package fr.messagerie.unifiee
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.Cursor
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+
+/**
+ * Archive permanente de tous les messages (toutes sources), avec recherche plein texte,
+ * et état local (lu / non lu, à traiter, sourdine, résumés IA). Fichier privé de l'appli.
+ */
+class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 1) {
+
+    override fun onConfigure(db: SQLiteDatabase) {
+        db.enableWriteAheadLogging()
+    }
+
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE conversations (cle TEXT PRIMARY KEY, source TEXT NOT NULL, ident TEXT NOT NULL,
+            nom TEXT, est_groupe INTEGER DEFAULT 0, derniere INTEGER DEFAULT 0)""")
+        db.execSQL("""CREATE TABLE messages (cle TEXT PRIMARY KEY, conv TEXT NOT NULL, date INTEGER NOT NULL,
+            de_moi INTEGER, auteur TEXT, type TEXT, texte TEXT, media TEXT, duree REAL)""")
+        db.execSQL("CREATE INDEX messages_conv_date ON messages(conv, date)")
+        try {
+            db.execSQL("CREATE VIRTUAL TABLE recherche USING fts4(cle, conv, contenu, notindexed=cle, notindexed=conv, tokenize=unicode61 \"remove_diacritics=1\")")
+        } catch (e: Exception) {
+            db.execSQL("CREATE VIRTUAL TABLE recherche USING fts4(cle, conv, contenu)")
+        }
+        db.execSQL("CREATE TABLE curseurs (nom TEXT PRIMARY KEY, valeur TEXT)")
+        db.execSQL("""CREATE TABLE etats (cle TEXT PRIMARY KEY, lue INTEGER DEFAULT 0, forcee INTEGER DEFAULT 0,
+            traitee INTEGER DEFAULT 0, notifiee INTEGER DEFAULT 0, manuel INTEGER DEFAULT 0, sourdine INTEGER DEFAULT 0)""")
+        db.execSQL("""CREATE TABLE syntheses (cle TEXT PRIMARY KEY, resume TEXT, action INTEGER, reponse TEXT, pour INTEGER)""")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, ancienne: Int, nouvelle: Int) {}
+
+    private inline fun <T> Cursor.lignes(f: (Cursor) -> T): List<T> = use { c ->
+        val r = ArrayList<T>()
+        while (c.moveToNext()) r.add(f(c))
+        r
+    }
+
+    private fun Cursor.s(n: String): String? = getColumnIndex(n).let { if (it < 0 || isNull(it)) null else getString(it) }
+    private fun Cursor.l(n: String): Long = getColumnIndex(n).let { if (it < 0 || isNull(it)) 0 else getLong(it) }
+
+    // MARK: Écriture
+
+    /** Ajoute ou met à jour les conversations. `garderNoms` : n'écrase pas une conversation déjà connue. */
+    @Synchronized
+    fun enregistrerConversations(convs: List<Conversation>, garderNoms: Boolean = false) {
+        if (convs.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (c in convs) {
+                val v = ContentValues().apply {
+                    put("cle", c.cle); put("source", c.source.id); put("ident", c.jid)
+                    put("nom", c.nom); put("est_groupe", if (c.estGroupe) 1 else 0)
+                }
+                if (db.insertWithOnConflict("conversations", null, v, SQLiteDatabase.CONFLICT_IGNORE) == -1L && !garderNoms) {
+                    v.remove("cle"); v.remove("source"); v.remove("ident")
+                    db.update("conversations", v, "cle = ?", arrayOf(c.cle))
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    @Synchronized
+    fun enregistrerMessages(messages: List<Message>) {
+        if (messages.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (m in messages) {
+                val v = ContentValues().apply {
+                    put("cle", m.cle); put("conv", m.conv); put("date", m.date); put("de_moi", if (m.deMoi) 1 else 0)
+                    put("auteur", m.auteur); put("type", m.type); put("texte", m.texte); put("media", m.media)
+                    if (m.duree != null) put("duree", m.duree) else putNull("duree")
+                }
+                db.insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+                db.delete("recherche", "cle = ?", arrayOf(m.cle))
+                if (m.texte.isNotEmpty()) {
+                    db.insert("recherche", null, ContentValues().apply { put("cle", m.cle); put("conv", m.conv); put("contenu", m.texte) })
+                }
+                db.execSQL("UPDATE conversations SET derniere = MAX(derniere, ?) WHERE cle = ?", arrayOf<Any>(m.date, m.conv))
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    @Synchronized
+    fun supprimerMessages(cles: List<String>) {
+        if (cles.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (c in cles) {
+                db.delete("messages", "cle = ?", arrayOf(c))
+                db.delete("recherche", "cle = ?", arrayOf(c))
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun existantes(cles: List<String>): Set<String> {
+        if (cles.isEmpty()) return emptySet()
+        val r = HashSet<String>()
+        for (lot in cles.chunked(500)) {
+            val marques = lot.joinToString(",") { "?" }
+            readableDatabase.rawQuery("SELECT cle FROM messages WHERE cle IN ($marques)", lot.toTypedArray())
+                .lignes { it.getString(0) }.let { r.addAll(it) }
+        }
+        return r
+    }
+
+    fun curseur(nom: String): String? =
+        readableDatabase.rawQuery("SELECT valeur FROM curseurs WHERE nom = ?", arrayOf(nom)).lignes { it.getString(0) }.firstOrNull()
+
+    @Synchronized
+    fun definirCurseur(nom: String, valeur: String?) {
+        if (valeur == null) writableDatabase.delete("curseurs", "nom = ?", arrayOf(nom))
+        else writableDatabase.insertWithOnConflict("curseurs", null,
+            ContentValues().apply { put("nom", nom); put("valeur", valeur) }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    // MARK: Lecture
+
+    private fun message(c: Cursor) = Message(
+        cle = c.s("cle") ?: "", conv = c.s("conv") ?: "", date = c.l("date"), deMoi = c.l("de_moi") == 1L,
+        auteur = c.s("auteur") ?: "", texte = c.s("texte") ?: "", type = c.s("type") ?: "texte",
+        media = c.s("media"), duree = c.getColumnIndex("duree").let { if (it < 0 || c.isNull(it)) null else c.getDouble(it) },
+    )
+
+    /** Toutes les conversations : `nbRecents` derniers messages si actives depuis `depuis`, sinon le dernier seul. */
+    fun conversations(depuis: Long, nbRecents: Int = 60): List<Conversation> {
+        val db = readableDatabase
+        data class L(val cle: String, val src: Source, val ident: String, val nom: String, val groupe: Boolean, val derniere: Long)
+        val convs = db.rawQuery("SELECT * FROM conversations WHERE derniere > 0 ORDER BY derniere DESC", null).lignes { c ->
+            Source.depuis(c.s("source") ?: "")?.let { L(c.s("cle")!!, it, c.s("ident") ?: "", c.s("nom") ?: "?", c.l("est_groupe") == 1L, c.l("derniere")) }
+        }.filterNotNull()
+        // Dernier message de chaque conversation, en une requête.
+        val derniers = HashMap<String, Message>()
+        db.rawQuery("SELECT m.* FROM messages m JOIN conversations c ON c.cle = m.conv AND m.date = c.derniere", null)
+            .lignes { message(it) }.forEach { derniers[it.conv] = it }
+        return convs.mapNotNull { l ->
+            val msgs = if (l.derniere >= depuis) messages(l.cle, null, nbRecents) else listOfNotNull(derniers[l.cle])
+            if (msgs.isEmpty()) null else Conversation(l.cle, l.src, l.ident, l.nom, l.groupe, l.derniere, msgs)
+        }
+    }
+
+    /** Historique d'une conversation (ordre chronologique), avant une date. */
+    fun messages(conv: String, avant: Long?, limite: Int = 200): List<Message> =
+        readableDatabase.rawQuery("SELECT * FROM messages WHERE conv = ? AND date < ? ORDER BY date DESC LIMIT ?",
+            arrayOf(conv, (avant ?: Long.MAX_VALUE).toString(), limite.toString())).lignes { message(it) }.reversed()
+
+    fun nombreMessages(conv: String): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM messages WHERE conv = ?", arrayOf(conv)).lignes { it.getInt(0) }.firstOrNull() ?: 0
+
+    fun conversationDuMessage(cle: String): String? =
+        readableDatabase.rawQuery("SELECT conv FROM messages WHERE cle = ?", arrayOf(cle)).lignes { it.getString(0) }.firstOrNull()
+
+    /** Conversations contenant tous les mots cherchés (début de mot). */
+    fun rechercher(texte: String): Set<String> {
+        val mots = texte.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { "$it*" }
+        if (mots.isEmpty()) return emptySet()
+        return try {
+            readableDatabase.rawQuery("SELECT DISTINCT conv FROM recherche WHERE contenu MATCH ? LIMIT 2000",
+                arrayOf(mots.joinToString(" "))).lignes { it.getString(0) }.toSet()
+        } catch (e: Exception) { emptySet() }
+    }
+
+    fun statistiques(): Map<Source, Pair<Int, Int>> {
+        val r = HashMap<Source, Pair<Int, Int>>()
+        readableDatabase.rawQuery("""SELECT c.source AS s, COUNT(DISTINCT c.cle) AS nc, COUNT(m.cle) AS nm
+            FROM conversations c LEFT JOIN messages m ON m.conv = c.cle GROUP BY c.source""", null).lignes { c ->
+            Source.depuis(c.s("s") ?: "")?.let { r[it] = c.l("nc").toInt() to c.l("nm").toInt() }
+        }
+        return r
+    }
+
+    // MARK: État local
+
+    fun etats(): Map<String, EtatConv> =
+        readableDatabase.rawQuery("SELECT * FROM etats", null).lignes { c ->
+            c.s("cle")!! to EtatConv(c.l("lue"), c.l("forcee"), c.l("traitee"), c.l("notifiee"), c.l("manuel") == 1L, c.l("sourdine") == 1L)
+        }.toMap()
+
+    @Synchronized
+    fun enregistrerEtat(cle: String, e: EtatConv) {
+        writableDatabase.insertWithOnConflict("etats", null, ContentValues().apply {
+            put("cle", cle); put("lue", e.lue); put("forcee", e.forcee); put("traitee", e.traitee); put("notifiee", e.notifiee)
+            put("manuel", if (e.manuel) 1 else 0); put("sourdine", if (e.sourdine) 1 else 0)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun syntheses(): Map<String, Synthese> =
+        readableDatabase.rawQuery("SELECT * FROM syntheses", null).lignes { c ->
+            c.s("cle")!! to Synthese(c.s("resume") ?: "", c.l("action") == 1L, c.s("reponse") ?: "", c.l("pour"))
+        }.toMap()
+
+    @Synchronized
+    fun enregistrerSynthese(cle: String, s: Synthese?) {
+        if (s == null) { writableDatabase.delete("syntheses", "cle = ?", arrayOf(cle)); return }
+        writableDatabase.insertWithOnConflict("syntheses", null, ContentValues().apply {
+            put("cle", cle); put("resume", s.resume); put("action", if (s.actionRequise) 1 else 0); put("reponse", s.reponse); put("pour", s.pourLeMessageDu)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+}
