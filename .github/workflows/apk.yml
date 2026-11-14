@@ -23,11 +23,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Installer la plateforme Android 37
+      - name: Accepter les licences Android
         run: |
           SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager
           yes | "$SDKM" --licenses > /dev/null || true
-          "$SDKM" --install "platforms;android-37" "build-tools;37.0.0" > /dev/null
+          "$SDKM" --list 2>/dev/null | grep -E '^ *(platforms;android-3[6-9]|build-tools;3[6-9])' | sort -u || true
 
       - uses: gradle/actions/setup-gradle@v4
         with:
