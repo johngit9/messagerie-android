@@ -11,6 +11,8 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +26,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** Instantané de tout ce que l'interface affiche. */
@@ -85,7 +89,11 @@ object Moteur {
     lateinit var cfg: Config
     lateinit var archive: Archive
 
-    private val portee = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Une erreur dans une tâche de fond est notée dans le rapport, sans fermer l'appli. */
+    private val gardien = CoroutineExceptionHandler { _, t -> Plantages.noter(t, fatal = false) }
+    private val portee = CoroutineScope(SupervisorJob() + Dispatchers.IO + gardien)
+    /** Au plus 2 passerelles importent en même temps (mémoire et base de données). */
+    private val passerelles = Semaphore(2)
     private val _etat = MutableStateFlow(Etat())
     val etat: StateFlow<Etat> = _etat
     private val verrou = Mutex()
@@ -219,15 +227,22 @@ object Moteur {
             _etat.update { it.copy(sources = sources.toMap()) }
             recharger()
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
-            nouveauxMessages()
-            lancerResumes()
+            runCatching { nouveauxMessages() }.onFailure { Plantages.noter(it, fatal = false) }
+            runCatching { lancerResumes() }.onFailure { Plantages.noter(it, fatal = false) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Plantages.noter(e, fatal = false)
         } finally {
             _etat.update { it.copy(enCours = false, importEnCours = null) }
             verrou.unlock()
         }
     }
 
-    private suspend fun synchroniserPont(pont: Pont, correspondance: Map<String, String>?, avant: EtatSource?, avecRcs: Boolean = false): EtatSource {
+    private suspend fun synchroniserPont(pont: Pont, correspondance: Map<String, String>?, avant: EtatSource?, avecRcs: Boolean = false): EtatSource =
+        passerelles.withPermit { synchroniserPontSeul(pont, correspondance, avant, avecRcs) }
+
+    private suspend fun synchroniserPontSeul(pont: Pont, correspondance: Map<String, String>?, avant: EtatSource?, avecRcs: Boolean): EtatSource {
         val initial = pont.source.id.lowercase() + ".initial"
         return try {
             if (archive.curseur(initial) == null) _etat.update { it.copy(importEnCours = "Import de l'historique ${pont.source.libelle}…") }
@@ -269,8 +284,9 @@ object Moteur {
 
     private fun majEtat(cle: String, f: (EtatConv) -> EtatConv) {
         val n = f(_etat.value.etats[cle] ?: EtatConv())
-        archive.enregistrerEtat(cle, n)
         _etat.update { it.copy(etats = it.etats + (cle to n)) }
+        // Écriture hors du fil d'affichage : la base peut être occupée par une synchro.
+        portee.launch { archive.enregistrerEtat(cle, n) }
     }
 
     // MARK: Lu / non lu — LOCAL uniquement
@@ -309,7 +325,7 @@ object Moteur {
         try {
             val msgs = withContext(Dispatchers.IO) { archive.messages(c.cle, null, 60) }.ifEmpty { c.messages }
             val s = withContext(Dispatchers.IO) { Ollama(cfg).synthetiser(c, msgs) } ?: return false
-            archive.enregistrerSynthese(c.cle, s)
+            withContext(Dispatchers.IO) { archive.enregistrerSynthese(c.cle, s) }
             _etat.update { it.copy(syntheses = it.syntheses + (c.cle to s)) }
             notifierSiBesoin(c)
             return true
@@ -319,9 +335,8 @@ object Moteur {
     }
 
     fun regenerer(c: Conversation) {
-        archive.enregistrerSynthese(c.cle, null)
         _etat.update { it.copy(syntheses = it.syntheses - c.cle) }
-        portee.launch { resumer(c) }
+        portee.launch { archive.enregistrerSynthese(c.cle, null); resumer(c) }
     }
 
     suspend fun ameliorer(brouillon: String, facon: Ollama.Facon, c: Conversation): String? = withContext(Dispatchers.IO) {

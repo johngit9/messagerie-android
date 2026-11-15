@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        Plantages.installer(this)
         Moteur.init(this)
         SynchroArrierePlan.programmer(this)
     }

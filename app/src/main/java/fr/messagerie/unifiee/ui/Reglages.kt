@@ -201,6 +201,8 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 }
             }
 
+            RapportPlantage()
+
             if (majDisponible(ctx)) {
                 Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.tertiaryContainer,
                     modifier = Modifier.fillMaxWidth().clickable { ouvrir(Page.MiseAJour) }) {
@@ -252,7 +254,11 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
             }
 
             // Latence de réception : heure du message sur le serveur → arrivée sur ce téléphone
-            val latences = Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
+            val latences by androidx.compose.runtime.produceState(emptyList<Pair<Source, List<Long>>>(), e.derniereActualisation) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
+                }
+            }
             Groupe("Latence de réception (serveur → téléphone)") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (latences.isEmpty()) Text("Pas encore mesurée : elle s'affichera après les prochains messages reçus.",
@@ -496,7 +502,9 @@ private fun PageMessageries(e: Etat) {
                             FilterChip(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ }, label = { Text(l, fontSize = 13.sp) })
                         }
                     }
-                    val d = remember(s) { Moteur.delais(s) }
+                    val d by androidx.compose.runtime.produceState(emptyList<Long>(), s) {
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.delais(s) }
+                    }
                     if (d.isNotEmpty()) {
                         val moyen = d.average().toLong()
                         Text("Délai de réception : ${duree(moyen)} en moyenne, ${duree(d.max())} au plus (${d.size} derniers messages)", fontSize = 13.sp)
@@ -682,5 +690,39 @@ private fun PageMiseAJour() {
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = valeur, onCheckedChange = maj)
+    }
+}
+
+/** Rapport des erreurs et arrêts de l'appli : à voir, copier (pour le transmettre) ou effacer. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun RapportPlantage() {
+    val ctx = LocalContext.current
+    var rapport by remember { mutableStateOf<String?>(null) }
+    var arret by remember { mutableStateOf(false) }
+    var ouvert by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { rapport = Plantages.rapport(); arret = Plantages.aUnArret() }
+    }
+    val r = rapport ?: return
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = RoundedCornerShape(20.dp), color = if (arret) cs.errorContainer else cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (arret) "L'appli s'est arrêtée" else "Des erreurs ont été rattrapées", fontWeight = FontWeight.SemiBold,
+                color = if (arret) cs.onErrorContainer else cs.onSurface)
+            Text("Le rapport reste sur ce téléphone. Copiez-le pour le transmettre (aucun message n'y figure).", fontSize = 13.sp,
+                color = if (arret) cs.onErrorContainer else cs.onSurfaceVariant)
+            if (ouvert) Text(r.take(4000), fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = if (arret) cs.onErrorContainer else cs.onSurface)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { ouvert = !ouvert }) { Text(if (ouvert) "Masquer" else "Voir") }
+                TextButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Rapport de plantage", r))
+                    android.widget.Toast.makeText(ctx, "Rapport copié", android.widget.Toast.LENGTH_SHORT).show()
+                }) { Text("Copier") }
+                TextButton(onClick = { Plantages.effacer(); rapport = null }) { Text("Effacer") }
+            }
+        }
     }
 }

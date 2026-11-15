@@ -43,10 +43,11 @@ class Teams(private val cfg: Config) {
     /** Recopie dans l'archive tout ce que le service a de nouveau (nouveaux, modifiés, supprimés). */
     fun synchroniser(archive: Archive): Int {
         connecter()
-        var apres = archive.curseur("teams.seq")?.toLongOrNull() ?: 0
+        // Archive sans Teams (premier chargement ou numérotation refaite côté serveur) : on repart de zéro.
+        var apres = if (archive.aDesConversations(Source.TEAMS)) archive.curseur("teams.seq")?.toLongOrNull() ?: 0 else 0
         var total = 0
-        repeat(50) {
-            val j = get("/teams/messages?apres=$apres&limite=2000", 30_000)
+        repeat(200) {
+            val j = get("/teams/messages?apres=$apres&limite=500", 30_000)
             val lignes = j.optJSONArray("messages")?.objets() ?: emptyList()
             val convs = HashMap<String, Conversation>()
             val lot = ArrayList<Message>()
@@ -69,9 +70,13 @@ class Teams(private val cfg: Config) {
             archive.enregistrerMessages(lot)
             archive.supprimerMessages(supprimes)
             total += lot.size
-            apres = j.optLong("dernier", apres)
+            val suivant = j.optLong("dernier", apres)
+            // Curseur plus loin que le serveur (renumérotation) : on recommence depuis le début au prochain passage.
+            if (suivant < apres) { archive.definirCurseur("teams.seq", "0"); return total }
+            val avance = suivant > apres
+            apres = suivant
             archive.definirCurseur("teams.seq", apres.toString())
-            if (!j.optBoolean("encore")) return total
+            if (!j.optBoolean("encore") || !avance) return total
         }
         return total
     }
