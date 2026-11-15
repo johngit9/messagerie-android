@@ -139,6 +139,7 @@ object Moteur {
             _etat.debounce(1500).collect { e ->
                 runCatching { Raccourcis.mettreAJour(app, e) }
                 runCatching { Pastille.afficher(app, e.nombreMessagesNonLus(null)) }
+                runCatching { WidgetNonLus.mettreAJour(app, e) }
             }
         }
     }

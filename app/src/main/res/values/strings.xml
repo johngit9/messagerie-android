@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Messagerie</string>
+    <string name="widget_description">Messages non lus, au total et par messagerie</string>
 </resources>
