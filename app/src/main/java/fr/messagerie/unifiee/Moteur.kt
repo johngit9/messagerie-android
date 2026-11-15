@@ -197,7 +197,7 @@ object Moteur {
                         if (!correspondance.isNullOrEmpty()) {
                             _etat.update { it.copy(salonsWhatsApp = correspondance.entries.associate { (salon, jid) -> jid to salon }) }
                             synchroniserPont(Pont.WHATSAPP, correspondance, sources[Source.WHATSAPP])
-                        } else if (archive.statistiques()[Source.WHATSAPP] != null)
+                        } else if (archive.aDesConversations(Source.WHATSAPP))
                             EtatSource.Erreur("passerelle WhatsApp injoignable") else EtatSource.NonConfigure
                     }
                     val sms = async { synchroniserPont(Pont.SMS, null, sources[Source.SMS], avecRcs = true) }
@@ -234,15 +234,16 @@ object Moteur {
             val s = SyncPont(Matrix(cfg), pont, archive, correspondance).avecMoi(cfg.moiFantome)
             s.synchroniser()
             appliquerLectures(s.lectures)
+            runCatching { s.completerHistorique() }
             if (avecRcs) s.rcs?.let { r ->
                 archive.definirCurseur("sms.rcs", r.sorted().joinToString("\n"))
                 _etat.update { it.copy(rcs = r) }
             }
-            if (archive.statistiques()[pont.source] == null) return EtatSource.NonConfigure
+            if (!archive.aDesConversations(pont.source)) return EtatSource.NonConfigure
             archive.definirCurseur(initial, "fait")
             EtatSource.Ok(0)
         } catch (e: Exception) {
-            if (archive.statistiques()[pont.source] != null || avant !is EtatSource.NonConfigure) EtatSource.Erreur(e.message ?: e.toString())
+            if (archive.aDesConversations(pont.source) || avant !is EtatSource.NonConfigure) EtatSource.Erreur(e.message ?: e.toString())
             else EtatSource.NonConfigure
         }
     }

@@ -8,8 +8,9 @@ import org.json.JSONObject
  */
 class Relais(private val cfg: Config) {
     companion object {
-        const val MAX_PAR_PASSAGE = 20_000
+        const val MAX_PAR_PASSAGE = 6_000
         @Volatile var derniereBonne: String? = null
+        @Volatile private var verifieLe = 0L
     }
 
     private var base = ""
@@ -17,9 +18,10 @@ class Relais(private val cfg: Config) {
 
     fun connecter() {
         if (!cfg.relaisConfigure) throw Injoignable("relais non configuré")
+        derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
         for (u in (listOfNotNull(derniereBonne) + Config.liste(cfg.relaisUrls)).distinct()) {
             try {
-                if (Http.requete("$u/etat", jeton = jeton, delaiMs = 5_000).code == 200) { base = u; derniereBonne = u; return }
+                if (Http.requete("$u/etat", jeton = jeton, delaiMs = 5_000).code == 200) { base = u; derniereBonne = u; verifieLe = System.currentTimeMillis(); return }
             } catch (_: Exception) {}
         }
         derniereBonne = null

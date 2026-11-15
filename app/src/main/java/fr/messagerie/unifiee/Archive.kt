@@ -252,7 +252,20 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         } catch (e: Exception) { emptySet() }
     }
 
+    fun aDesConversations(s: Source): Boolean =
+        readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE source = ? LIMIT 1", arrayOf(s.id)).use { it.moveToFirst() }
+
+    @Volatile private var stats: Pair<Long, Map<Source, Pair<Int, Int>>>? = null
+
+    /** Comptages par messagerie (requête lourde : gardée 60 s). */
     fun statistiques(): Map<Source, Pair<Int, Int>> {
+        stats?.let { (t, v) -> if (System.currentTimeMillis() - t < 60_000) return v }
+        val v = calculerStatistiques()
+        stats = System.currentTimeMillis() to v
+        return v
+    }
+
+    private fun calculerStatistiques(): Map<Source, Pair<Int, Int>> {
         val r = HashMap<Source, Pair<Int, Int>>()
         readableDatabase.rawQuery("""SELECT c.source AS s, COUNT(DISTINCT c.cle) AS nc, COUNT(m.cle) AS nm
             FROM conversations c LEFT JOIN messages m ON m.conv = c.cle GROUP BY c.source""", null).lignes { c ->

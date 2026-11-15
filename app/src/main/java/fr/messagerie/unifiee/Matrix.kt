@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 class Matrix(private val cfg: Config) {
     companion object {
         @Volatile var derniereBonne: String? = null
+        @Volatile private var verifieLe = 0L
         private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
     }
 
@@ -28,11 +29,13 @@ class Matrix(private val cfg: Config) {
     /** Essaie la dernière adresse qui a marché, puis les autres dans l'ordre saisi. */
     fun connecter() {
         if (!cfg.matrixConfigure) throw Injoignable("serveur Matrix non configuré")
+        // Adresse vérifiée il y a moins de 2 min : pas de nouvelle sonde (plus rapide).
+        derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
         val toutes = (listOfNotNull(derniereBonne) + Config.liste(cfg.matrixUrls)).distinct()
         for (u in toutes) {
             try {
                 if (Http.requete("$u/_matrix/client/v3/account/whoami", jeton = jeton, delaiMs = 5_000).code == 200) {
-                    base = u; derniereBonne = u; return
+                    base = u; derniereBonne = u; verifieLe = System.currentTimeMillis(); return
                 }
             } catch (_: Exception) {}
         }
@@ -41,7 +44,8 @@ class Matrix(private val cfg: Config) {
     }
 
     fun get(chemin: String, delaiMs: Int = 8_000): JSONObject {
-        val r = Http.requete(base + chemin, jeton = jeton, delaiMs = delaiMs)
+        val r = try { Http.requete(base + chemin, jeton = jeton, delaiMs = delaiMs) }
+            catch (e: java.io.IOException) { verifieLe = 0; throw e }
         if (r.code != 200) throw ErreurHttp(r.code, chemin.substringBefore('?'))
         return JSONObject(r.texte)
     }
@@ -155,6 +159,8 @@ class SyncPont(
 
         private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        /** Pages (de 100 messages) remontées par salon au premier passage : la liste s'affiche vite. */
+        private const val PAGES_RAPIDES = 3
         private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction"]}"""
     }
 
@@ -271,7 +277,7 @@ class SyncPont(
         // Remontée de l'historique, 6 conversations à la fois.
         var total = 0
         for (lot in infos.entries.chunked(6)) {
-            total += lot.map { (id, i) -> async(Dispatchers.IO) { remonter(id, cle(id), null, i, moi) } }.awaitAll().sum()
+            total += lot.map { (id, i) -> async(Dispatchers.IO) { remonter(id, cle(id), null, i, moi, PAGES_RAPIDES) } }.awaitAll().sum()
         }
 
         depart?.optString("next_batch")?.takeIf { it.isNotEmpty() }?.let { archive.definirCurseur(pont.curseur, it) }
@@ -279,6 +285,18 @@ class SyncPont(
         cache[pont.curseur] = Cache(infos, moi, System.currentTimeMillis())
         autres[pont.curseur] = ids.toSet() - infos.keys
         total
+    }
+
+    /** Complète l'historique ancien des salons, quelques pages à chaque passage. */
+    fun completerHistorique(budget: Int = 30) {
+        val c = cache[pont.curseur] ?: return
+        var reste = budget
+        for ((id, i) in c.infos) {
+            if (reste <= 0) return
+            val jeton = archive.curseur("remontee.${pont.curseur}.$id") ?: continue
+            remonter(id, cle(id), jeton, i, c.moi, minOf(10, reste), suite = true)
+            reste -= 10
+        }
     }
 
     private var moiConfig: String? = null
@@ -305,20 +323,27 @@ class SyncPont(
     }
 
     /** Remonte l'historique d'un salon jusqu'à retomber sur des messages déjà archivés (ou le début). */
-    private fun remonter(salon: String, conv: String, debut: String?, info: InfoSalon, moi: String?): Int {
+    /**
+     * Remonte l'historique d'un salon (au plus `pages` pages de 100). Si la limite est atteinte, le point
+     * d'arrêt est gardé et la suite est remontée petit à petit, en arrière-plan (voir completerHistorique).
+     */
+    private fun remonter(salon: String, conv: String, debut: String?, info: InfoSalon, moi: String?, pages: Int = 5000, suite: Boolean = false): Int {
         var depuis = debut
         var total = 0
-        repeat(5000) {
+        val reprise = "remontee.${pont.curseur}.$salon"
+        var page = 0
+        while (true) {
+            if (page++ >= pages) { depuis?.let { archive.definirCurseur(reprise, it) }; return total }
             var chemin = "/_matrix/client/v3/rooms/${Http.enc(salon)}/messages?dir=b&limit=100&filter=${Http.enc(FILTRE_MESSAGES)}"
             if (depuis != null) chemin += "&from=${Http.enc(depuis!!)}"
             val rep = runCatching { m.get(chemin, 20_000) }.getOrNull() ?: return total
             val evs = rep.optJSONArray("chunk")?.objets() ?: emptyList()
             val (lus, nouveaux) = enregistrer(evs, conv, info, moi)
             total += nouveaux
-            if ((lus > 0 && nouveaux < lus) || evs.isEmpty()) return total
-            depuis = rep.optString("end").takeIf { it.isNotEmpty() } ?: return total
+            if (evs.isEmpty()) { if (suite) archive.definirCurseur(reprise, null); return total }
+            if (!suite && lus > 0 && nouveaux < lus) return total   // retombé sur des messages déjà archivés
+            depuis = rep.optString("end").takeIf { it.isNotEmpty() } ?: run { if (suite) archive.definirCurseur(reprise, null); return total }
         }
-        return total
     }
 
     /** Archive des événements ; renvoie (messages lus, messages nouveaux). */

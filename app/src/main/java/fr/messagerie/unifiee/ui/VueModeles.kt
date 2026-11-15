@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Vues de la liste (pastilles en haut). */
-enum class Vue(val libelle: String) { ATraiter("À traiter"), NonLus("Non lus"), Toutes("Toutes"), Archivees("Archivées") }
+enum class Vue(val libelle: String) { Toutes("Toutes"), NonLus("Non lues"), ATraiter("À traiter"), Archivees("Archivées") }
 /** Discussions à deux ou groupes. */
 enum class Genre(val libelle: String) { Tous("Tous"), Discussions("Discussions"), Groupes("Groupes") }
 /** Vues Pro / Perso. */
@@ -34,7 +34,7 @@ enum class Espace(val libelle: String) { Tout("Tout"), Perso("Perso"), Pro("Pro"
 /** Liste des conversations : filtres et recherche calculés hors du fil d'affichage. */
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class ListeVM : ViewModel() {
-    val vue = MutableStateFlow(Vue.ATraiter)
+    val vue = MutableStateFlow(Vue.Toutes)
     val source = MutableStateFlow<Source?>(null)
     val genre = MutableStateFlow(Genre.Tous)
     val espace = MutableStateFlow(Espace.Tout)
