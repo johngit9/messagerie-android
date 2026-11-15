@@ -654,8 +654,8 @@ private fun PageNotifications(version: Int) {
     Choix(listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min", 900 to "15 min"), intervalle) { intervalle = it; cfg.intervalle = it }
     HorizontalDivider()
     Text("Chiffre sur l'icône", fontWeight = FontWeight.SemiBold)
-    Explication("L'appli donne à Android le nombre de messages non lus. Selon le téléphone, l'icône montre ce nombre ou seulement un point : " +
-        "choisissez « Nombre » dans les réglages Android des notifications (pastilles d'icône), si votre téléphone le propose.")
+    Explication("Le chiffre suit le total des messages non lus, et baisse dès que vous les lisez. Il est porté par une notification discrète " +
+        "« N messages non lus » (sans son). Si l'icône montre un point, choisissez « Nombre » pour les pastilles d'icône dans les réglages Android.")
     TextButton(onClick = {
         runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }

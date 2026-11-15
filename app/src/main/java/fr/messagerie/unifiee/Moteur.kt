@@ -107,7 +107,7 @@ object Moteur {
     private var veilleElement: Job? = null
     private var fileIA: Job? = null
 
-    const val CANAL = "reponse_attendue"
+    const val CANAL = "attendue"
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
     fun init(context: Context) {
@@ -120,7 +120,8 @@ object Moteur {
             rcs = archive.curseur("sms.rcs")?.split("\n")?.filter { s -> s.isNotEmpty() }?.toSet() ?: emptySet()) }
         if (Build.VERSION.SDK_INT >= 26) {
             app.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CANAL, "Réponse attendue", NotificationManager.IMPORTANCE_DEFAULT))
+                NotificationChannel(CANAL, "Réponse attendue", NotificationManager.IMPORTANCE_DEFAULT).apply { setShowBadge(false) })
+            runCatching { app.getSystemService(NotificationManager::class.java).deleteNotificationChannel("reponse_attendue") }
         }
         portee.launch {
             // Correspondance WhatsApp de la dernière synchro : l'envoi marche avant la première actualisation
@@ -591,7 +592,7 @@ object Moteur {
     /** Appli visible (pas de notification alors) et conversation ouverte. */
     @Volatile var auPremierPlan = false
     @Volatile var convOuverte: String? = null
-    const val CANAL_MESSAGES = "messages"
+    const val CANAL_MESSAGES = "msg"
 
     /** Délais de réception mesurés (ms) : date d'arrivée sur le téléphone − date du message sur le serveur. */
     fun delais(s: Source): List<Long> = liste("delais.${s.id}")
@@ -640,7 +641,8 @@ object Moteur {
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val canal = "$CANAL_MESSAGES.${c.source.id}"
         if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH))
+            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })
+        if (Build.VERSION.SDK_INT >= 26) runCatching { app.getSystemService(NotificationManager::class.java).deleteNotificationChannel("messages.${c.source.id}") }
         val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(app, c.cle.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

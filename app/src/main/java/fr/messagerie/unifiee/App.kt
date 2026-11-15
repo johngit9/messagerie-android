@@ -44,14 +44,9 @@ class ServiceVeille : Service() {
         runCatching { nm.deleteNotificationChannel("veille") }   // ancien canal, qui mettait un point sur l'icône
         // Pas de point sur l'icône pour la notification permanente : il masquerait le chiffre des non-lus.
         nm.createNotificationChannel(NotificationChannel(CANAL, "Réception en arrière-plan", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
-        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val n: Notification = NotificationCompat.Builder(this, CANAL)
-            .setSmallIcon(R.drawable.ic_bulle)
-            .setContentTitle("Messagerie à l'écoute")
-            .setContentText("Réception des nouveaux messages")
-            .setContentIntent(pi)
-            .setOngoing(true)
-            .build()
+        // La notification permanente porte aussi le chiffre des non-lus (pastille de l'icône).
+        Pastille.veilleActive = true
+        val n: Notification = Pastille.notification(this, Moteur.etat.value.nombreMessagesNonLus(null))
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING else 0
         try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, type) else startForeground(1, n)
@@ -59,6 +54,13 @@ class ServiceVeille : Service() {
             stopSelf(); return START_NOT_STICKY
         }
         Moteur.demarrer()
+        Pastille.rafraichir(this)
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        Pastille.veilleActive = false
+        Pastille.rafraichir(this)
+        super.onDestroy()
     }
 }
