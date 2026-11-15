@@ -37,6 +37,35 @@ class Config(context: Context) {
     var envoyerReactions: Boolean get() = p.getBoolean("reactions", true); set(v) = p.edit().putBoolean("reactions", v).apply()
     var veilleArrierePlan: Boolean get() = p.getBoolean("veille", false); set(v) = p.edit().putBoolean("veille", v).apply()
 
+    // Affichage : échelle de toute l'interface et de la taille du texte (en %)
+    var zoom: Int get() = p.getInt("zoom", 100); set(v) = p.edit().putInt("zoom", v).apply()
+    var tailleTexte: Int get() = p.getInt("tailleTexte", 100); set(v) = p.edit().putInt("tailleTexte", v).apply()
+    var verifierMaj: Boolean get() = p.getBoolean("verifierMaj", true); set(v) = p.edit().putBoolean("verifierMaj", v).apply()
+
+    // Historique des fichiers importés (gardé dans les données privées de l'appli)
+    data class Import(val nom: String, val date: Long, val faits: String, val contenu: String)
+
+    val imports: List<Import>
+        get() = try {
+            val a = org.json.JSONArray(p.getString("imports", "[]"))
+            (0 until a.length()).map { i -> a.getJSONObject(i).let {
+                Import(it.optString("nom"), it.optLong("date"), it.optString("faits"), it.optString("contenu")) } }
+        } catch (_: Exception) { emptyList() }
+
+    fun memoriserImport(nom: String, faits: List<String>, contenu: String) {
+        val l = listOf(Import(nom, System.currentTimeMillis(), faits.joinToString(", "), contenu)) +
+            imports.filter { it.contenu != contenu }
+        enregistrerImports(l.take(10))
+    }
+
+    fun oublierImport(i: Import) = enregistrerImports(imports.filter { it.date != i.date })
+
+    private fun enregistrerImports(l: List<Import>) {
+        val a = org.json.JSONArray()
+        l.forEach { a.put(JSONObject().put("nom", it.nom).put("date", it.date).put("faits", it.faits).put("contenu", it.contenu)) }
+        p.edit().putString("imports", a.toString()).apply()
+    }
+
     /** Les messages plus anciens comptent comme lus (fixé au premier lancement : maintenant − 24 h). */
     val debutLecture: Long
         get() {
@@ -55,6 +84,7 @@ class Config(context: Context) {
         .put("relais", JSONObject().put("adresses", relaisUrls).put("jeton", relaisJeton))
         .put("ollama", JSONObject().put("adresses", ollamaUrls).put("modele", ollamaModele))
         .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan).put("envoyerReactions", envoyerReactions)
+        .put("zoom", zoom).put("tailleTexte", tailleTexte)
         .toString(2)
 
     /**
@@ -112,6 +142,8 @@ class Config(context: Context) {
         if (j.has("intervalle")) intervalle = j.optInt("intervalle", intervalle)
         if (j.has("notifications")) notifications = j.optBoolean("notifications", notifications)
         if (j.has("envoyerReactions")) envoyerReactions = j.optBoolean("envoyerReactions", envoyerReactions)
+        if (j.has("zoom")) zoom = j.optInt("zoom", zoom)
+        if (j.has("tailleTexte")) tailleTexte = j.optInt("tailleTexte", tailleTexte)
         if (j.has("veille")) veilleArrierePlan = j.optBoolean("veille", veilleArrierePlan)
         return faits.distinct()
     }

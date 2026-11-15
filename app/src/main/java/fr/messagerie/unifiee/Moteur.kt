@@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -158,34 +160,43 @@ object Moteur {
             if (_etat.value.conversations.isEmpty()) recharger()
             val sources = _etat.value.sources.toMutableMap()
 
-            if (cfg.matrixConfigure) {
-                // WhatsApp via la passerelle du serveur (correspondance fournie par le relais).
-                var correspondance: Map<String, String>? = null
-                if (cfg.relaisConfigure) correspondance = runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()
-                if (!correspondance.isNullOrEmpty()) {
-                    _etat.update { it.copy(salonsWhatsApp = correspondance.entries.associate { (salon, jid) -> jid to salon }) }
-                    sources[Source.WHATSAPP] = synchroniserPont(Pont.WHATSAPP, correspondance, sources[Source.WHATSAPP])
-                } else sources[Source.WHATSAPP] = if (archive.statistiques()[Source.WHATSAPP] != null)
-                    EtatSource.Erreur("passerelle WhatsApp injoignable") else EtatSource.NonConfigure
-
-                sources[Source.SMS] = synchroniserPont(Pont.SMS, null, sources[Source.SMS], avecRcs = true)
-                sources[Source.TELEGRAM] = synchroniserPont(Pont.TELEGRAM, null, sources[Source.TELEGRAM])
-                sources[Source.LINKEDIN] = synchroniserPont(Pont.LINKEDIN, null, sources[Source.LINKEDIN])
-            } else {
-                for (s in listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN)) sources[s] = EtatSource.NonConfigure
+            // Toutes les messageries se synchronisent en même temps (et non plus l'une après l'autre).
+            coroutineScope {
+                val element = async {
+                    if (!cfg.relaisConfigure) return@async EtatSource.NonConfigure
+                    try {
+                        if (archive.curseur("element.seq") == null) _etat.update { it.copy(importEnCours = "Import de l'historique Element…") }
+                        val n = Relais(cfg).synchroniser(archive)
+                        runCatching { Relais(cfg).lus() }.getOrNull()?.let { appliquerLectures(it.second) }
+                        if (n >= Relais.MAX_PAR_PASSAGE) _etat.update { it.copy(importEnCours = "Import de l'historique Element…") }
+                        EtatSource.Ok(0)
+                    } catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
+                }
+                if (cfg.matrixConfigure) {
+                    val whatsapp = async {
+                        // WhatsApp via la passerelle du serveur (correspondance fournie par le relais).
+                        var correspondance: Map<String, String>? = null
+                        if (cfg.relaisConfigure) correspondance = runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()
+                        if (!correspondance.isNullOrEmpty()) {
+                            _etat.update { it.copy(salonsWhatsApp = correspondance.entries.associate { (salon, jid) -> jid to salon }) }
+                            synchroniserPont(Pont.WHATSAPP, correspondance, sources[Source.WHATSAPP])
+                        } else if (archive.statistiques()[Source.WHATSAPP] != null)
+                            EtatSource.Erreur("passerelle WhatsApp injoignable") else EtatSource.NonConfigure
+                    }
+                    val sms = async { synchroniserPont(Pont.SMS, null, sources[Source.SMS], avecRcs = true) }
+                    val telegram = async { synchroniserPont(Pont.TELEGRAM, null, sources[Source.TELEGRAM]) }
+                    val linkedin = async { synchroniserPont(Pont.LINKEDIN, null, sources[Source.LINKEDIN]) }
+                    sources[Source.SMS] = sms.await()
+                    sources[Source.TELEGRAM] = telegram.await()
+                    sources[Source.LINKEDIN] = linkedin.await()
+                    sources[Source.WHATSAPP] = whatsapp.await()
+                    _etat.update { it.copy(sources = sources.toMap()) }
+                    recharger()
+                } else {
+                    for (s in listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN)) sources[s] = EtatSource.NonConfigure
+                }
+                sources[Source.ELEMENT] = element.await()
             }
-            _etat.update { it.copy(sources = sources.toMap()) }
-            recharger()
-
-            if (cfg.relaisConfigure) {
-                sources[Source.ELEMENT] = try {
-                    if (archive.curseur("element.seq") == null) _etat.update { it.copy(importEnCours = "Import de l'historique Element…") }
-                    val n = Relais(cfg).synchroniser(archive)
-                    runCatching { Relais(cfg).lus() }.getOrNull()?.let { appliquerLectures(it.second) }
-                    if (n >= Relais.MAX_PAR_PASSAGE) _etat.update { it.copy(importEnCours = "Import de l'historique Element…") }
-                    EtatSource.Ok(0)
-                } catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
-            } else sources[Source.ELEMENT] = EtatSource.NonConfigure
 
             _etat.update { it.copy(sources = sources.toMap()) }
             recharger()

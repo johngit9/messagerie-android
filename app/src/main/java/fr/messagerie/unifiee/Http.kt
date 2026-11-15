@@ -19,6 +19,7 @@ object Http {
         corps: String? = null,
         delaiMs: Int = 8_000,
     ): Reponse {
+        // Pas de disconnect() en cas de succès : la connexion reste ouverte et resservira (plus rapide).
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = methode
@@ -35,8 +36,8 @@ object Http {
             val flux = if (code in 200..299) c.inputStream else c.errorStream
             val data = flux?.use { it.readBytes() } ?: ByteArray(0)
             return Reponse(code, data)
-        } finally {
-            c.disconnect()
+        } catch (e: Exception) {
+            c.disconnect(); throw e
         }
     }
 

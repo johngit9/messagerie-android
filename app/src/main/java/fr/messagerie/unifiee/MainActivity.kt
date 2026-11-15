@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        Affichage.charger(Moteur.cfg)
         setContent { Theme { Racine(cleDemandee) } }
     }
 
@@ -69,12 +70,25 @@ fun Theme(contenu: @Composable () -> Unit) {
         background = Color(0xFF111318), surface = Color(0xFF111318),
         surfaceContainer = Color(0xFF1D1F25), surfaceContainerHigh = Color(0xFF282A2F), surfaceContainerLow = Color(0xFF191B20),
     ) else lightColorScheme(
-        primary = Color(0xFF4355B9), onPrimary = Color.White, primaryContainer = Color(0xFFDEE0FF), onPrimaryContainer = Color(0xFF00105C),
-        secondary = Color(0xFF5B5D72), secondaryContainer = Color(0xFFE0E1F9), onSecondaryContainer = Color(0xFF181A2C),
-        background = Color(0xFFFBF8FF), surface = Color(0xFFFBF8FF),
-        surfaceContainer = Color(0xFFEFEDF4), surfaceContainerHigh = Color(0xFFE9E7EF), surfaceContainerLow = Color(0xFFF5F2FA),
+        primary = Color(0xFF3B5BDB), onPrimary = Color.White, primaryContainer = Color(0xFFE3E9FC), onPrimaryContainer = Color(0xFF1B2F86),
+        secondary = Color(0xFF5A606D), secondaryContainer = Color(0xFFE6E8EE), onSecondaryContainer = Color(0xFF15171C),
+        tertiaryContainer = Color(0xFFFDEEDC), onTertiaryContainer = Color(0xFFA04A0B),
+        background = Color(0xFFF6F7F9), surface = Color(0xFFF6F7F9), onSurface = Color(0xFF15171C), onSurfaceVariant = Color(0xFF5A606D),
+        surfaceVariant = Color(0xFFECEEF2), outlineVariant = Color(0xFFECEEF2),
+        surfaceContainer = Color(0xFFEFF1F4), surfaceContainerHigh = Color(0xFFE9EBEF), surfaceContainerLow = Color.White,
     )
-    MaterialTheme(colorScheme = couleurs, content = contenu)
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    val echelle = androidx.compose.ui.unit.Density(d.density * Affichage.zoom / 100f, d.fontScale * Affichage.texte / 100f)
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides echelle) {
+        MaterialTheme(colorScheme = couleurs, content = contenu)
+    }
+}
+
+/** Échelle d'affichage choisie dans les Réglages (appliquée tout de suite). */
+object Affichage {
+    var zoom by androidx.compose.runtime.mutableIntStateOf(100)
+    var texte by androidx.compose.runtime.mutableIntStateOf(100)
+    fun charger(c: Config) { zoom = c.zoom; texte = c.tailleTexte }
 }
 
 @Composable
