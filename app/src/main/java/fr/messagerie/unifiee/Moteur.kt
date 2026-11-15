@@ -22,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -104,6 +105,7 @@ object Moteur {
 
     const val CANAL = "reponse_attendue"
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     fun init(context: Context) {
         if (::app.isInitialized) return
         app = context.applicationContext
@@ -117,6 +119,10 @@ object Moteur {
                 NotificationChannel(CANAL, "Réponse attendue", NotificationManager.IMPORTANCE_DEFAULT))
         }
         portee.launch { recharger() }
+        // Non-lus par messagerie dans les raccourcis de l'icône (appui long)
+        portee.launch {
+            _etat.debounce(1500).collect { e -> runCatching { Raccourcis.mettreAJour(app, e) } }
+        }
     }
 
     /** Démarre l'actualisation périodique et la réception en temps réel (idempotent). */

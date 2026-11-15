@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         cleDemandee.value = intent?.getStringExtra("cle")
+        lireRaccourci(intent)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -65,6 +66,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra("cle")?.let { cleDemandee.value = it }
+        lireRaccourci(intent)
+    }
+
+    /** Raccourci « messagerie » de l'icône : ouvre la liste filtrée sur cette messagerie. */
+    private fun lireRaccourci(i: Intent?) {
+        val s = i?.getStringExtra("source")?.let { n -> Source.entries.firstOrNull { it.name == n } } ?: return
+        Raccourcis.sourceDemandee.value = s
     }
 
     override fun onPause() {
@@ -124,6 +132,12 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     val nav = rememberNavController()
     val depart = remember { if (Moteur.cfg.configure) "liste" else "accueil" }
 
+    val raccourci by Raccourcis.sourceDemandee.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(raccourci) {
+        if (raccourci != null && Moteur.cfg.configure && nav.currentDestination?.route != "liste")
+            nav.navigate("liste") { popUpTo("liste") { inclusive = false }; launchSingleTop = true }
+    }
+
     // Ouverture depuis une notification
     val demande = cleDemandee.value
     androidx.compose.runtime.LaunchedEffect(demande) {
@@ -142,6 +156,10 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     ) {
         composable("liste") {
             val vm: ListeVM = viewModel()
+            val demandee by Raccourcis.sourceDemandee.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(demandee) {
+                demandee?.let { vm.source.value = it; vm.vue.value = fr.messagerie.unifiee.ui.Vue.Toutes; Raccourcis.sourceDemandee.value = null }
+            }
             EcranListe(etat, vm,
                 ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } },
                 ouvrirReglages = { nav.navigate("reglages") { launchSingleTop = true } },
