@@ -186,7 +186,7 @@ object Moteur {
                     if (!cfg.teamsConfigure) return@async EtatSource.NonConfigure
                     try { Teams(cfg).synchroniser(archive); EtatSource.Ok(0) }
                     catch (e: Exception) {
-                        if (archive.statistiques()[Source.TEAMS] == null) EtatSource.NonConfigure else EtatSource.Erreur(e.message ?: e.toString())
+                        EtatSource.Erreur(e.message ?: e.toString())
                     }
                 }
                 if (cfg.matrixConfigure) {

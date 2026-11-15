@@ -14,14 +14,25 @@ class Teams(private val cfg: Config) {
 
     fun connecter() {
         if (!cfg.teamsConfigure) throw Injoignable("Teams non configuré")
+        val erreurs = ArrayList<String>()
         for (u in (listOfNotNull(derniereBonne) + cfg.teamsAdresses).distinct()) {
             try {
-                if (Http.requete("$u/teams/etat", jeton = jeton, delaiMs = 5_000).code == 200) { base = u; derniereBonne = u; return }
-            } catch (_: Exception) {}
+                val code = Http.requete("$u/teams/etat", jeton = jeton, delaiMs = 5_000).code
+                if (code == 200) { base = u; derniereBonne = u; return }
+                erreurs += "$u : " + when (code) { 401 -> "jeton refusé (401)"; 404 -> "pas de service Teams (404)"; else -> "erreur $code" }
+            } catch (e: Exception) { erreurs += "$u : " + (e.message ?: e.javaClass.simpleName) }
         }
         derniereBonne = null
-        throw Injoignable("service Teams injoignable")
+        throw Injoignable("service Teams injoignable — " + erreurs.joinToString(" ; "))
     }
+
+    /** Test depuis les Réglages : résultat lisible pour chaque adresse essayée. */
+    fun tester(): String = try {
+        connecter()
+        val j = get("/teams/etat", 8_000)
+        val l = j.optJSONObject("lecture")
+        "✅ $base : ${l?.optInt("conversations") ?: "?"} conversations, ${l?.optInt("messages") ?: "?"} messages"
+    } catch (e: Exception) { "⚠️ " + (e.message ?: e.toString()) }
 
     private fun get(chemin: String, delaiMs: Int = 20_000): JSONObject {
         val r = Http.requete(base + chemin, jeton = jeton, delaiMs = delaiMs)

@@ -352,7 +352,17 @@ private fun PageElement(version: Int, modifie: () -> Unit) {
     var teams by remember(version) { mutableStateOf(cfg.teamsUrls) }
     var avecTeams by remember(version) { mutableStateOf(cfg.afficherTeams) }
     Interrupteur("Afficher Teams (lecture seule)", avecTeams, "Service Teams du serveur, même jeton que le relais.") { avecTeams = it; cfg.afficherTeams = it; modifie() }
-    if (avecTeams) Champ("Adresse(s) du service Teams (facultatif)", teams, "vide = hôte du relais, port 8789") { teams = it; cfg.teamsUrls = it; modifie() }
+    if (avecTeams) {
+        Champ("Adresse(s) du service Teams (facultatif)", teams, "vide = hôte du relais, port 8789") { teams = it; cfg.teamsUrls = it; modifie() }
+        val portee = rememberCoroutineScope()
+        var test by remember { mutableStateOf<String?>(null) }
+        Explication("Adresses essayées : " + cfg.teamsAdresses.joinToString(", ").ifEmpty { "aucune (renseignez le relais)" })
+        OutlinedButton(onClick = {
+            test = "Test…"
+            portee.launch { test = withContext(Dispatchers.IO) { fr.messagerie.unifiee.Teams.derniereBonne = null; fr.messagerie.unifiee.Teams(cfg).tester() } }
+        }) { Text("Tester Teams") }
+        test?.let { Text(it, fontSize = 13.sp) }
+    }
 }
 
 @Composable
