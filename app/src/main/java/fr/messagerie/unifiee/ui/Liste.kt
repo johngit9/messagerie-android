@@ -60,6 +60,7 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -155,6 +156,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
     actionsPour?.let { c -> FeuilleActions(e, c) { actionsPour = null } }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Entete(
     e: Etat, vue: Vue, genre: Genre, espace: Espace, source: Source?, nombre: Int, recherche: String,
@@ -191,7 +193,7 @@ private fun Entete(
         // Vues Perso / Pro
         androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             Espace.entries.forEachIndexed { i, es ->
-                androidx.compose.material3.SegmentedButton(
+                SegmentedButton(
                     selected = espace == es, onClick = { choisirEspace(es) },
                     shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, Espace.entries.size),
                     icon = {},
