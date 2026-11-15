@@ -350,8 +350,9 @@ private fun PageElement(version: Int, modifie: () -> Unit) {
     Champ("Jeton du relais", jeton, "", secret = true) { jeton = it; cfg.relaisJeton = it; modifie() }
     HorizontalDivider()
     var teams by remember(version) { mutableStateOf(cfg.teamsUrls) }
-    Explication("Teams (lecture seule) : service du serveur, même jeton que le relais. Laissez vide pour ne pas afficher Teams.")
-    Champ("Adresse(s) du service Teams", teams, "http://serveur:8789") { teams = it; cfg.teamsUrls = it; modifie() }
+    var avecTeams by remember(version) { mutableStateOf(cfg.afficherTeams) }
+    Interrupteur("Afficher Teams (lecture seule)", avecTeams, "Service Teams du serveur, même jeton que le relais.") { avecTeams = it; cfg.afficherTeams = it; modifie() }
+    if (avecTeams) Champ("Adresse(s) du service Teams (facultatif)", teams, "vide = hôte du relais, port 8789") { teams = it; cfg.teamsUrls = it; modifie() }
 }
 
 @Composable

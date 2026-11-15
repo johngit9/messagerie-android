@@ -14,7 +14,7 @@ class Teams(private val cfg: Config) {
 
     fun connecter() {
         if (!cfg.teamsConfigure) throw Injoignable("Teams non configuré")
-        for (u in (listOfNotNull(derniereBonne) + Config.liste(cfg.teamsUrls)).distinct()) {
+        for (u in (listOfNotNull(derniereBonne) + cfg.teamsAdresses).distinct()) {
             try {
                 if (Http.requete("$u/teams/etat", jeton = jeton, delaiMs = 5_000).code == 200) { base = u; derniereBonne = u; return }
             } catch (_: Exception) {}

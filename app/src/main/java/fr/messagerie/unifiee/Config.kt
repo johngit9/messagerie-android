@@ -27,6 +27,12 @@ class Config(context: Context) {
 
     // Service Teams (lecture seule), même jeton que le relais
     var teamsUrls: String get() = s("teams.urls"); set(v) = set("teams.urls", v)
+    var afficherTeams: Boolean get() = p.getBoolean("teams", true); set(v) = p.edit().putBoolean("teams", v).apply()
+    /** Adresses du service Teams : celles saisies, sinon les hôtes du relais sur le port 8789. */
+    val teamsAdresses: List<String>
+        get() = liste(teamsUrls).ifEmpty {
+            liste(relaisUrls).mapNotNull { u -> runCatching { val x = java.net.URI(u); "${x.scheme}://${x.host}:8789" }.getOrNull() }.distinct()
+        }
 
     // Ollama
     var ollamaUrls: String get() = s("ollama.urls"); set(v) = set("ollama.urls", v)
@@ -104,7 +110,7 @@ class Config(context: Context) {
     val matrixConfigure get() = matrixUrls.isNotEmpty() && matrixJeton.isNotEmpty() && matrixUtilisateur.isNotEmpty()
     val relaisConfigure get() = relaisUrls.isNotEmpty() && relaisJeton.isNotEmpty()
     val ollamaConfigure get() = ollamaUrls.isNotEmpty()
-    val teamsConfigure get() = teamsUrls.isNotEmpty() && relaisJeton.isNotEmpty()
+    val teamsConfigure get() = afficherTeams && relaisJeton.isNotEmpty() && teamsAdresses.isNotEmpty()
     val configure get() = matrixConfigure || relaisConfigure
 
     /** Exporte tous les réglages dans le format du fichier de configuration (voir messagerie-config.exemple.json). */

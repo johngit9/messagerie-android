@@ -17,6 +17,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 - Chaque push sur `main` → `assembleRelease` → Release `v1.<numéro du run>` avec `Messagerie-v1.<n>.apk`. `versionCode` = `GITHUB_RUN_NUMBER` (la page Mise à jour de l'app compare ce numéro au tag).
 - Signature : clé fixe dans les secrets `CLE_SIGNATURE_BASE64`, `CLE_SIGNATURE_MDP`, `CLE_SIGNATURE_ALIAS`. Le journal doit afficher « Signature : clé fixe du dépôt » ; sinon l'APK ne s'installera pas par-dessus.
 - Versions : catalogue `gradle/libs.versions.toml` (AGP 9.4, Kotlin 2.2, Gradle 9.6, compileSdk 37, minSdk 26). R8 + réduction des ressources actifs en release.
+- Les autres branches compilent sans publier de Release (vérification).
 - Les modifications de `*.md` seules ne déclenchent pas de compilation.
 - **Après chaque version, lancer le workflow « Tester le démarrage »** (`test-demarrage.yml`, `workflow_dispatch`) : il installe la dernière Release dans un émulateur et affiche le plantage éventuel. R8 casse ce qui passe par réflexion (ex. base Room de WorkManager) : ajouter les règles dans `app/proguard-rules.pro`.
 
@@ -31,6 +32,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 | `Archive.kt` | SQLite (WAL) : messages, recherche FTS, états, synthèses, réactions |
 | `Config.kt` | Réglages (SharedPreferences), import/export JSON, historique des imports |
 | `MiseAJour.kt` | Vérifie la dernière Release GitHub publique, télécharge et installe l'APK |
+| `Teams.kt` | Teams en lecture seule : service du serveur (port 8789 par défaut, même jeton que le relais), `/teams/messages?apres=<seq>` |
 | `Lecteur.kt` | Lecture des vocaux (MediaPlayer) |
 | `SynchroArrierePlan.kt` | WorkManager : synchro toutes les 15 min appli fermée (réglage « Vérifier régulièrement ») |
 | `ui/Medias.kt` | Photos (Coil, plein écran), vidéos et documents ouverts via FileProvider |

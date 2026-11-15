@@ -185,7 +185,9 @@ object Moteur {
                 val teams = async {
                     if (!cfg.teamsConfigure) return@async EtatSource.NonConfigure
                     try { Teams(cfg).synchroniser(archive); EtatSource.Ok(0) }
-                    catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
+                    catch (e: Exception) {
+                        if (archive.statistiques()[Source.TEAMS] == null) EtatSource.NonConfigure else EtatSource.Erreur(e.message ?: e.toString())
+                    }
                 }
                 if (cfg.matrixConfigure) {
                     val whatsapp = async {
