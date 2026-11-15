@@ -84,6 +84,7 @@ import fr.messagerie.unifiee.Etat
 import fr.messagerie.unifiee.EtatSource
 import fr.messagerie.unifiee.MiseAJour
 import fr.messagerie.unifiee.Moteur
+import fr.messagerie.unifiee.Plantages
 import fr.messagerie.unifiee.Ollama
 import fr.messagerie.unifiee.ServiceVeille
 import fr.messagerie.unifiee.Source
