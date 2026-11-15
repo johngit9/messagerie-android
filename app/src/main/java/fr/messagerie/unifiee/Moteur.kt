@@ -118,7 +118,17 @@ object Moteur {
             app.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CANAL, "Réponse attendue", NotificationManager.IMPORTANCE_DEFAULT))
         }
-        portee.launch { recharger() }
+        portee.launch {
+            // Correspondance WhatsApp de la dernière synchro : l'envoi marche avant la première actualisation
+            runCatching {
+                archive.curseur("whatsapp.salons")?.let { t ->
+                    val j = org.json.JSONObject(t)
+                    val m = j.keys().asSequence().associateWith { j.getString(it) }
+                    if (_etat.value.salonsWhatsApp.isEmpty()) _etat.update { it.copy(salonsWhatsApp = m.entries.associate { (salon, jid) -> jid to salon }) }
+                }
+            }
+            recharger()
+        }
         // Non-lus par messagerie dans les raccourcis de l'icône (appui long)
         portee.launch {
             _etat.debounce(1500).collect { e -> runCatching { Raccourcis.mettreAJour(app, e) } }
@@ -209,7 +219,7 @@ object Moteur {
                         var correspondance: Map<String, String>? = null
                         if (cfg.relaisConfigure) correspondance = runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()
                         if (!correspondance.isNullOrEmpty()) {
-                            _etat.update { it.copy(salonsWhatsApp = correspondance.entries.associate { (salon, jid) -> jid to salon }) }
+                            memoriserSalonsWhatsApp(correspondance)
                             synchroniserPont(Pont.WHATSAPP, correspondance, sources[Source.WHATSAPP])
                         } else if (archive.aDesConversations(Source.WHATSAPP))
                             EtatSource.Erreur("passerelle WhatsApp injoignable") else EtatSource.NonConfigure
@@ -361,7 +371,13 @@ object Moteur {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
                 Source.ELEMENT -> Relais(cfg).envoyer(c.jid, t, idCite)
                 Source.WHATSAPP -> {
-                    val salon = _etat.value.salonsWhatsApp[c.jid] ?: return@withContext "passerelle WhatsApp indisponible"
+                    // Correspondance discussion → salon : en mémoire, sinon redemandée au relais tout de suite
+                    val salon = _etat.value.salonsWhatsApp[c.jid]
+                        ?: runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()?.takeIf { it.isNotEmpty() }
+                            ?.let { memoriserSalonsWhatsApp(it); _etat.value.salonsWhatsApp[c.jid] }
+                        ?: return@withContext if (_etat.value.salonsWhatsApp.isEmpty())
+                            "relais injoignable : impossible de trouver la discussion WhatsApp sur le serveur"
+                        else "cette discussion WhatsApp n'est pas reliée au serveur (passerelle)"
                     Matrix(cfg).envoyer(salon, t, idCite)
                 }
                 else -> Matrix(cfg).envoyer(c.jid, t, idCite)
@@ -370,6 +386,12 @@ object Moteur {
             portee.launch { delay(1500); actualiser() }
             null
         } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /** Garde la correspondance salon Matrix → discussion WhatsApp (aussi dans l'archive, pour envoyer dès l'ouverture). */
+    private fun memoriserSalonsWhatsApp(salonVersJid: Map<String, String>) {
+        _etat.update { it.copy(salonsWhatsApp = salonVersJid.entries.associate { (salon, jid) -> jid to salon }) }
+        runCatching { archive.definirCurseur("whatsapp.salons", org.json.JSONObject(salonVersJid).toString()) }
     }
 
     // MARK: Réactions — uniquement sur un appui de l'utilisateur

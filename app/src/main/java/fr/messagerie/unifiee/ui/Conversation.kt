@@ -201,13 +201,32 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
             // --- Compositeur (Teams : lecture seule, on répond depuis l'appli Teams)
             if (c.source == Source.TEAMS) Surface(tonalElevation = 3.dp) {
                 val ctx = LocalContext.current
-                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Teams est en lecture seule ici.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                    Button(onClick = {
-                        val i = ctx.packageManager.getLaunchIntentForPackage("com.microsoft.teams")
-                            ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://teams.microsoft.com"))
-                        runCatching { ctx.startActivity(i) }
-                    }, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) { Text("Ouvrir Teams") }
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    e.synthese(c)?.reponse?.takeIf { it.isNotEmpty() && it != brouillon }?.let { r ->
+                        Text("✨ $r", fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().border(1.dp, degradeIA, RoundedCornerShape(10.dp))
+                                .clickable { brouillon = r }.padding(8.dp))
+                    }
+                    OutlinedTextField(
+                        value = brouillon, onValueChange = { brouillon = it },
+                        placeholder = { Text("Préparer la réponse Teams…") },
+                        maxLines = 6, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Rien n'est envoyé d'ici : le texte est copié, collez-le dans Teams.", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = {
+                            if (brouillon.isNotBlank()) {
+                                ctx.getSystemService(android.content.ClipboardManager::class.java)
+                                    .setPrimaryClip(android.content.ClipData.newPlainText("Réponse Teams", brouillon.trim()))
+                                android.widget.Toast.makeText(ctx, "Réponse copiée : collez-la dans Teams", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            ouvrirTeams(ctx, c.jid, historique.lastOrNull()?.cle?.substringAfter(':'))
+                        }, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
+                            Text(if (brouillon.isNotBlank()) "Copier et ouvrir Teams" else "Ouvrir Teams")
+                        }
+                    }
                 }
             } else Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -460,4 +479,19 @@ private fun CarteResume(e: Etat, c: Conversation, utiliser: (String) -> Unit) {
             }
         }
     }
+}
+
+/** Ouvre l'appli Teams sur la discussion (lien profond vers le dernier message), sinon l'appli seule. */
+private fun ouvrirTeams(ctx: android.content.Context, conversation: String, dernierMessage: String?) {
+    val paquet = "com.microsoft.teams"
+    if (dernierMessage != null && conversation.isNotEmpty()) {
+        val lien = android.net.Uri.parse("https://teams.microsoft.com/l/message/" + android.net.Uri.encode(conversation) + "/" +
+            android.net.Uri.encode(dernierMessage) + "?context=" + android.net.Uri.encode("{\"contextType\":\"chat\"}"))
+        val i = android.content.Intent(android.content.Intent.ACTION_VIEW, lien).setPackage(paquet)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { ctx.startActivity(i) }.isSuccess) return
+    }
+    val i = ctx.packageManager.getLaunchIntentForPackage(paquet)
+        ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://teams.microsoft.com"))
+    runCatching { ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
