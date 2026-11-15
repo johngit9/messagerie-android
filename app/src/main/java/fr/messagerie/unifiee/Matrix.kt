@@ -107,6 +107,32 @@ class Matrix(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "réaction")
     }
 
+    /** Transfère un message (texte ou pièce jointe déjà sur le serveur) — UNIQUEMENT après confirmation de l'utilisateur. */
+    fun envoyerContenu(salon: String, contenu: JSONObject): String {
+        connecter()
+        val txn = "messagerie-" + UUID.randomUUID()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
+            "PUT", jeton, contenu.toString(), 20_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "transfert")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Membres d'un salon (lecture seule) : identifiant → nom affiché. */
+    fun membres(salon: String): Map<String, String> {
+        connecter()
+        val o = get("/_matrix/client/v3/rooms/${Http.enc(salon)}/joined_members").optJSONObject("joined") ?: return emptyMap()
+        return o.keys().asSequence().associateWith { u ->
+            o.optJSONObject(u)?.optString("display_name")?.takeIf { it.isNotEmpty() && it != "null" } ?: u
+        }
+    }
+
+    /** Quitte le salon — UNIQUEMENT après la confirmation « Quitter le groupe ». */
+    fun quitter(salon: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/leave", "POST", jeton, "{}", 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "quitter le groupe")
+    }
+
     /** Télécharge un média mxc://serveur/id (lecture seule). */
     fun media(mxc: String): ByteArray {
         connecter()
@@ -185,6 +211,8 @@ class SyncPont(
 
     /** Lectures faites sur vos autres appareils : conversation → date. Simplement lues, jamais envoyées. */
     val lectures = HashMap<String, Long>()
+    /** Jusqu'où vos contacts ont lu (accusés de lecture reçus, jamais envoyés) : conversation → date. */
+    val lusParContacts = HashMap<String, Long>()
     /** Conversations SMS passant par RCS. */
     var rcs: Set<String>? = null
 
@@ -332,8 +360,12 @@ class SyncPont(
                 for (t in listOf("m.read", "m.read.private")) {
                     val users = types.optJSONObject(t) ?: continue
                     for (u in users.keys()) {
-                        if (u != m.utilisateur && u != moi) continue
                         val ts = users.optJSONObject(u)?.ts("ts") ?: continue
+                        if (u != m.utilisateur && u != moi) {
+                            // Accusé d'un contact (« lu » sur vos messages) ; le robot de la passerelle est ignoré
+                            if (t == "m.read" && !u.contains("bot:") && ts > (lusParContacts[conv] ?: 0)) lusParContacts[conv] = ts
+                            continue
+                        }
                         if (ts > (lectures[conv] ?: 0)) lectures[conv] = ts
                     }
                 }
@@ -424,10 +456,9 @@ class SyncPont(
                 val nom = c.optString("filename").ifEmpty { corps }.replace("#", "")
                 c.optString("url").takeIf { it.isNotEmpty() }?.let { media = it + "#" + (info?.optString("mimetype")?.ifEmpty { null } ?: "application/octet-stream") + "#" + nom }
                 // Vidéo : vignette fournie par la passerelle (4e champ) et durée
-                if (type == "video") {
-                    info?.optString("thumbnail_url")?.takeIf { it.startsWith("mxc://") }?.let { v -> media = media?.plus("#" + v) }
-                    duree = info?.ts("duration")?.let { it / 1000.0 }
-                }
+                // Vignette fournie par la passerelle (4e champ) : vidéos et pièces jointes
+                info?.optString("thumbnail_url")?.takeIf { it.startsWith("mxc://") }?.let { v -> media = media?.plus("#" + v) }
+                if (type == "video") duree = info?.ts("duration")?.let { it / 1000.0 }
             }
             "m.location" -> { type = "autre"; texte = "[position]" }
             else -> if (corps.isEmpty()) return null

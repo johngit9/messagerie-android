@@ -1,0 +1,277 @@
+package fr.messagerie.unifiee.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ExitToApp
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.PermMedia
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import fr.messagerie.unifiee.Conversation
+import fr.messagerie.unifiee.Etat
+import fr.messagerie.unifiee.Message
+import fr.messagerie.unifiee.Moteur
+import fr.messagerie.unifiee.Source
+import kotlinx.coroutines.launch
+
+private val LIEN_WEB = Regex("""(?i)\b(?:https?://|www\.)\S+""")
+
+/**
+ * Fiche d'informations de la conversation (comme la fiche d'un groupe WhatsApp) :
+ * actions rapides, médias, réglages, membres et « Quitter le groupe » (avec confirmation).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FeuilleInfos(
+    e: Etat, c: Conversation, historique: List<Message>, fermer: () -> Unit,
+    appeler: () -> Unit, rechercher: () -> Unit, selectionner: () -> Unit, message: (String) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val portee = rememberCoroutineScope()
+    var confirmerDepart by remember { mutableStateOf(false) }
+    var depart by remember { mutableStateOf(false) }
+    val membres by produceState<List<String>?>(null, c.cle) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
+
+    ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = cs.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // En-tête
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar(c.nom, c.source, c.estGroupe, taille = 88.dp, bordure = cs.surfaceContainerLow, cle = c.cle)
+                Spacer(Modifier.height(10.dp))
+                Text(c.nom, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    buildString {
+                        append(if (c.estGroupe) "Groupe" else "Discussion")
+                        append(" · ").append(e.libelleSource(c))
+                        membres?.let { append(" · ${it.size} membre" + if (it.size > 1) "s" else "") }
+                    },
+                    fontSize = 14.sp, color = cs.onSurfaceVariant,
+                )
+            }
+            // Actions rapides
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BoutonInfo("Appeler", Icons.Outlined.Call, c.source.teinte(), Modifier.weight(1f)) { fermer(); appeler() }
+                BoutonInfo("Rechercher", Icons.Outlined.Search, c.source.teinte(), Modifier.weight(1f)) { fermer(); rechercher() }
+                BoutonInfo("Sélectionner", Icons.Outlined.Checklist, c.source.teinte(), Modifier.weight(1f)) { fermer(); selectionner() }
+            }
+            // Médias, liens et documents (messages chargés)
+            val photos = historique.filter { it.type == "image" && it.media != null }
+            val videos = historique.count { it.type == "video" }
+            val docs = historique.count { it.type == "fichier" }
+            val liens = historique.sumOf { LIEN_WEB.findAll(it.texte).count() }
+            Carte {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.PermMedia, null, tint = cs.onSurfaceVariant)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Médias, liens et docs", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(listOf("${photos.size} photo(s)", "$videos vidéo(s)", "$docs doc(s)", "$liens lien(s)").joinToString(" · "),
+                            fontSize = 12.sp, color = cs.onSurfaceVariant)
+                    }
+                }
+                val enCache = remember(photos) { photos.asReversed().mapNotNull { Moteur.mediaEnCache(it) }.take(8) }
+                if (enCache.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    enCache.forEach { f ->
+                        AsyncImage(model = f, contentDescription = "Photo", contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)))
+                    }
+                }
+            }
+            // Réglages de la conversation (notifications, Pro/Perso, épingler, archiver…)
+            Carte {
+                actionsConversation(e, c).forEachIndexed { i, a ->
+                    if (i > 0) HorizontalDivider(Modifier.padding(start = 52.dp), color = cs.outlineVariant)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { a.faire() }.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(a.icone, null, tint = cs.onSurfaceVariant)
+                        Spacer(Modifier.width(14.dp))
+                        Text(a.libelle, fontSize = 15.sp)
+                    }
+                }
+            }
+            // Membres
+            if (c.estGroupe) Carte {
+                Text(membres?.let { "${it.size} membre" + if (it.size > 1) "s" else "" } ?: "Membres",
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 14.dp, top = 14.dp, bottom = 6.dp))
+                when {
+                    membres == null && (c.source == Source.ELEMENT || c.source == Source.TEAMS) ->
+                        Text("La liste des membres n'est pas disponible pour ${c.source.libelle}.", fontSize = 13.sp,
+                            color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp))
+                    membres == null -> Text("Chargement…", fontSize = 13.sp, color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 14.dp, bottom = 14.dp))
+                    else -> {
+                        var tous by remember { mutableStateOf(false) }
+                        val liste = membres!!
+                        (if (tous) liste else liste.take(12)).forEach { nom ->
+                            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Avatar(nom, c.source, false, taille = 34.dp, bordure = cs.surfaceContainerLow)
+                                Spacer(Modifier.width(12.dp))
+                                Text(nom, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        if (liste.size > 12 && !tous) TextButton(onClick = { tous = true }, modifier = Modifier.padding(start = 6.dp)) {
+                            Text("Voir tout (${liste.size - 12} de plus)")
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+            // Quitter le groupe
+            if (c.estGroupe) Carte {
+                if (Moteur.peutQuitter(c)) Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(enabled = !depart) { confirmerDepart = true }.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.AutoMirrored.Outlined.ExitToApp, null, tint = cs.error)
+                    Spacer(Modifier.width(14.dp))
+                    Text(if (depart) "Départ en cours…" else "Quitter le groupe", fontSize = 15.sp, color = cs.error, fontWeight = FontWeight.SemiBold)
+                }
+                else Text("Pour quitter ce groupe, utilisez l'appli ${c.source.libelle}.", fontSize = 13.sp, color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(14.dp))
+            }
+        }
+    }
+
+    if (confirmerDepart) AlertDialog(
+        onDismissRequest = { confirmerDepart = false },
+        title = { Text("Quitter « ${c.nom} » ?") },
+        text = {
+            Text("Vous ne recevrez plus les messages de ce groupe et il sera archivé dans Messagerie. " +
+                "La passerelle ${c.source.libelle} transmet votre départ ; s'il n'apparaît pas dans l'appli ${c.source.libelle}, quittez aussi depuis celle-ci.")
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmerDepart = false; depart = true
+                portee.launch {
+                    val err = Moteur.quitterGroupe(c)
+                    depart = false
+                    if (err == null) { message("Vous avez quitté « ${c.nom} »"); fermer() } else message("Échec : $err")
+                }
+            }) { Text("Quitter le groupe", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(onClick = { confirmerDepart = false }) { Text("Annuler") } },
+    )
+}
+
+@Composable
+private fun Carte(contenu: @Composable () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cs.background)
+        .border(1.dp, cs.outlineVariant, RoundedCornerShape(16.dp))) { contenu() }
+}
+
+@Composable
+private fun BoutonInfo(libelle: String, icone: ImageVector, teinte: Color, modifier: Modifier, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier.height(76.dp).clip(RoundedCornerShape(16.dp)).background(cs.background)
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(16.dp)).clickable(onClick = clic),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icone, null, tint = teinte)
+        Spacer(Modifier.height(6.dp))
+        Text(libelle, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * Choix de la conversation où transférer les messages sélectionnés.
+ * Rien n'est envoyé ici : l'envoi part seulement après la confirmation qui suit.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FeuilleTransfert(e: Etat, nombre: Int, fermer: () -> Unit, choisir: (Conversation) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var filtre by remember { mutableStateOf("") }
+    val candidates = remember(e.conversations, filtre) {
+        e.conversations.filter { Moteur.destinationPossible(it) && !e.estArchivee(it) }
+            .filter { filtre.isBlank() || it.nom.contains(filtre.trim(), ignoreCase = true) }
+            .sortedByDescending { it.derniere }
+    }
+    ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp)) {
+            Text("Transférer $nombre message" + if (nombre > 1) "s" else "", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = filtre, onValueChange = { filtre = it }, singleLine = true,
+                placeholder = { Text("Rechercher une conversation") }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                items(candidates, key = { it.cle }) { c ->
+                    Row(Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(12.dp)).clickable { choisir(c) }.padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Avatar(c.nom, c.source, c.estGroupe, taille = 40.dp, cle = c.cle)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(c.nom, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "", fontSize = 12.sp, color = c.source.teinte())
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/** Petite pastille ronde de sélection (cochée ou non). */
+@Composable
+fun PastilleSelection(choisi: Boolean, teinte: Color) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        Modifier.size(22.dp).clip(CircleShape)
+            .background(if (choisi) teinte else Color.Transparent)
+            .border(2.dp, if (choisi) teinte else cs.outline, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) { if (choisi) Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+}

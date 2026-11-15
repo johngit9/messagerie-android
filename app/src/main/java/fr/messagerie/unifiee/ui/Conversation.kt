@@ -54,6 +54,13 @@ import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.automirrored.outlined.Forward
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -128,6 +135,21 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var menu by remember { mutableStateOf(false) }
     var menuIA by remember { mutableStateOf(false) }
     var menuAppel by remember { mutableStateOf(false) }
+    var menuPlus by remember { mutableStateOf(false) }
+    var infos by remember { mutableStateOf(false) }
+    // Sélection de plusieurs messages (copier, transférer)
+    var selection by remember(c.cle) { mutableStateOf(setOf<String>()) }
+    var modeSelection by remember(c.cle) { mutableStateOf(false) }
+    var transfert by remember { mutableStateOf(false) }
+    var destination by remember { mutableStateOf<Conversation?>(null) }
+    var transfertEnCours by remember { mutableStateOf(false) }
+    fun quitterSelection() { modeSelection = false; selection = emptySet() }
+    fun basculerSelection(m: Message) {
+        modeSelection = true
+        selection = if (m.cle in selection) selection - m.cle else selection + m.cle
+        if (selection.isEmpty()) modeSelection = false
+    }
+    androidx.activity.compose.BackHandler(enabled = modeSelection) { quitterSelection() }
     // Recherche dans la discussion
     var rechercheOuverte by remember(c.cle) { mutableStateOf(false) }
     var requete by remember(c.cle) { mutableStateOf("") }
@@ -178,7 +200,25 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         topBar = {
-            TopAppBar(
+            if (modeSelection) TopAppBar(
+                navigationIcon = { IconButton(onClick = { quitterSelection() }) { Icon(Icons.Outlined.Close, "Annuler la sélection") } },
+                title = { Text("${selection.size} sélectionné" + if (selection.size > 1) "s" else "") },
+                actions = {
+                    val ctxSel = LocalContext.current
+                    val choisis = historique.filter { it.cle in selection }
+                    IconButton(onClick = {
+                        val texte = choisis.joinToString("\n") { m ->
+                            (if (choisis.size > 1) "[${heure(m.date)}] ${m.auteur} : " else "") + m.texteUtile
+                        }
+                        copier(ctxSel, texte); afficher(if (choisis.size > 1) "${choisis.size} messages copiés" else "Texte copié"); quitterSelection()
+                    }, enabled = choisis.isNotEmpty()) { Icon(Icons.Outlined.ContentCopy, "Copier") }
+                    IconButton(onClick = { transfert = true }, enabled = choisis.isNotEmpty() && !transfertEnCours) {
+                        if (transfertEnCours) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.AutoMirrored.Outlined.Forward, "Transférer")
+                    }
+                },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            ) else TopAppBar(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
                 title = {
                     if (rechercheOuverte) {
@@ -194,7 +234,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             },
                         )
                     } else
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.clickable { infos = true }, verticalAlignment = Alignment.CenterVertically) {
                     Avatar(c.nom, c.source, c.estGroupe, taille = 38.dp, cle = c.cle)
                     Spacer(Modifier.width(12.dp))
                     Column {
@@ -225,7 +265,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                         IconButton(onClick = { rechercheOuverte = false; requete = ""; vm.chercher(""); courant = null }) { Icon(Icons.Outlined.Close, "Fermer la recherche") }
                         return@actions
                     }
-                    IconButton(onClick = { rechercheOuverte = true }) { Icon(Icons.Outlined.Search, "Rechercher dans la discussion") }
+                    // Icônes regroupées : l'appel reste visible, le reste passe dans le menu ⋯
                     val ctxAppel = LocalContext.current
                     val appels = remember(c.cle) { moyensAppel(c) }
                     Box {
@@ -236,9 +276,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             }
                         }
                     }
-                    IconButton(onClick = { menu = true },
-                        colors = androidx.compose.material3.IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                        Icon(Icons.Outlined.MoreVert, "Actions")
+                    Box {
+                        IconButton(onClick = { menuPlus = true }) { Icon(Icons.Outlined.MoreVert, "Plus d'actions") }
+                        DropdownMenu(expanded = menuPlus, onDismissRequest = { menuPlus = false }) {
+                            DropdownMenuItem(text = { Text("Rechercher") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                                onClick = { menuPlus = false; rechercheOuverte = true })
+                            DropdownMenuItem(text = { Text(if (c.estGroupe) "Infos du groupe" else "Infos du contact") }, leadingIcon = { Icon(Icons.Outlined.Info, null) },
+                                onClick = { menuPlus = false; infos = true })
+                            DropdownMenuItem(text = { Text("Sélectionner des messages") }, leadingIcon = { Icon(Icons.Outlined.Checklist, null) },
+                                onClick = { menuPlus = false; modeSelection = true })
+                            DropdownMenuItem(text = { Text("Actions de la conversation") }, leadingIcon = { Icon(Icons.Outlined.Tune, null) },
+                                onClick = { menuPlus = false; menu = true })
+                        }
                     }
                     Spacer(Modifier.width(4.dp))
                 },
@@ -255,14 +304,24 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         is Ligne.NonLus -> Text("— Nouveaux messages —", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        is Ligne.Msg -> Box(Modifier.fillMaxWidth().background(
-                            if (l.m.cle == courant) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f) else Color.Transparent,
-                            RoundedCornerShape(14.dp))) { Bulle(l.m, c, l.auteur,
+                        is Ligne.Msg -> Row(Modifier.fillMaxWidth().background(
+                            when {
+                                l.m.cle in selection -> c.source.teinte().copy(alpha = 0.14f)
+                                l.m.cle == courant -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
+                                else -> Color.Transparent
+                            }, RoundedCornerShape(14.dp))
+                            .then(if (modeSelection) Modifier.clickable { basculerSelection(l.m) } else Modifier),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            if (modeSelection) { Spacer(Modifier.width(4.dp)); PastilleSelection(l.m.cle in selection, c.source.teinte()); Spacer(Modifier.width(6.dp)) }
+                            Box(Modifier.weight(1f)) { Bulle(l.m, c, l.auteur,
                             reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
                             copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
                             reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } },
-                            afficherMessage = { afficher(it) }) }
+                            afficherMessage = { afficher(it) },
+                            luParContact = e.lusParContacts[c.cle] ?: 0L,
+                            modeSelection = modeSelection, choisi = l.m.cle in selection,
+                            basculer = { basculerSelection(l.m) }) } }
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -416,6 +475,36 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         }
     }
     if (menu) FeuilleActions(e, c) { menu = false }
+    if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
+        appeler = { menuAppel = true }, rechercher = { rechercheOuverte = true }, selectionner = { modeSelection = true },
+        message = { afficher(it) })
+    if (transfert) FeuilleTransfert(e, selection.size, fermer = { transfert = false }) { d -> transfert = false; destination = d }
+    destination?.let { d ->
+        val n = selection.size
+        AlertDialog(
+            onDismissRequest = { destination = null },
+            title = { Text("Transférer à ${d.nom} ?") },
+            text = { Text("$n message" + (if (n > 1) "s seront envoyés" else " sera envoyé") + " dans cette conversation ${d.source.libelle}.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    destination = null
+                    val choisis = historique.filter { it.cle in selection }
+                    transfertEnCours = true
+                    portee.launch {
+                        val (faits, err) = Moteur.transferer(choisis, d)
+                        transfertEnCours = false
+                        quitterSelection()
+                        afficher(when {
+                            err == null -> "$faits message" + (if (faits > 1) "s transférés" else " transféré") + " à ${d.nom}"
+                            faits > 0 -> "$faits transféré(s), mais : $err"
+                            else -> "Échec : $err"
+                        })
+                    }
+                }) { Text("Transférer") }
+            },
+            dismissButton = { TextButton(onClick = { destination = null }) { Text("Annuler") } },
+        )
+    }
 }
 
 private fun copier(ctx: Context, texte: String) {
@@ -431,6 +520,8 @@ private fun Bulle(
     reactions: List<Reaction>, maReaction: MaReaction?,
     repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
     afficherMessage: (String) -> Unit = {},
+    luParContact: Long = 0,
+    modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -447,7 +538,7 @@ private fun Bulle(
             Modifier.widthIn(max = 300.dp)
                 .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerLow, forme)
                 .then(if (moi) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, forme))
-                .combinedClickable(onClick = {}, onLongClick = { menu = true })
+                .combinedClickable(onClick = { if (modeSelection) basculer() }, onLongClick = { if (modeSelection) basculer() else menu = true })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurface
@@ -460,7 +551,17 @@ private fun Bulle(
                 "fichier" -> FichierMessage(m, couleur, afficherMessage)
                 else -> Text(avecLiens(m.texte, couleur), color = couleur)
             }
-            Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))
+            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f))
+                // Statut de vos messages : ✓ envoyé, ✓✓ lu par le contact (si la messagerie le transmet)
+                if (moi && c.source != Source.TEAMS) {
+                    val lu = luParContact >= m.date && luParContact > 0
+                    Spacer(Modifier.width(3.dp))
+                    Text(if (lu) "✓✓" else "✓", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = if (lu) Color(0xFF7FD4FF) else couleur.copy(alpha = 0.7f),
+                        modifier = Modifier.semantics { contentDescription = if (lu) "Lu" else "Envoyé" })
+                }
+            }
         }
         // Réactions sous la bulle
         val autres = reactions.filter { !it.deMoi }
@@ -484,13 +585,14 @@ private fun Bulle(
         }
     }
     if (menu) FeuilleMessage(m, c, monEmoji, fermer = { menu = false },
-        reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) })
+        reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) },
+        selectionner = { menu = false; basculer() })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
-                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit) {
+                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit) {
     ModalBottomSheet(onDismissRequest = fermer) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Text("Réagir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -515,6 +617,7 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
             if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
+            ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
         }
     }
 }

@@ -129,6 +129,11 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         return r
     }
 
+    /** Tous les curseurs dont le nom commence par ce préfixe (sans le préfixe). */
+    fun curseurs(prefixe: String): Map<String, String> =
+        readableDatabase.rawQuery("SELECT nom, valeur FROM curseurs WHERE nom LIKE ?", arrayOf("$prefixe%"))
+            .lignes { it.getString(0).removePrefix(prefixe) to it.getString(1) }.toMap()
+
     fun curseur(nom: String): String? =
         readableDatabase.rawQuery("SELECT valeur FROM curseurs WHERE nom = ?", arrayOf(nom)).lignes { it.getString(0) }.firstOrNull()
 

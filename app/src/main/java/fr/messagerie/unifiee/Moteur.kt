@@ -39,6 +39,8 @@ data class Etat(
     val sources: Map<Source, EtatSource> = Source.entries.associateWith { EtatSource.Inactif },
     val statistiques: Map<Source, Pair<Int, Int>> = emptyMap(),
     val rcs: Set<String> = emptySet(),
+    /** Conversation → date jusqu'à laquelle le contact a lu vos messages (si la messagerie le transmet). */
+    val lusParContacts: Map<String, Long> = emptyMap(),
     val salonsWhatsApp: Map<String, String> = emptyMap(),   // jid WhatsApp → salon Matrix
     val enCours: Boolean = false,
     val derniereActualisation: Long? = null,
@@ -278,6 +280,10 @@ object Moteur {
             val s = SyncPont(Matrix(cfg), pont, archive, correspondance).avecMoi(cfg.moiFantome)
             s.synchroniser()
             appliquerLectures(s.lectures)
+            for ((conv, ts) in s.lusParContacts) {
+                val avant = archive.curseur("luPar.$conv")?.toLongOrNull() ?: 0
+                if (ts > avant) archive.definirCurseur("luPar.$conv", ts.toString())
+            }
             runCatching { s.completerHistorique() }
             if (avecRcs) s.rcs?.let { r ->
                 archive.definirCurseur("sms.rcs", r.sorted().joinToString("\n"))
@@ -308,7 +314,8 @@ object Moteur {
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources,
-            etats = archive.etats(), syntheses = archive.syntheses()) }
+            etats = archive.etats(), syntheses = archive.syntheses(),
+            lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 
     private fun majEtat(cle: String, f: (EtatConv) -> EtatConv) {
@@ -529,6 +536,103 @@ object Moteur {
             }
         if (octets == null) return@withContext null
         f.writeBytes(octets); f
+    }
+
+    /**
+     * Aperçu d'une pièce jointe : vignette fournie par la messagerie, sinon première page
+     * d'un PDF déjà sur le téléphone. null si aucun aperçu possible (on affiche alors le type).
+     */
+    suspend fun apercuFichier(m: Message): java.io.File? = withContext(Dispatchers.IO) {
+        val parts = m.media?.split('#') ?: return@withContext null
+        val dossier = java.io.File(app.cacheDir, "medias").apply { mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(parts[0].toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        val f = java.io.File(dossier, "$hash-apercu.jpg")
+        if (f.exists() && f.length() > 0) return@withContext f
+        parts.getOrNull(3)?.takeIf { it.startsWith("mxc://") }?.let { v ->
+            runCatching { Matrix(cfg).miniature(v, 320) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { f.writeBytes(it); return@withContext f }
+        }
+        val mime = parts.getOrNull(1).orEmpty()
+        val nom = parts.getOrNull(2).orEmpty()
+        if (mime != "application/pdf" && !nom.endsWith(".pdf", true)) return@withContext null
+        val pdf = mediaEnCache(m) ?: return@withContext null
+        runCatching {
+            android.os.ParcelFileDescriptor.open(pdf, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                android.graphics.pdf.PdfRenderer(pfd).use { r ->
+                    r.openPage(0).use { page ->
+                        val l = 480; val h = (l.toFloat() * page.height / page.width).toInt().coerceIn(120, 900)
+                        val bmp = android.graphics.Bitmap.createBitmap(l, h, android.graphics.Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(android.graphics.Color.WHITE)
+                        page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }
+                    }
+                }
+            }
+            f
+        }.getOrNull()
+    }
+
+    // MARK: Groupes — lecture des membres ; quitter seulement après confirmation
+
+    /** Membres d'un groupe (noms), hors robots des passerelles. null si la messagerie ne le permet pas. */
+    suspend fun membresGroupe(c: Conversation): List<String>? = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext null
+        val salon = salonDe(c) ?: return@withContext null
+        runCatching {
+            Matrix(cfg).membres(salon).filterKeys { !it.contains("bot:") }
+                .map { (id, nom) -> if (id == cfg.matrixUtilisateur || id == cfg.moiFantome) "Vous" else nom.replace(" (WA)", "") }
+                .distinct().sortedWith(compareBy<String> { it != "Vous" }.thenBy { it.lowercase() })
+        }.getOrNull()
+    }
+
+    fun peutQuitter(c: Conversation) = c.estGroupe && cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
+
+    /** Quitte le groupe — UNIQUEMENT après la confirmation de l'utilisateur. Renvoie null si c'est fait. */
+    suspend fun quitterGroupe(c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutQuitter(c)) return@withContext "impossible de quitter ce groupe depuis Messagerie"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            Matrix(cfg).quitter(salon)
+            if (!_etat.value.estArchivee(c)) withContext(Dispatchers.Main) { basculerArchive(c) }
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    // MARK: Transfert — uniquement après confirmation de l'utilisateur
+
+    /** Peut-on transférer vers cette conversation ? */
+    fun destinationPossible(c: Conversation) = c.source != Source.TEAMS
+
+    /**
+     * Transfère les messages choisis vers une conversation (texte renvoyé, pièce jointe reprise du serveur).
+     * Renvoie (nombre transférés, erreur éventuelle).
+     */
+    suspend fun transferer(messages: List<Message>, vers: Conversation): Pair<Int, String?> = withContext(Dispatchers.IO) {
+        var faits = 0
+        var erreur: String? = null
+        for (m in messages.sortedBy { it.date }) {
+            val ref = m.media?.split('#')
+            val mxc = ref?.getOrNull(0)?.takeIf { it.startsWith("mxc://") }
+            if (m.type in setOf("image", "video", "fichier", "audio") && mxc != null) {
+                val salon = if (vers.source == Source.ELEMENT) null else salonPourEnvoi(vers)
+                if (salon == null) { erreur = "pièce jointe non transférable vers ${vers.source.libelle}"; continue }
+                val mime = ref.getOrNull(1) ?: "application/octet-stream"
+                val nom = ref.getOrNull(2)?.ifBlank { null } ?: when (m.type) { "image" -> "photo"; "video" -> "video"; "audio" -> "vocal"; else -> "fichier" }
+                val info = org.json.JSONObject().put("mimetype", mime)
+                m.duree?.let { info.put("duration", (it * 1000).toLong()) }
+                val contenu = org.json.JSONObject()
+                    .put("msgtype", when (m.type) { "image" -> "m.image"; "video" -> "m.video"; "audio" -> "m.audio"; else -> "m.file" })
+                    .put("body", nom).put("url", mxc).put("info", info)
+                try {
+                    val eid = Matrix(cfg).envoyerContenu(salon, contenu)
+                    afficherEnvoye(vers, eid, m.texte, m.type, m.media, m.duree)
+                    faits++
+                } catch (e: Exception) { erreur = e.message ?: e.toString() }
+            } else if (m.texte.isNotBlank() && m.type != "audio") {
+                val err = envoyer(m.texte, vers, null)
+                if (err == null) faits++ else erreur = err
+            } else erreur = "certains messages ne peuvent pas être transférés"
+        }
+        faits to erreur
     }
 
     private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()

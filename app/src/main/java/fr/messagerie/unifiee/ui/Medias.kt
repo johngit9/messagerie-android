@@ -38,6 +38,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -124,28 +126,54 @@ fun FichierMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
     val portee = rememberCoroutineScope()
     var enCours by remember { mutableStateOf(false) }
     val video = m.type == "video"
-    Row(
-        Modifier.widthIn(max = 260.dp).clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.10f))
+    var essai by remember { mutableStateOf(0) }
+    // Aperçu : vignette de la messagerie, ou 1re page d'un PDF déjà téléchargé
+    val apercu by produceState<File?>(null, m.cle, essai) { value = if (video) null else Moteur.apercuFichier(m) }
+    val nom = if (video) "Vidéo" else nomMedia(m)
+    val ext = nom.substringAfterLast('.', "").takeIf { it.length in 1..5 }?.uppercase()
+        ?: m.media?.split('#')?.getOrNull(1)?.substringAfter('/')?.take(4)?.uppercase() ?: "FICHIER"
+    Column(
+        Modifier.width(250.dp).clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.10f))
             .clickable(enabled = m.media != null && !enCours) {
                 enCours = true
                 portee.launch {
                     runCatching { Moteur.fichierMedia(m) }
-                        .onSuccess { ouvrirAvec(ctx, it, m) }
+                        .onSuccess { ouvrirAvec(ctx, it, m); if (apercu == null) essai++ }
                         .onFailure { afficher("Téléchargement impossible : ${it.message ?: it.javaClass.simpleName}") }
                     enCours = false
                 }
-            }
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            },
     ) {
-        if (enCours) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = couleur)
-        else Icon(if (video) Icons.Outlined.PlayCircle else Icons.Outlined.Description, null, tint = couleur, modifier = Modifier.size(28.dp))
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(if (video) "Vidéo" else nomMedia(m), color = couleur, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(if (m.media == null) "Indisponible" else "Toucher pour ouvrir", fontSize = 11.sp, color = couleur.copy(alpha = 0.75f))
+        apercu?.let {
+            AsyncImage(model = it, contentDescription = "Aperçu de la pièce jointe", contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp).aspectRatio(1.4f).background(Color.White))
+        }
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(width = 40.dp, height = 46.dp).background(couleurType(ext), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center) {
+                if (enCours) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                else if (video) Icon(Icons.Outlined.PlayCircle, null, tint = Color.White)
+                else Text(ext.take(4), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(nom, color = couleur, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (m.media == null) "Indisponible" else "Toucher pour ouvrir", fontSize = 11.sp, color = couleur.copy(alpha = 0.75f))
+            }
         }
     }
+}
+
+/** Couleur de l'étiquette selon le type de fichier. */
+private fun couleurType(ext: String): Color = when (ext.lowercase()) {
+    "pdf" -> Color(0xFFD93A3A)
+    "doc", "docx", "odt", "rtf", "txt", "pages" -> Color(0xFF2B6CD9)
+    "xls", "xlsx", "ods", "csv", "numb" -> Color(0xFF1E8A4C)
+    "ppt", "pptx", "odp", "key" -> Color(0xFFD9701E)
+    "zip", "rar", "7z", "gz", "tar" -> Color(0xFF6B6F7A)
+    "jpg", "jpeg", "png", "heic", "gif", "webp" -> Color(0xFF8A4BD6)
+    else -> Color(0xFF5A606D)
 }
 
 private fun ouvrirAvec(ctx: Context, f: File, m: Message) {
