@@ -44,6 +44,10 @@ import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.FlowRow
@@ -118,6 +122,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var iaEnCours by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var menuIA by remember { mutableStateOf(false) }
+    var menuAppel by remember { mutableStateOf(false) }
+    val ctxVocal = LocalContext.current
+    val enregistreur = remember(c.cle) { fr.messagerie.unifiee.Enregistreur(ctxVocal.applicationContext) }
+    var vocal by remember(c.cle) { mutableStateOf(0) }   // 0 rien, 1 enregistrement, 2 aperçu
+    var ecouteVocal by remember(c.cle) { mutableStateOf(false) }
+    var tempsVocal by remember(c.cle) { mutableStateOf(0L) }
+    androidx.compose.runtime.DisposableEffect(c.cle) { onDispose { enregistreur.annuler() } }
+    LaunchedEffect(vocal) { while (vocal == 1) { tempsVocal = enregistreur.ecoule(); kotlinx.coroutines.delay(200) } }
+    val demandeMicro = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }
+    }
     // Date de lecture à l'ouverture : place le repère « Nouveaux messages ».
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
 
@@ -164,6 +180,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                     }
                 },
                 actions = {
+                    val ctxAppel = LocalContext.current
+                    val appels = remember(c.cle) { moyensAppel(c) }
+                    Box {
+                        IconButton(onClick = { menuAppel = true }) { Icon(Icons.Outlined.Call, "Appeler") }
+                        DropdownMenu(expanded = menuAppel, onDismissRequest = { menuAppel = false }) {
+                            appels.forEach { (libelle, lien) ->
+                                DropdownMenuItem(text = { Text(libelle) }, onClick = { menuAppel = false; lancerAppel(ctxAppel, lien) })
+                            }
+                        }
+                    }
                     IconButton(onClick = { menu = true },
                         colors = androidx.compose.material3.IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                         Icon(Icons.Outlined.MoreVert, "Actions")
@@ -250,6 +276,39 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                         Text("✨ Texte amélioré par l'IA", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = { brouillon = brouillonAvant!!; brouillonAvant = null }) { Text("Revenir à mon texte", fontSize = 12.sp) }
                     }
+                    if (vocal != 0) Row(
+                        Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        val sec = (if (vocal == 1) tempsVocal else enregistreur.dureeMs) / 1000
+                        if (vocal == 1) {
+                            Box(Modifier.size(10.dp).background(MaterialTheme.colorScheme.error, CircleShape))
+                            Text("Enregistrement  ${sec / 60}:${"%02d".format(sec % 60)}", modifier = Modifier.weight(1f))
+                            TextButton(onClick = { enregistreur.annuler(); vocal = 0 }) { Text("Annuler") }
+                            Button(onClick = { vocal = if (enregistreur.arreter()) 2 else 0; if (vocal == 0) afficher("Vocal trop court") },
+                                colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) { Text("Arrêter") }
+                        } else {
+                            IconButton(onClick = {
+                                if (ecouteVocal) { enregistreur.arreterEcoute(); ecouteVocal = false }
+                                else { ecouteVocal = true; runCatching { enregistreur.ecouter { ecouteVocal = false } } }
+                            }) { Icon(if (ecouteVocal) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, if (ecouteVocal) "Arrêter l'écoute" else "Écouter") }
+                            Text("Vocal  ${sec / 60}:${"%02d".format(sec % 60)}", modifier = Modifier.weight(1f))
+                            IconButton(onClick = { enregistreur.annuler(); vocal = 0; ecouteVocal = false }) { Icon(Icons.Outlined.Delete, "Supprimer le vocal") }
+                            Button(onClick = {
+                                val f = enregistreur.fichier ?: return@Button
+                                enregistreur.arreterEcoute(); ecouteVocal = false
+                                envoi = true
+                                portee.launch {
+                                    val err = Moteur.envoyerVocal(f, enregistreur.typeMime, enregistreur.dureeMs, c)
+                                    envoi = false
+                                    if (err == null) { enregistreur.annuler(); vocal = 0; afficher("Vocal envoyé") } else afficher("Échec : $err")
+                                }
+                            }, enabled = !envoi, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
+                                if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                                else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer le vocal")
+                            }
+                        }
+                    } else
                     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(
                             value = brouillon, onValueChange = { brouillon = it }, enabled = !iaEnCours,
@@ -276,7 +335,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 }
                             }
                         }
-                        Button(
+                        if (brouillon.isBlank() && Moteur.vocalPossible(c)) Button(
+                            onClick = {
+                                val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctxVocal, android.Manifest.permission.RECORD_AUDIO) ==
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }.onFailure { afficher("Micro indisponible") }
+                                else demandeMicro.launch(android.Manifest.permission.RECORD_AUDIO)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte()),
+                        ) { Icon(Icons.Outlined.Mic, "Enregistrer un vocal") }
+                        else Button(
                             onClick = {
                                 envoi = true
                                 portee.launch {
@@ -482,7 +550,7 @@ private fun CarteResume(e: Etat, c: Conversation, utiliser: (String) -> Unit) {
 }
 
 /** Ouvre l'appli Teams sur la discussion (lien profond vers le dernier message), sinon l'appli seule. */
-private fun ouvrirTeams(ctx: android.content.Context, conversation: String, dernierMessage: String?) {
+internal fun ouvrirTeams(ctx: android.content.Context, conversation: String, dernierMessage: String?) {
     val paquet = "com.microsoft.teams"
     if (dernierMessage != null && conversation.isNotEmpty()) {
         val lien = android.net.Uri.parse("https://teams.microsoft.com/l/message/" + android.net.Uri.encode(conversation) + "/" +
@@ -494,4 +562,39 @@ private fun ouvrirTeams(ctx: android.content.Context, conversation: String, dern
     val i = ctx.packageManager.getLaunchIntentForPackage(paquet)
         ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://teams.microsoft.com"))
     runCatching { ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+
+/** Moyens d'appeler ce contact : l'appel se fait dans l'appli concernée (Messagerie ne passe pas d'appel). */
+private fun moyensAppel(c: Conversation): List<Pair<String, String>> {
+    val l = ArrayList<Pair<String, String>>()
+    // Numéro : identifiant WhatsApp (numéro@s.whatsapp.net) ou nom de la conversation s'il ressemble à un numéro
+    val numero = when {
+        c.source == Source.WHATSAPP && c.jid.endsWith("@s.whatsapp.net") -> c.jid.substringBefore('@').substringBefore(':')
+        else -> c.nom.filter { it.isDigit() || it == '+' }.takeIf { it.count(Char::isDigit) >= 8 && c.nom.none { ch -> ch.isLetter() } }
+    }?.trimStart('+')
+    when (c.source) {
+        Source.WHATSAPP -> if (numero != null) l += "Appel WhatsApp (vidéo ou audio)" to "https://wa.me/$numero" else l += "Ouvrir WhatsApp" to "appli:com.whatsapp"
+        Source.TELEGRAM -> l += "Appel Telegram (ouvrir l'appli)" to "appli:org.telegram.messenger"
+        Source.TEAMS -> l += "Appel Teams (ouvrir la discussion)" to "teams:${c.jid}"
+        Source.LINKEDIN -> l += "Ouvrir LinkedIn" to "appli:com.linkedin.android"
+        Source.ELEMENT -> l += "Appel Element (ouvrir l'appli)" to "appli:im.vector.app"
+        else -> {}
+    }
+    if (numero != null) l += "Appel téléphonique" to "tel:+$numero"
+    l += "Nouvelle visio Google Meet" to "https://meet.google.com/new"
+    return l
+}
+
+private fun lancerAppel(ctx: Context, lien: String) {
+    val nt = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+    when {
+        lien.startsWith("appli:") -> {
+            val i = ctx.packageManager.getLaunchIntentForPackage(lien.removePrefix("appli:"))
+            if (i == null) android.widget.Toast.makeText(ctx, "Appli non installée", android.widget.Toast.LENGTH_SHORT).show()
+            else runCatching { ctx.startActivity(i.addFlags(nt)) }
+        }
+        lien.startsWith("teams:") -> ouvrirTeams(ctx, lien.removePrefix("teams:"), null)
+        lien.startsWith("tel:") -> runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse(lien)).addFlags(nt)) }
+        else -> runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lien)).addFlags(nt)) }
+    }
 }

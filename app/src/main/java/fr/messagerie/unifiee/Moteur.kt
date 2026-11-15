@@ -187,8 +187,10 @@ object Moteur {
 
     fun actualiserMaintenant() { portee.launch { actualiser() } }
 
-    suspend fun actualiser() {
-        if (!verrou.tryLock()) return
+    @Volatile private var relanceDemandee = false
+
+    suspend fun actualiser(relancerSiOccupe: Boolean = false) {
+        if (!verrou.tryLock()) { if (relancerSiOccupe) relanceDemandee = true; return }
         _etat.update { it.copy(enCours = true) }
         try {
             if (_etat.value.conversations.isEmpty()) recharger()
@@ -253,6 +255,8 @@ object Moteur {
             _etat.update { it.copy(enCours = false, importEnCours = null) }
             verrou.unlock()
         }
+        // Un envoi a eu lieu pendant l'actualisation : on repasse pour récupérer son écho.
+        if (relanceDemandee) { relanceDemandee = false; portee.launch { actualiser() } }
     }
 
     private suspend fun synchroniserPont(pont: Pont, correspondance: Map<String, String>?, avant: EtatSource?, avecRcs: Boolean = false): EtatSource =
@@ -367,9 +371,9 @@ object Moteur {
         if (t.isEmpty()) return@withContext "message vide"
         val idCite = cite?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") }
         try {
-            when (c.source) {
+            val eid: String = when (c.source) {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
-                Source.ELEMENT -> Relais(cfg).envoyer(c.jid, t, idCite)
+                Source.ELEMENT -> { Relais(cfg).envoyer(c.jid, t, idCite); "" }
                 Source.WHATSAPP -> {
                     // Correspondance discussion → salon : en mémoire, sinon redemandée au relais tout de suite
                     val salon = _etat.value.salonsWhatsApp[c.jid]
@@ -382,10 +386,43 @@ object Moteur {
                 }
                 else -> Matrix(cfg).envoyer(c.jid, t, idCite)
             }
-            marquerTraitee(c)
-            portee.launch { delay(1500); actualiser() }
+            afficherEnvoye(c, eid, t)
             null
         } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /** Salon Matrix d'une conversation (WhatsApp : via la correspondance du relais). */
+    private fun salonPourEnvoi(c: Conversation): String? = when (c.source) {
+        Source.WHATSAPP -> _etat.value.salonsWhatsApp[c.jid]
+            ?: runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()?.takeIf { it.isNotEmpty() }
+                ?.let { memoriserSalonsWhatsApp(it); _etat.value.salonsWhatsApp[c.jid] }
+        Source.ELEMENT, Source.TEAMS -> null
+        else -> c.jid
+    }
+
+    /** Peut-on envoyer un vocal dans cette conversation ? (passerelles Matrix seulement) */
+    fun vocalPossible(c: Conversation) = cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
+
+    /** Envoie un message vocal enregistré — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. */
+    suspend fun envoyerVocal(f: java.io.File, typeMime: String, dureeMs: Long, c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!vocalPossible(c)) return@withContext "envoi de vocaux impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val (eid, mxc) = Matrix(cfg).envoyerVocal(salon, f.readBytes(), typeMime, f.name, dureeMs)
+            afficherEnvoye(c, eid, "", type = "audio", media = "$mxc#$typeMime", duree = dureeMs / 1000.0)
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /** Le message envoyé s'affiche tout de suite (même clé que l'écho du serveur : pas de doublon). */
+    private fun afficherEnvoye(c: Conversation, eid: String, texte: String, type: String = "texte", media: String? = null, duree: Double? = null) {
+        if (eid.isNotEmpty()) runCatching {
+            archive.enregistrerMessages(listOf(Message("${c.source.id}:$eid", c.cle, System.currentTimeMillis(), true, "Vous", texte, type, media, duree)))
+            recharger()
+        }
+        val n = _etat.value.conversations.firstOrNull { it.cle == c.cle } ?: c
+        majEtat(c.cle) { it.copy(traitee = maxOf(n.derniere, c.derniere), manuel = false, lue = maxOf(n.derniere, c.derniere), forcee = 0) }
+        portee.launch { delay(1500); actualiser(relancerSiOccupe = true) }
     }
 
     /** Garde la correspondance salon Matrix → discussion WhatsApp (aussi dans l'archive, pour envoyer dès l'ouverture). */

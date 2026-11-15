@@ -57,7 +57,8 @@ class Matrix(private val cfg: Config) {
     }
 
     /** Envoie un message — UNIQUEMENT sur le bouton « Envoyer ». */
-    fun envoyer(salon: String, texte: String, reponseA: String?) {
+    /** Envoie un texte — UNIQUEMENT sur le bouton « Envoyer ». Renvoie l'identifiant de l'événement. */
+    fun envoyer(salon: String, texte: String, reponseA: String?): String {
         connecter()
         val txn = "messagerie-" + UUID.randomUUID()
         val contenu = JSONObject().put("msgtype", "m.text").put("body", texte)
@@ -65,6 +66,24 @@ class Matrix(private val cfg: Config) {
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
             "PUT", jeton, contenu.toString(), 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Envoie un message vocal — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. Renvoie (événement, mxc). */
+    fun envoyerVocal(salon: String, octets: ByteArray, typeMime: String, nom: String, dureeMs: Long): Pair<String, String> {
+        connecter()
+        val u = Http.envoyerOctets("$base/_matrix/media/v3/upload?filename=${Http.enc(nom)}", jeton, octets, typeMime)
+        if (u.code != 200) throw ErreurHttp(u.code, "téléversement du vocal")
+        val mxc = JSONObject(u.texte).optString("content_uri").ifEmpty { throw Exception("téléversement sans adresse") }
+        val contenu = JSONObject().put("msgtype", "m.audio").put("body", nom).put("url", mxc)
+            .put("info", JSONObject().put("mimetype", typeMime).put("size", octets.size).put("duration", dureeMs))
+            .put("org.matrix.msc1767.audio", JSONObject().put("duration", dureeMs))
+            .put("org.matrix.msc3245.voice", JSONObject())
+        val txn = "messagerie-" + UUID.randomUUID()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
+            "PUT", jeton, contenu.toString(), 20_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "envoi du vocal")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("") to mxc
     }
 
     /** Pose une réaction — UNIQUEMENT sur un appui de l'utilisateur. Renvoie l'identifiant de la réaction. */

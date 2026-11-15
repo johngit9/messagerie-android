@@ -41,6 +41,23 @@ object Http {
         }
     }
 
+    /** Envoie des octets bruts (téléversement d'un média). */
+    fun envoyerOctets(url: String, jeton: String?, octets: ByteArray, typeMime: String, delaiMs: Int = 60_000): Reponse {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.requestMethod = "POST"
+            c.connectTimeout = 8_000; c.readTimeout = delaiMs; c.useCaches = false
+            if (jeton != null) c.setRequestProperty("Authorization", "Bearer $jeton")
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", typeMime)
+            c.setFixedLengthStreamingMode(octets.size)
+            c.outputStream.use { it.write(octets) }
+            val code = c.responseCode
+            val flux = if (code in 200..299) c.inputStream else c.errorStream
+            return Reponse(code, flux?.use { it.readBytes() } ?: ByteArray(0))
+        } catch (e: Exception) { c.disconnect(); throw e }
+    }
+
     /** Encode tout sauf les caractères alphanumériques (identifiants Matrix dans un chemin). */
     fun enc(s: String): String = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 }
