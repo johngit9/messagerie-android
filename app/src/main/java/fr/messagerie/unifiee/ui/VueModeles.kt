@@ -103,6 +103,30 @@ class ConversationVM(private val cle: String) : ViewModel() {
         }
     }
 
+    // --- Recherche dans la discussion
+    private val _trouves = MutableStateFlow<List<Message>>(emptyList())
+    val trouves = _trouves.asStateFlow()
+    private var tacheRecherche: kotlinx.coroutines.Job? = null
+
+    fun chercher(q: String) {
+        tacheRecherche?.cancel()
+        if (q.isBlank()) { _trouves.value = emptyList(); return }
+        tacheRecherche = viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(250)
+            _trouves.value = Moteur.archive.chercherDans(cle, q.trim())
+        }
+    }
+
+    /** Charge l'historique jusqu'à ce message (s'il n'est pas déjà affiché), puis appelle pret. */
+    fun allerA(m: Message, pret: () -> Unit) {
+        if (_historique.value.any { it.cle == m.cle }) { pret(); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val n = Moteur.archive.nombreDepuis(cle, m.date) + 30
+            _historique.value = Moteur.archive.messages(cle, null, maxOf(n, _historique.value.size))
+            withContext(Dispatchers.Main) { pret() }
+        }
+    }
+
     private fun chargerReactions() {
         _reactions.value = Moteur.archive.reactions(cle)
         _mesReactions.value = Moteur.archive.mesReactions(cle)

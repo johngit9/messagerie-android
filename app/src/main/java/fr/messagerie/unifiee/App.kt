@@ -28,7 +28,7 @@ class App : Application() {
  */
 class ServiceVeille : Service() {
     companion object {
-        private const val CANAL = "veille"
+        private const val CANAL = "veille.discret"
         fun mettreAJour(context: Context) {
             val i = Intent(context, ServiceVeille::class.java)
             if (Moteur.cfg.veilleArrierePlan && Moteur.cfg.configure) {
@@ -41,7 +41,9 @@ class ServiceVeille : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CANAL, "Réception en arrière-plan", NotificationManager.IMPORTANCE_MIN))
+        runCatching { nm.deleteNotificationChannel("veille") }   // ancien canal, qui mettait un point sur l'icône
+        // Pas de point sur l'icône pour la notification permanente : il masquerait le chiffre des non-lus.
+        nm.createNotificationChannel(NotificationChannel(CANAL, "Réception en arrière-plan", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
         val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n: Notification = NotificationCompat.Builder(this, CANAL)
             .setSmallIcon(R.drawable.ic_bulle)

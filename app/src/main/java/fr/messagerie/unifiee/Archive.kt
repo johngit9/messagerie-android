@@ -252,6 +252,22 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         } catch (e: Exception) { emptySet() }
     }
 
+    /** Messages d'une conversation contenant ces mots (du plus ancien au plus récent). */
+    fun chercherDans(conv: String, texte: String, limite: Int = 300): List<Message> {
+        val mots = texte.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { "$it*" }
+        if (mots.isEmpty()) return emptyList()
+        return try {
+            readableDatabase.rawQuery("SELECT m.* FROM recherche r JOIN messages m ON m.cle = r.cle " +
+                "WHERE r.contenu MATCH ? AND r.conv = ? ORDER BY m.date DESC LIMIT ?",
+                arrayOf(mots.joinToString(" "), conv, limite.toString())).lignes { message(it) }.reversed()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    /** Nombre de messages d'une conversation depuis une date (pour charger l'historique jusqu'à un résultat). */
+    fun nombreDepuis(conv: String, date: Long): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM messages WHERE conv = ? AND date >= ?", arrayOf(conv, date.toString()))
+            .lignes { it.getInt(0) }.firstOrNull() ?: 0
+
     fun aDesConversations(s: Source): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE source = ? LIMIT 1", arrayOf(s.id)).use { it.moveToFirst() }
 

@@ -84,6 +84,12 @@ class Config(context: Context) {
     /** Heures de silence des notifications (-1 = désactivé), de debut à fin, en heures pleines. */
     var silenceDebut: Int get() = p.getInt("silenceDebut", -1); set(v) = p.edit().putInt("silenceDebut", v).apply()
     var silenceFin: Int get() = p.getInt("silenceFin", 7); set(v) = p.edit().putInt("silenceFin", v).apply()
+    /** Messageries concernées par les heures de silence (toutes par défaut). */
+    fun silencePour(s: Source): Boolean = p.getBoolean("silence.${s.id}", true)
+    fun definirSilencePour(s: Source, v: Boolean) = p.edit().putBoolean("silence.${s.id}", v).apply()
+    fun enSilence(s: Source): Boolean = silencePour(s) && enSilence()
+    /** Présentation de la liste : 0 cartes, 1 liste compacte, 2 bulles (aérée). */
+    var design: Int get() = p.getInt("design", 0); set(v) = p.edit().putInt("design", v).apply()
     fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
         val d = silenceDebut; val f = silenceFin
         if (d < 0 || d == f) return false

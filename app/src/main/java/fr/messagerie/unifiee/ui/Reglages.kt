@@ -453,6 +453,29 @@ private fun Pastilles(choisie: Long, origine: Long, choisir: (Long) -> Unit) {
 private fun PageAffichage() {
     val cfg = Moteur.cfg
     Explication("Tout s'applique tout de suite. « A » remet la couleur d'origine.")
+    Text("Design de la liste", fontWeight = FontWeight.Medium)
+    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        listOf(0 to "Cartes", 1 to "Compacte", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->
+            val actif = Affichage.design == v
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                .border(if (actif) 2.dp else 1.dp, if (actif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                .clickable { Affichage.design = v; cfg.design = v }.padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Miniature : trois lignes dans le style choisi
+                repeat(3) { i ->
+                    val coul = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM)[i].teinte()
+                    Row(Modifier.fillMaxWidth().height(if (v == 3) 16.dp else if (v == 1) 10.dp else 13.dp)
+                        .background(when (v) { 1 -> Color.Transparent; 2 -> coul.copy(alpha = 0.15f); else -> MaterialTheme.colorScheme.surfaceContainerHigh }, RoundedCornerShape(4.dp))
+                        .padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(if (v == 3) 11.dp else 8.dp).background(coul, CircleShape))
+                        Spacer(Modifier.width(3.dp))
+                        Box(Modifier.weight(1f).height(3.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)))
+                    }
+                }
+                Text(nom, fontSize = 12.sp, fontWeight = if (actif) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+            }
+        }
+    }
     Text("Thème", fontWeight = FontWeight.Medium)
     Choix(listOf(0 to "Comme le téléphone", 1 to "Clair", 2 to "Sombre"), Affichage.theme) { Affichage.theme = it; cfg.theme = it }
     if (android.os.Build.VERSION.SDK_INT >= 31)
@@ -509,7 +532,7 @@ private fun PageAffichage() {
         }
     }
     TextButton(onClick = {
-        Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear()
+        Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear(); Affichage.design = 0; cfg.design = 0
         cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; Source.entries.forEach { cfg.definirCouleur(it, 0L) }
     }) { Text("Tout remettre comme à l'origine") }
 }
@@ -601,7 +624,20 @@ private fun PageNotifications(version: Int) {
     var debut by remember { mutableIntStateOf(cfg.silenceDebut) }
     var fin by remember { mutableIntStateOf(cfg.silenceFin) }
     Choix(listOf(-1 to "Désactivé", 20 to "Dès 20 h", 21 to "Dès 21 h", 22 to "Dès 22 h", 23 to "Dès 23 h"), debut) { debut = it; cfg.silenceDebut = it }
-    if (debut >= 0) Choix(listOf(6 to "Jusqu'à 6 h", 7 to "7 h", 8 to "8 h", 9 to "9 h"), fin) { fin = it; cfg.silenceFin = it }
+    if (debut >= 0) {
+        Choix(listOf(6 to "Jusqu'à 6 h", 7 to "7 h", 8 to "8 h", 9 to "9 h"), fin) { fin = it; cfg.silenceFin = it }
+        Text("Messageries concernées", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        var majSilence by remember { mutableIntStateOf(0) }
+        key(majSilence) {
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Source.entries.filter { e.statistiques[it] != null }.forEach { s ->
+                    FilterChip(selected = cfg.silencePour(s), onClick = { cfg.definirSilencePour(s, !cfg.silencePour(s)); majSilence++ },
+                        leadingIcon = { LogoSource(s, 18.dp) }, label = { Text(s.id, fontSize = 13.sp) })
+                }
+            }
+        }
+        Explication("Une messagerie décochée sonne normalement, même pendant les heures de silence.")
+    }
     HorizontalDivider()
     Text("Réception", fontWeight = FontWeight.SemiBold)
     Interrupteur("Rester à l'écoute en arrière-plan", veille, "Messages reçus en quelques secondes, appli fermée. Affiche une notification permanente.") {

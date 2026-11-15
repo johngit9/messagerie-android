@@ -135,7 +135,10 @@ object Moteur {
         }
         // Non-lus par messagerie dans les raccourcis de l'icône (appui long)
         portee.launch {
-            _etat.debounce(1500).collect { e -> runCatching { Raccourcis.mettreAJour(app, e) } }
+            _etat.debounce(1500).collect { e ->
+                runCatching { Raccourcis.mettreAJour(app, e) }
+                runCatching { Pastille.afficher(app, e.nombreMessagesNonLus(null)) }
+            }
         }
     }
 
@@ -316,11 +319,15 @@ object Moteur {
     // MARK: Lu / non lu — LOCAL uniquement
 
     fun marquerLue(c: Conversation) {
+        runCatching { NotificationManagerCompat.from(app).cancel(c.cle.hashCode()) }   // le chiffre de l'icône baisse
         if (!_etat.value.estNonLue(c)) return
         majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) }
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
-    fun toutMarquerLu() = _etat.value.let { e -> e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) } } }
+    fun toutMarquerLu() = _etat.value.let { e ->
+        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) } }
+        runCatching { NotificationManagerCompat.from(app).cancelAll() }
+    }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
     fun basculerATraiter(c: Conversation) = majEtat(c.cle) { if (it.manuel) it.copy(manuel = false) else it.copy(manuel = true, traitee = 0) }
     fun basculerSourdine(c: Conversation) = majEtat(c.cle) { it.copy(sourdine = !it.sourdine) }
@@ -616,7 +623,7 @@ object Moteur {
             // Chiffre sur l'icône (si le lanceur du téléphone l'affiche) : non-lus de la conversation
             .setNumber(_etat.value.conversations.firstOrNull { it.cle == c.cle }?.let { _etat.value.nombreNonLus(it) }?.coerceAtLeast(msgs.size) ?: msgs.size)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-            .setSilent(cfg.enSilence())
+            .setSilent(cfg.enSilence(c.source))
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setGroup("messages")
@@ -647,7 +654,7 @@ object Moteur {
             .setAutoCancel(true)
             .setNumber(_etat.value.nombreNonLus(c).coerceAtLeast(1))
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
-            .setSilent(cfg.enSilence())
+            .setSilent(cfg.enSilence(c.source))
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }

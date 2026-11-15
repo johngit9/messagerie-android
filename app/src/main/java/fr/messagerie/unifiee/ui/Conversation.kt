@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -44,6 +45,9 @@ import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Mic
@@ -123,6 +127,13 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var menu by remember { mutableStateOf(false) }
     var menuIA by remember { mutableStateOf(false) }
     var menuAppel by remember { mutableStateOf(false) }
+    // Recherche dans la discussion
+    var rechercheOuverte by remember(c.cle) { mutableStateOf(false) }
+    var requete by remember(c.cle) { mutableStateOf("") }
+    val trouves by vm.trouves.collectAsState()
+    var rang by remember(c.cle) { mutableStateOf(0) }
+    var courant by remember(c.cle) { mutableStateOf<String?>(null) }
+    val liste = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctxVocal = LocalContext.current
     val enregistreur = remember(c.cle) { fr.messagerie.unifiee.Enregistreur(ctxVocal.applicationContext) }
     var vocal by remember(c.cle) { mutableStateOf(0) }   // 0 rien, 1 enregistrement, 2 aperçu
@@ -169,6 +180,19 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
             TopAppBar(
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
                 title = {
+                    if (rechercheOuverte) {
+                        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                        LaunchedEffect(Unit) { focus.requestFocus() }
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = requete, onValueChange = { requete = it; vm.chercher(it) }, singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                            decorationBox = { champ ->
+                                Box { if (requete.isEmpty()) Text("Rechercher dans la discussion", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp); champ() }
+                            },
+                        )
+                    } else
                     Row(verticalAlignment = Alignment.CenterVertically) {
                     Avatar(c.nom, c.source, c.estGroupe, taille = 38.dp, cle = c.cle)
                     Spacer(Modifier.width(12.dp))
@@ -179,7 +203,28 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                     }
                     }
                 },
-                actions = {
+                actions = actions@{
+                    if (rechercheOuverte) {
+                        fun aller(i: Int) {
+                            if (trouves.isEmpty()) return
+                            rang = i.coerceIn(0, trouves.size - 1)
+                            val m = trouves[trouves.size - 1 - rang]   // du plus récent au plus ancien
+                            courant = m.cle
+                            vm.allerA(m) { portee.launch {
+                                kotlinx.coroutines.delay(80)
+                                val idx = lignes.asReversed().indexOfFirst { it is Ligne.Msg && it.m.cle == m.cle }
+                                if (idx >= 0) liste.animateScrollToItem(idx + 1)
+                            } }
+                        }
+                        LaunchedEffect(trouves) { if (trouves.isNotEmpty()) aller(0) else courant = null }
+                        Text(if (requete.isBlank()) "" else if (trouves.isEmpty()) "0" else "${rang + 1}/${trouves.size}",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(onClick = { aller(rang + 1) }, enabled = rang < trouves.size - 1) { Icon(Icons.Outlined.KeyboardArrowUp, "Plus ancien") }
+                        IconButton(onClick = { aller(rang - 1) }, enabled = rang > 0) { Icon(Icons.Outlined.KeyboardArrowDown, "Plus récent") }
+                        IconButton(onClick = { rechercheOuverte = false; requete = ""; vm.chercher(""); courant = null }) { Icon(Icons.Outlined.Close, "Fermer la recherche") }
+                        return@actions
+                    }
+                    IconButton(onClick = { rechercheOuverte = true }) { Icon(Icons.Outlined.Search, "Rechercher dans la discussion") }
                     val ctxAppel = LocalContext.current
                     val appels = remember(c.cle) { moyensAppel(c) }
                     Box {
@@ -201,7 +246,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = liste, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
                 item(key = "resume") { CarteResume(e, c) { brouillon = it } }
                 items(lignes.asReversed(), key = { it.cle }) { l ->
                     when (l) {
@@ -209,12 +254,14 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         is Ligne.NonLus -> Text("— Nouveaux messages —", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        is Ligne.Msg -> Bulle(l.m, c, l.auteur,
+                        is Ligne.Msg -> Box(Modifier.fillMaxWidth().background(
+                            if (l.m.cle == courant) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f) else Color.Transparent,
+                            RoundedCornerShape(14.dp))) { Bulle(l.m, c, l.auteur,
                             reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
                             copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
                             reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } },
-                            afficherMessage = { afficher(it) })
+                            afficherMessage = { afficher(it) }) }
                     }
                 }
                 if (historique.size < total) item(key = "plus") {

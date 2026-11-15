@@ -73,6 +73,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -142,7 +143,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                 } else LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(when (fr.messagerie.unifiee.Affichage.design) { 1 -> 0.dp; 3 -> 12.dp; else -> 8.dp }),
                 ) {
                     items(visibles, key = { it.cle }) { c ->
                         CarteConversation(e, c, Modifier.animateItem(),
@@ -381,15 +382,20 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
     val aTraiter = e.aTraiter(c)
     val nonLue = e.estNonLue(c)
     val nb = e.nombreNonLus(c)
+    val design = fr.messagerie.unifiee.Affichage.design
+    val fond = when (design) { 1 -> Color.Transparent; 2 -> c.source.teinte().copy(alpha = 0.08f); else -> cs.surfaceContainerLow }
+    val forme = RoundedCornerShape(if (design == 3) 22.dp else 16.dp)
+    Column(modifier.fillMaxWidth()) {
     Row(
-        modifier.fillMaxWidth()
-            .background(cs.surfaceContainerLow, RoundedCornerShape(16.dp))
-            .border(1.dp, cs.outlineVariant, RoundedCornerShape(16.dp))
+        Modifier.fillMaxWidth()
+            .background(fond, forme)
+            .then(if (design == 1) Modifier else Modifier.border(1.dp, if (design == 2) c.source.teinte().copy(alpha = 0.25f) else cs.outlineVariant, forme))
+            .clip(forme)
             .combinedClickable(onClick = ouvrir, onLongClick = actions)
-            .padding(12.dp),
-        verticalAlignment = Alignment.Top,
+            .padding(horizontal = if (design == 1) 4.dp else 12.dp, vertical = when (design) { 1 -> 9.dp; 3 -> 16.dp; else -> 12.dp }),
+        verticalAlignment = if (design == 1) Alignment.CenterVertically else Alignment.Top,
     ) {
-        Avatar(c.nom, c.source, c.estGroupe, taille = 48.dp, bordure = cs.surfaceContainerLow, cle = c.cle)
+        Avatar(c.nom, c.source, c.estGroupe, taille = when (design) { 1 -> 40.dp; 3 -> 56.dp; else -> 48.dp }, bordure = cs.surfaceContainerLow, cle = c.cle)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,7 +425,7 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
             }
             Row {
                 if (s != null || enCours) Icon(Icons.Outlined.AutoAwesome, "Résumé IA", Modifier.padding(top = 2.dp, end = 4.dp).size(14.dp), tint = Color(0xFF6A4BD6))
-                Text(apercu, fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                Text(apercu, fontSize = 14.sp, lineHeight = 19.sp, maxLines = when (design) { 1 -> 1; 3 -> 3; else -> 2 }, overflow = TextOverflow.Ellipsis,
                     color = if (nonLue) cs.onSurface else cs.onSurfaceVariant)
             }
             if (aTraiter || nb > 0) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -432,6 +438,8 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
                 }
             }
         }
+    }
+    if (design == 1) HorizontalDivider(Modifier.padding(start = 56.dp), color = cs.outlineVariant)
     }
 }
 
