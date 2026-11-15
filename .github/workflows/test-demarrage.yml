@@ -1,0 +1,47 @@
+name: Tester le démarrage
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release à tester (vide = la dernière)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  demarrage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Télécharger l'APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then gh release download "${{ inputs.version }}" -R ${{ github.repository }} -p '*.apk' -O app.apk
+          else gh release download -R ${{ github.repository }} -p '*.apk' -O app.apk; fi
+          ls -l app.apk
+      - name: Activer KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Lancer l'appli dans l'émulateur
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb install -r app.apk
+            adb logcat -c
+            adb shell monkey -p fr.messagerie.unifiee -c android.intent.category.LAUNCHER 1
+            sleep 20
+            adb shell pidof fr.messagerie.unifiee && echo "APPLI EN VIE" || echo "APPLI ARRÊTÉE"
+            adb logcat -d -b crash > crash.txt || true
+            adb logcat -d | grep -iE "AndroidRuntime|FATAL|fr.messagerie" | head -80 || true
+            echo "===== CRASH ====="
+            cat crash.txt
