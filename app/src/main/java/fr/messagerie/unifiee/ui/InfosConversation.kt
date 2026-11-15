@@ -80,7 +80,12 @@ fun FeuilleInfos(
     val portee = rememberCoroutineScope()
     var confirmerDepart by remember { mutableStateOf(false) }
     var depart by remember { mutableStateOf(false) }
-    val membres by produceState<List<String>?>(null, c.cle) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var accesContacts by remember { mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_CONTACTS) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED) }
+    val demandeContacts = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> accesContacts = ok }
+    val membres by produceState<List<Moteur.Membre>?>(null, c.cle, accesContacts) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
 
     ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = cs.surfaceContainerLow) {
@@ -155,11 +160,18 @@ fun FeuilleInfos(
                     else -> {
                         var tous by remember { mutableStateOf(false) }
                         val liste = membres!!
-                        (if (tous) liste else liste.take(12)).forEach { nom ->
-                            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Avatar(nom, c.source, false, taille = 34.dp, bordure = cs.surfaceContainerLow)
+                        if (!accesContacts && liste.any { it.nom == null && it.numero != null }) TextButton(
+                            onClick = { demandeContacts.launch(android.Manifest.permission.READ_CONTACTS) },
+                            modifier = Modifier.padding(start = 6.dp)) { Text("Afficher les noms de mes contacts") }
+                        (if (tous) liste else liste.take(12)).forEach { mb ->
+                            val titre = mb.nom ?: mb.numero?.let { "+$it" } ?: "Inconnu"
+                            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Avatar(titre, c.source, false, taille = 34.dp, bordure = cs.surfaceContainerLow)
                                 Spacer(Modifier.width(12.dp))
-                                Text(nom, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Column {
+                                    Text(titre, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (mb.nom != null && mb.numero != null && !mb.moi) Text("+" + mb.numero, fontSize = 12.sp, color = cs.onSurfaceVariant)
+                                }
                             }
                         }
                         if (liste.size > 12 && !tous) TextButton(onClick = { tous = true }, modifier = Modifier.padding(start = 6.dp)) {

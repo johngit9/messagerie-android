@@ -57,6 +57,8 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.OpenInFull
+import androidx.compose.material.icons.outlined.CloseFullscreen
 import androidx.compose.material.icons.automirrored.outlined.Forward
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.semantics.semantics
@@ -128,7 +130,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     val reactions by vm.reactions.collectAsState()
     val mesReactions by vm.mesReactions.collectAsState()
     var brouillon by rememberSaveable(c.cle) { mutableStateOf("") }
-    var brouillonAvant by remember(c.cle) { mutableStateOf<String?>(null) }
+    // Versions précédentes du texte avant chaque modification par l'IA (pour revenir en arrière)
+    var versionsIA by remember(c.cle) { mutableStateOf(listOf<String>()) }
+    var saisieAgrandie by rememberSaveable(c.cle) { mutableStateOf(false) }
+    // Image collée depuis le presse-papiers (copie d'écran…) : envoyée seulement sur « Envoyer »
+    var imageCollee by remember(c.cle) { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    var imageDispo by remember { mutableStateOf(false) }
     var reponseA by remember(c.cle) { mutableStateOf<Message?>(null) }
     var envoi by remember { mutableStateOf(false) }
     var iaEnCours by remember { mutableStateOf(false) }
@@ -163,6 +170,28 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var ecouteVocal by remember(c.cle) { mutableStateOf(false) }
     var tempsVocal by remember(c.cle) { mutableStateOf(0L) }
     androidx.compose.runtime.DisposableEffect(c.cle) { onDispose { enregistreur.annuler() } }
+    // Le presse-papiers contient-il une image ? (on lit seulement sa description ; l'image n'est lue que sur appui)
+    val pressePapiers = remember { ctxVocal.getSystemService(ClipboardManager::class.java) }
+    fun verifierPressePapiers() {
+        imageDispo = runCatching { pressePapiers.primaryClipDescription?.hasMimeType("image/*") == true }.getOrDefault(false)
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val l = ClipboardManager.OnPrimaryClipChangedListener { verifierPressePapiers() }
+        pressePapiers.addPrimaryClipChangedListener(l)
+        onDispose { pressePapiers.removePrimaryClipChangedListener(l) }
+    }
+    val fenetreActive = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(fenetreActive) { if (fenetreActive) verifierPressePapiers() }
+    fun collerImage() {
+        runCatching {
+            val clip = pressePapiers.primaryClip ?: error("presse-papiers vide")
+            val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri } ?: error("aucune image")
+            val mime = ctxVocal.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/png"
+            val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("image illisible")
+            if (octets.size > 20_000_000) error("image trop lourde")
+            imageCollee = octets to mime
+        }.onFailure { portee.launch { snack.showSnackbar("Impossible de coller l'image : ${it.message}") } }
+    }
     LaunchedEffect(vocal) { while (vocal == 1) { tempsVocal = enregistreur.ecoule(); kotlinx.coroutines.delay(200) } }
     val demandeMicro = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
@@ -379,10 +408,46 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             modifier = Modifier.fillMaxWidth().border(1.dp, degradeIA, RoundedCornerShape(10.dp))
                                 .clickable { brouillon = r }.padding(8.dp))
                     }
-                    if (brouillonAvant != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("✨ Texte amélioré par l'IA", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { brouillon = brouillonAvant!!; brouillonAvant = null }) { Text("Revenir à mon texte", fontSize = 12.sp) }
+                    if (versionsIA.isNotEmpty()) Row(
+                        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                            .border(1.dp, degradeIA, RoundedCornerShape(12.dp)).padding(start = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("✨ Modifié par l'IA", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { brouillon = versionsIA.last(); versionsIA = versionsIA.dropLast(1) }) {
+                            Text(if (versionsIA.size > 1) "↶ Annuler (${versionsIA.size})" else "↶ Annuler", fontSize = 13.sp)
+                        }
+                        if (versionsIA.size > 1) TextButton(onClick = { brouillon = versionsIA.first(); versionsIA = emptyList() }) { Text("Mon texte", fontSize = 13.sp) }
                     }
+                    // Image collée : aperçu, puis envoi sur appui
+                    imageCollee?.let { (octets, mime) ->
+                        Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(14.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            coil3.compose.AsyncImage(model = octets, contentDescription = "Image collée",
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(72.dp).background(Color.White, RoundedCornerShape(10.dp))
+                                    .then(Modifier.padding(0.dp)))
+                            Column(Modifier.weight(1f)) {
+                                Text("Image à envoyer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("${octets.size / 1024} Ko", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { imageCollee = null }) { Icon(Icons.Outlined.Close, "Retirer l'image") }
+                            Button(onClick = {
+                                envoi = true
+                                portee.launch {
+                                    val err = Moteur.envoyerImage(octets, mime, c)
+                                    envoi = false
+                                    if (err == null) { imageCollee = null; afficher("Image envoyée") } else afficher("Échec : $err")
+                                }
+                            }, enabled = !envoi, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
+                                if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                                else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer l'image")
+                            }
+                        }
+                    }
+                    if (imageCollee == null && imageDispo && Moteur.imagePossible(c)) Text("📋 Coller l'image copiée",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
+                        modifier = Modifier.background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+                            .clickable { collerImage() }.padding(horizontal = 12.dp, vertical = 8.dp))
                     if (vocal != 0) Row(
                         Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -420,7 +485,14 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                         OutlinedTextField(
                             value = brouillon, onValueChange = { brouillon = it }, enabled = !iaEnCours,
                             placeholder = { Text(if (c.source == Source.SMS) "Écrire un SMS…" else "Écrire une réponse…") },
-                            maxLines = 6, shape = RoundedCornerShape(20.dp), modifier = Modifier.weight(1f),
+                            minLines = if (saisieAgrandie) 8 else 2, maxLines = if (saisieAgrandie) 16 else 8,
+                            trailingIcon = {
+                                IconButton(onClick = { saisieAgrandie = !saisieAgrandie }) {
+                                    Icon(if (saisieAgrandie) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
+                                        if (saisieAgrandie) "Réduire la zone de saisie" else "Agrandir la zone de saisie", modifier = Modifier.size(20.dp))
+                                }
+                            },
+                            shape = RoundedCornerShape(20.dp), modifier = Modifier.weight(1f),
                         )
                         if (Moteur.cfg.ollamaConfigure) Box {
                             OutlinedButton(onClick = { menuIA = true }, enabled = brouillon.isNotBlank() && !iaEnCours,
@@ -436,7 +508,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                         portee.launch {
                                             val r = Moteur.ameliorer(avant, f, c)
                                             iaEnCours = false
-                                            if (r != null) { brouillonAvant = brouillonAvant ?: avant; brouillon = r } else afficher("L'IA n'a pas répondu")
+                                            if (r != null) { versionsIA = versionsIA + avant; brouillon = r } else afficher("L'IA n'a pas répondu")
                                         }
                                     })
                                 }
@@ -458,7 +530,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                     val err = Moteur.envoyer(brouillon, c, reponseA)
                                     envoi = false
                                     if (err == null) {
-                                        brouillon = ""; brouillonAvant = null; reponseA = null
+                                        brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false
                                         afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
                                     } else afficher("Échec : $err")
                                 }

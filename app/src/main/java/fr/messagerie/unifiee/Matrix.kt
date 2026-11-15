@@ -71,10 +71,7 @@ class Matrix(private val cfg: Config) {
 
     /** Envoie un message vocal — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. Renvoie (événement, mxc). */
     fun envoyerVocal(salon: String, octets: ByteArray, typeMime: String, nom: String, dureeMs: Long): Pair<String, String> {
-        connecter()
-        val u = Http.envoyerOctets("$base/_matrix/media/v3/upload?filename=${Http.enc(nom)}", jeton, octets, typeMime)
-        if (u.code != 200) throw ErreurHttp(u.code, "téléversement du vocal")
-        val mxc = JSONObject(u.texte).optString("content_uri").ifEmpty { throw Exception("téléversement sans adresse") }
+        val mxc = televerser(octets, typeMime, nom)
         val contenu = JSONObject().put("msgtype", "m.audio").put("body", nom).put("url", mxc)
             .put("info", JSONObject().put("mimetype", typeMime).put("size", octets.size).put("duration", dureeMs))
             .put("org.matrix.msc1767.audio", JSONObject().put("duration", dureeMs))
@@ -105,6 +102,14 @@ class Matrix(private val cfg: Config) {
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/redact/${Http.enc(idReaction)}/${Http.enc(txn)}",
             "PUT", jeton, "{}", 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "réaction")
+    }
+
+    /** Téléverse un fichier sur le serveur Matrix (avant un envoi demandé par l'utilisateur). Renvoie l'adresse mxc. */
+    fun televerser(octets: ByteArray, typeMime: String, nom: String): String {
+        connecter()
+        val u = Http.envoyerOctets("$base/_matrix/media/v3/upload?filename=${Http.enc(nom)}", jeton, octets, typeMime)
+        if (u.code != 200) throw ErreurHttp(u.code, "téléversement")
+        return JSONObject(u.texte).optString("content_uri").ifEmpty { throw Exception("téléversement sans adresse") }
     }
 
     /** Transfère un message (texte ou pièce jointe déjà sur le serveur) — UNIQUEMENT après confirmation de l'utilisateur. */

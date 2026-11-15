@@ -434,6 +434,28 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    /** Peut-on envoyer une image dans cette conversation ? (passerelles Matrix seulement) */
+    fun imagePossible(c: Conversation) = vocalPossible(c)
+
+    /** Envoie une image collée — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. */
+    suspend fun envoyerImage(octets: ByteArray, typeMime: String, c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!imagePossible(c)) return@withContext "envoi d'images impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val ext = when (typeMime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
+            val nom = "image-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.FRANCE).format(java.util.Date()) + "." + ext
+            val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size, bornes)
+            val m = Matrix(cfg)
+            val mxc = m.televerser(octets, typeMime, nom)
+            val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
+            if (bornes.outWidth > 0) info.put("w", bornes.outWidth).put("h", bornes.outHeight)
+            val eid = m.envoyerContenu(salon, org.json.JSONObject().put("msgtype", "m.image").put("body", nom).put("url", mxc).put("info", info))
+            afficherEnvoye(c, eid, "[photo]", type = "image", media = "$mxc#$typeMime#$nom")
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
     /** Le message envoyé s'affiche tout de suite (même clé que l'écho du serveur : pas de doublon). */
     private fun afficherEnvoye(c: Conversation, eid: String, texte: String, type: String = "texte", media: String? = null, duree: Double? = null) {
         if (eid.isNotEmpty()) runCatching {
@@ -573,15 +595,50 @@ object Moteur {
 
     // MARK: Groupes — lecture des membres ; quitter seulement après confirmation
 
-    /** Membres d'un groupe (noms), hors robots des passerelles. null si la messagerie ne le permet pas. */
-    suspend fun membresGroupe(c: Conversation): List<String>? = withContext(Dispatchers.IO) {
+    /** Membre d'un groupe : nom (si connu) et numéro (si la messagerie en donne un). */
+    data class Membre(val nom: String?, val numero: String?, val moi: Boolean = false)
+
+    /**
+     * Membres d'un groupe, hors robots des passerelles. Le nom vient, dans l'ordre : des contacts
+     * du téléphone (si autorisé, lecture locale), d'une discussion à deux déjà connue, puis de la passerelle.
+     * null si la messagerie ne le permet pas.
+     */
+    suspend fun membresGroupe(c: Conversation): List<Membre>? = withContext(Dispatchers.IO) {
         if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext null
         val salon = salonDe(c) ?: return@withContext null
-        runCatching {
-            Matrix(cfg).membres(salon).filterKeys { !it.contains("bot:") }
-                .map { (id, nom) -> if (id == cfg.matrixUtilisateur || id == cfg.moiFantome) "Vous" else nom.replace(" (WA)", "") }
-                .distinct().sortedWith(compareBy<String> { it != "Vous" }.thenBy { it.lowercase() })
-        }.getOrNull()
+        val brut = runCatching { Matrix(cfg).membres(salon) }.getOrNull() ?: return@withContext null
+        val convs = _etat.value.conversations.filter { it.source == c.source && !it.estGroupe }
+        val parNumero = HashMap<String, String>()
+        convs.forEach { cv ->
+            val n = cv.jid.substringBefore('@').substringBefore(':').filter { it.isDigit() }
+            if (n.length >= 6 && !estUnNumero(cv.nom)) parNumero[n] = cv.nom.replace(" (WA)", "")
+        }
+        brut.filterKeys { !it.contains("bot:") }.map { (id, affiche) ->
+            val moi = id == cfg.matrixUtilisateur || id == cfg.moiFantome
+            val propre = affiche.replace(" (WA)", "").trim()
+            val numero = Regex("""_\+?(\d{6,})[:_]""").find(id)?.groupValues?.get(1)
+                ?: propre.takeIf { estUnNumero(it) }?.filter { it.isDigit() }
+            val nom = when {
+                moi -> "Vous"
+                else -> numero?.let { nomContactTelephone(it) } ?: numero?.let { parNumero[it] } ?: propre.takeIf { !estUnNumero(it) && !it.startsWith("@") }
+            }
+            Membre(nom, numero, moi)
+        }.distinctBy { it.numero ?: it.nom }
+            .sortedWith(compareBy<Membre> { !it.moi }.thenBy { it.nom == null }.thenBy { (it.nom ?: it.numero ?: "").lowercase() })
+    }
+
+    private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
+
+    /** Nom d'un numéro dans les contacts du téléphone (lecture locale, rien n'est envoyé). */
+    private fun nomContactTelephone(numero: String): String? {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return null
+        return runCatching {
+            val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode("+$numero"))
+            app.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) cur.getString(0) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
     fun peutQuitter(c: Conversation) = c.estGroupe && cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
