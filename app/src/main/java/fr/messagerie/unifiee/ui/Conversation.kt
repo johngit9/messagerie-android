@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -457,7 +458,7 @@ private fun Bulle(
                 "image" -> PhotoMessage(m, couleur)
                 "video" -> VideoMessage(m, couleur, afficherMessage)
                 "fichier" -> FichierMessage(m, couleur, afficherMessage)
-                else -> Text(m.texte, color = couleur)
+                else -> Text(avecLiens(m.texte, couleur), color = couleur)
             }
             Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))
         }
@@ -646,3 +647,20 @@ private fun lancerAppel(ctx: Context, lien: String) {
         else -> runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lien)).addFlags(nt)) }
     }
 }
+
+private val LIEN = Regex("""(?i)\b((?:https?://|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]}])""")
+
+/** Texte avec liens web cliquables (soulignés), ouverts dans le navigateur. */
+private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.AnnotatedString =
+    androidx.compose.ui.text.buildAnnotatedString {
+        var i = 0
+        for (r in LIEN.findAll(t)) {
+            append(t.substring(i, r.range.first))
+            val url = r.value.let { if (it.startsWith("www.", true)) "https://$it" else it }
+            withLink(androidx.compose.ui.text.LinkAnnotation.Url(url,
+                androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = couleur,
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))) { append(r.value) }
+            i = r.range.last + 1
+        }
+        append(t.substring(i))
+    }
