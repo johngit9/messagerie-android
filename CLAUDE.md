@@ -32,9 +32,10 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 | `MiseAJour.kt` | Vérifie la dernière Release GitHub publique, télécharge et installe l'APK |
 | `Lecteur.kt` | Lecture des vocaux (MediaPlayer) |
 | `ui/Liste.kt`, `ui/Conversation.kt`, `ui/Reglages.kt`, `ui/Commun.kt` | Écrans Compose |
-| `MainActivity.kt` | Thème (palette fixe, échelle d'affichage `Affichage`) et navigation simple |
+| `ui/VueModeles.kt` | ViewModel par écran : `ListeVM` (filtres, recherche hors fil d'affichage), `ConversationVM` (historique, réactions) |
+| `MainActivity.kt` | Thème (palette des maquettes ou Material You en option, échelle `Affichage`) et Navigation Compose (`liste`, `conversation/{cle}`, `reglages`, `accueil`) avec transitions |
 
-Pas de Hilt ni de ViewModel pour l'instant : `Moteur` est un singleton initialisé dans `App`.
+MVVM sans Hilt : `Moteur` (singleton initialisé dans `App`) reste la source de données ; les ViewModel s'y abonnent.
 
 ## Design
 

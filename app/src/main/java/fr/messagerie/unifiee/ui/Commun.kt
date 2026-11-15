@@ -48,13 +48,6 @@ val orangeAttente = Color(0xFFE8833A)
 
 fun Source.teinte() = Color(couleur)
 
-sealed class Filtre {
-    data object ATraiter : Filtre()
-    data object NonLus : Filtre()
-    data object Tout : Filtre()
-    data class ParSource(val source: Source) : Filtre()
-}
-
 private fun memeJour(a: Calendar, b: Calendar) = a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
 
 /** « 14:32 », « Hier 14:32 », « Lundi 14:32 », « 3 nov. 14:32 », « 3 nov. 2025 14:32 ». */
@@ -86,14 +79,13 @@ fun jourComplet(ms: Long): String {
 fun heure(ms: Long): String = SimpleDateFormat("HH:mm", Locale.FRANCE).format(Date(ms))
 
 @Composable
-fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp) {
+fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bordure: Color = MaterialTheme.colorScheme.surface) {
     val initiales = nom.split(' ', '-').filter { it.firstOrNull()?.isLetter() == true }.take(2)
         .joinToString("") { it.first().uppercase() }.ifEmpty { "#" }
     val teinte = (nom.fold(0) { a, c -> (a * 31 + c.code) and 0xFFFF } % 360).toFloat()
     Box(Modifier.size(taille)) {
         Box(
-            Modifier.size(taille).background(
-                Brush.verticalGradient(listOf(Color.hsv(teinte, 0.45f, 0.85f), Color.hsv(teinte, 0.65f, 0.62f))), CircleShape),
+            Modifier.size(taille).background(Color.hsv(teinte, 0.5f, 0.72f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (groupe) Icon(Icons.Outlined.Group, "Groupe", tint = Color.White, modifier = Modifier.size(taille * 0.5f))
@@ -101,7 +93,7 @@ fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp) {
         }
         Box(
             Modifier.align(Alignment.BottomEnd).size(taille * 0.38f)
-                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                .border(2.dp, bordure, CircleShape)
                 .background(source.teinte(), CircleShape),
         )
     }

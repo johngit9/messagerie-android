@@ -2,23 +2,31 @@ package fr.messagerie.unifiee.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
@@ -28,13 +36,14 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Badge
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,32 +57,27 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.messagerie.unifiee.Conversation
@@ -81,204 +85,242 @@ import fr.messagerie.unifiee.Etat
 import fr.messagerie.unifiee.EtatSource
 import fr.messagerie.unifiee.Moteur
 import fr.messagerie.unifiee.Source
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EcranListe(
-    e: Etat,
-    filtre: Filtre,
-    onFiltre: (Filtre) -> Unit,
-    ouvrir: (String) -> Unit,
-    ouvrirReglages: () -> Unit,
-    selection: String?,
-) {
-    var genre by rememberSaveable { mutableStateOf(0) }       // 0 tout, 1 discussions, 2 groupes
-    var recherche by rememberSaveable { mutableStateOf("") }
-    var trouvees by remember { mutableStateOf(emptySet<String>()) }
+fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: () -> Unit) {
+    val vue by vm.vue.collectAsState()
+    val source by vm.source.collectAsState()
+    val recherche by vm.recherche.collectAsState()
+    val visibles by vm.visibles.collectAsState()
     var actionsPour by remember { mutableStateOf<Conversation?>(null) }
     val tiroir = rememberDrawerState(DrawerValue.Closed)
     val portee = rememberCoroutineScope()
-
-    LaunchedEffect(recherche) {
-        val q = recherche.trim()
-        delay(200)
-        trouvees = if (q.isEmpty()) emptySet() else withContext(Dispatchers.IO) { Moteur.archive.rechercher(q) }
-    }
-
-    val duFiltre = when (filtre) {
-        Filtre.ATraiter -> e.conversations.filter { e.aTraiter(it) }
-        Filtre.NonLus -> e.conversations.filter { e.estNonLue(it) || it.cle == selection }
-        Filtre.Tout -> e.conversations
-        is Filtre.ParSource -> e.conversations.filter { it.source == filtre.source }
-    }
-    var visibles = when (genre) { 1 -> duFiltre.filter { !it.estGroupe }; 2 -> duFiltre.filter { it.estGroupe }; else -> duFiltre }
-    val q = recherche.trim()
-    if (q.isNotEmpty()) visibles = visibles.filter { c ->
-        c.nom.contains(q, true) || c.cle in trouvees || e.synthese(c)?.resume?.contains(q, true) == true
-    }
-    val titre = when (filtre) { Filtre.ATraiter -> "À traiter"; Filtre.NonLus -> "Non lus"; Filtre.Tout -> "Toutes les conversations"; is Filtre.ParSource -> filtre.source.libelle }
-
-    fun choisir(f: Filtre) { onFiltre(f); portee.launch { tiroir.close() } }
+    val sources = Source.entries.filter { s -> e.statistiques[s] != null || e.sources[s] is EtatSource.Ok || e.sources[s] is EtatSource.Erreur }
 
     ModalNavigationDrawer(
         drawerState = tiroir,
         drawerContent = {
-            ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-                    Row(Modifier.padding(start = 16.dp, top = 24.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(36.dp).background(degradeIA, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Messagerie", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                e.derniereActualisation?.let { "Actualisé à ${heure(it)}" } ?: "Toutes vos messageries",
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    ElementTiroir("À traiter", Icons.Outlined.AutoAwesome, filtre == Filtre.ATraiter, e.nombreATraiter) { choisir(Filtre.ATraiter) }
-                    ElementTiroir("Non lus", Icons.Outlined.MarkEmailUnread, filtre == Filtre.NonLus, e.nombreMessagesNonLus(null)) { choisir(Filtre.NonLus) }
-                    ElementTiroir("Toutes", Icons.Outlined.Inbox, filtre == Filtre.Tout, 0) { choisir(Filtre.Tout) }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
-                    Text("Messageries", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
-                    Source.entries.filter { s -> e.sources[s] !is EtatSource.NonConfigure || e.statistiques[s] != null }.forEach { s ->
-                        val st = e.sources[s]
-                        NavigationDrawerItem(
-                            label = {
-                                Column {
-                                    Text(s.libelle)
-                                    if (st is EtatSource.Erreur) Text(st.message, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                }
-                            },
-                            icon = { PastilleSource(s) },
-                            badge = {
-                                when {
-                                    st is EtatSource.Erreur -> Icon(Icons.Outlined.ErrorOutline, "Erreur", tint = MaterialTheme.colorScheme.error)
-                                    st is EtatSource.Inactif -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    else -> e.nombreMessagesNonLus(s).takeIf { it > 0 }?.let { Text(compte(it)) }
-                                }
-                            },
-                            selected = filtre == Filtre.ParSource(s),
-                            onClick = { choisir(Filtre.ParSource(s)) },
-                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                        )
-                    }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
-                    ElementTiroir("Tout marquer comme lu", Icons.Outlined.DoneAll, false, 0) { Moteur.toutMarquerLu(); portee.launch { tiroir.close() } }
-                    ElementTiroir("Réglages", Icons.Outlined.Settings, false, 0) { portee.launch { tiroir.close() }; ouvrirReglages() }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
+            Tiroir(e, sources, fermer = { portee.launch { tiroir.close() } }, ouvrirReglages = ouvrirReglages,
+                choisirSource = { vm.source.value = it; vm.vue.value = Vue.Toutes })
         },
     ) {
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    navigationIcon = {
-                        IconButton(onClick = { portee.launch { tiroir.open() } }) { Icon(Icons.Outlined.Menu, "Menu") }
-                    },
-                    title = {
-                        Column {
-                            Text(titre, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                when {
-                                    e.importEnCours != null -> e.importEnCours
-                                    e.enCours -> "Actualisation…"
-                                    filtre == Filtre.ATraiter -> if (e.jours == 1) "Dernières 24 h" else "${e.jours} derniers jours"
-                                    else -> "${visibles.size} conversation" + if (visibles.size > 1) "s" else ""
-                                },
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    actions = {
-                        if (e.enCours) CircularProgressIndicator(Modifier.padding(end = 12.dp).size(22.dp), strokeWidth = 2.dp)
-                        else IconButton(onClick = { Moteur.actualiserMaintenant() }) { Icon(Icons.Outlined.Refresh, "Actualiser") }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                )
-            },
+            containerColor = MaterialTheme.colorScheme.background,
+            bottomBar = { if (sources.size > 1) BarreSources(e, sources, source) { vm.source.value = it } },
         ) { pad ->
-            Column(Modifier.padding(pad).fillMaxSize()) {
-                // Recherche
-                TextField(
-                    value = recherche, onValueChange = { recherche = it }, singleLine = true,
-                    placeholder = { Text("Rechercher dans les messages") },
-                    leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                    trailingIcon = {
-                        if (recherche.isNotEmpty()) IconButton(onClick = { recherche = "" }) { Icon(Icons.Outlined.Close, "Effacer") }
-                    },
-                    shape = RoundedCornerShape(28.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-                // Discussions / Groupes
-                val nbGroupes = duFiltre.count { it.estGroupe }
-                val genres = listOf("Tout", "Discussions", "Groupes")
-                val nombres = listOf(duFiltre.size, duFiltre.size - nbGroupes, nbGroupes)
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    genres.forEachIndexed { i, l ->
-                        SegmentedButton(
-                            selected = genre == i, onClick = { genre = i },
-                            shape = SegmentedButtonDefaults.itemShape(index = i, count = genres.size),
-                            label = { Text(if (i == 0) l else "$l · ${nombres[i]}", fontSize = 13.sp, maxLines = 1) },
-                        )
-                    }
-                }
+            Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
+                Entete(e, vue, source, visibles.size, recherche,
+                    ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
+                    chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it })
 
                 if (visibles.isEmpty()) {
+                    val q = recherche.trim()
                     EtatVide(
                         when {
                             e.conversations.isEmpty() && e.enCours -> Triple(Icons.Outlined.Refresh, "Lecture des messages…", "")
                             q.isNotEmpty() -> Triple(Icons.Outlined.Search, "Aucun résultat", "Rien ne correspond à « $q ».")
-                            filtre == Filtre.ATraiter -> Triple(Icons.Outlined.DoneAll, "Tout est à jour", "Personne n'attend de réponse de votre part.")
-                            filtre == Filtre.NonLus -> Triple(Icons.Outlined.DoneAll, "Tout est lu", "")
+                            vue == Vue.ATraiter -> Triple(Icons.Outlined.DoneAll, "Tout est à jour", "Personne n'attend de réponse de votre part.")
+                            vue == Vue.NonLus -> Triple(Icons.Outlined.DoneAll, "Tout est lu", "")
                             else -> Triple(Icons.Outlined.Forum, "Aucune conversation", "")
                         },
                     )
-                } else LazyColumn(Modifier.fillMaxSize()) {
+                } else LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     items(visibles, key = { it.cle }) { c ->
-                        LigneConversation(e, c, ouvrir = { ouvrir(c.cle) }, actions = { actionsPour = c })
+                        CarteConversation(e, c, Modifier.animateItem(),
+                            ouvrir = { vm.derniereOuverte = c.cle; ouvrir(c.cle) }, actions = { actionsPour = c })
                     }
                 }
             }
         }
     }
 
-    actionsPour?.let { c ->
-        FeuilleActions(e, c) { actionsPour = null }
+    actionsPour?.let { c -> FeuilleActions(e, c) { actionsPour = null } }
+}
+
+@Composable
+private fun Entete(
+    e: Etat, vue: Vue, source: Source?, nombre: Int, recherche: String,
+    ouvrirTiroir: () -> Unit, ouvrirReglages: () -> Unit, chercher: (String) -> Unit, choisirVue: (Vue) -> Unit,
+) {
+    Column(Modifier.statusBarsPadding().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = ouvrirTiroir, modifier = Modifier.padding(start = 0.dp)) { Icon(Icons.Outlined.Menu, "Menu") }
+            Spacer(Modifier.weight(1f))
+            if (e.enCours) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else IconButton(onClick = { Moteur.actualiserMaintenant() }) {
+                Icon(Icons.Outlined.Refresh, "Actualiser", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = ouvrirReglages) { Icon(Icons.Outlined.Settings, "Réglages", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text((if (source != null) source.libelle + " · " else "") + vue.libelle,
+                fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when {
+                    e.importEnCours != null -> e.importEnCours
+                    e.enCours -> "Actualisation…"
+                    vue == Vue.ATraiter -> if (e.jours == 1) "Dernières 24 h" else "${e.jours} derniers jours"
+                    else -> "$nombre conversation" + if (nombre > 1) "s" else ""
+                },
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        // Recherche
+        Row(
+            Modifier.fillMaxWidth().height(48.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(14.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                .padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f)) {
+                if (recherche.isEmpty()) Text("Rechercher dans tous les messages", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                BasicTextField(
+                    value = recherche, onValueChange = chercher, singleLine = true,
+                    textStyle = TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (recherche.isNotEmpty()) IconButton(onClick = { chercher("") }) { Icon(Icons.Outlined.Close, "Effacer") }
+        }
+        // Pastilles de vue
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Vue.entries.forEach { v ->
+                val n = when (v) {
+                    Vue.ATraiter -> e.nombreATraiter
+                    Vue.NonLus -> e.nombreMessagesNonLus(source)
+                    else -> 0
+                }
+                PastilleVue(v.libelle, n, v == vue) { choisirVue(v) }
+            }
+        }
     }
 }
 
 @Composable
-private fun ElementTiroir(libelle: String, icone: ImageVector, choisi: Boolean, n: Int, clic: () -> Unit) {
+private fun PastilleVue(libelle: String, n: Int, choisie: Boolean, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.height(38.dp)
+            .background(if (choisie) cs.onSurface else cs.surfaceContainerLow, RoundedCornerShape(19.dp))
+            .then(if (choisie) Modifier else Modifier.border(1.dp, cs.outline.copy(alpha = 0.35f), RoundedCornerShape(19.dp)))
+            .clickable(onClick = clic).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(libelle, fontSize = 14.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (choisie) cs.surface else cs.onSurface)
+        if (n > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text(compte(n), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                color = if (choisie) cs.onSurface else cs.onPrimary,
+                modifier = Modifier.background(if (choisie) cs.surface else cs.primary, RoundedCornerShape(10.dp)).padding(horizontal = 7.dp, vertical = 1.dp))
+        }
+    }
+}
+
+/** Barre du bas : une entrée par messagerie, plus « Tout ». */
+@Composable
+private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, choisir: (Source?) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp) {
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceAround) {
+                OngletSource("Tout", MaterialTheme.colorScheme.onSurface, choisie == null, e.nombreMessagesNonLus(null), erreur = false) { choisir(null) }
+                sources.forEach { s ->
+                    OngletSource(s.id, s.teinte(), choisie == s, e.nombreMessagesNonLus(s), erreur = e.sources[s] is EtatSource.Erreur) { choisir(s) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OngletSource(nom: String, point: Color, choisi: Boolean, n: Int, erreur: Boolean, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.defaultMinSize(minWidth = 56.dp, minHeight = 52.dp)
+            .background(if (choisi) cs.primaryContainer else Color.Transparent, RoundedCornerShape(14.dp))
+            .clickable(onClick = clic).padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box {
+            Box(Modifier.size(12.dp).background(point, CircleShape))
+            if (erreur) Box(Modifier.align(Alignment.TopEnd).size(6.dp).background(cs.error, CircleShape))
+        }
+        Text(nom + if (n > 0) " · ${compte(n)}" else "", fontSize = 11.sp, maxLines = 1,
+            fontWeight = if (choisi) FontWeight.Bold else FontWeight.Medium,
+            color = if (choisi) cs.onPrimaryContainer else cs.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReglages: () -> Unit, choisirSource: (Source) -> Unit) {
+    ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+            Row(Modifier.padding(start = 16.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(38.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Messagerie", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(e.derniereActualisation?.let { "Actualisé à ${heure(it)}" } ?: "Toutes vos messageries",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text("Messageries", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
+            sources.forEach { s ->
+                val st = e.sources[s]
+                NavigationDrawerItem(
+                    label = {
+                        Column {
+                            Text(s.libelle)
+                            if (st is EtatSource.Erreur) Text(st.message, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    },
+                    icon = { PastilleSource(s) },
+                    badge = {
+                        when {
+                            st is EtatSource.Erreur -> Icon(Icons.Outlined.ErrorOutline, "Erreur", tint = MaterialTheme.colorScheme.error)
+                            else -> e.statistiques[s]?.let { Text("${it.first}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    },
+                    selected = false, onClick = { choisirSource(s); fermer() },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                )
+            }
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+            ElementTiroir("Tout marquer comme lu", Icons.Outlined.DoneAll) { Moteur.toutMarquerLu(); fermer() }
+            ElementTiroir("Réglages", Icons.Outlined.Settings) { fermer(); ouvrirReglages() }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ElementTiroir(libelle: String, icone: ImageVector, clic: () -> Unit) {
     NavigationDrawerItem(
-        label = { Text(libelle) },
-        icon = { Icon(icone, null) },
-        badge = { if (n > 0) Text(compte(n), fontWeight = FontWeight.SemiBold) },
-        selected = choisi, onClick = clic,
+        label = { Text(libelle) }, icon = { Icon(icone, null) }, selected = false, onClick = clic,
         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
     )
 }
 
 @Composable
-fun PastilleSource(s: Source, taille: androidx.compose.ui.unit.Dp = 24.dp) {
+fun PastilleSource(s: Source, taille: Dp = 24.dp) {
     Box(Modifier.size(taille).background(s.teinte(), RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
         Text(s.libelle.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (taille.value * 0.5f).sp)
     }
@@ -289,9 +331,9 @@ private fun compte(n: Int) = if (n > 999) "999+" else "$n"
 @Composable
 private fun EtatVide(contenu: Triple<ImageVector, String, String>) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(72.dp)) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(72.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(contenu.first, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(34.dp))
+                Icon(contenu.first, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(34.dp))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -305,81 +347,111 @@ private fun EtatVide(contenu: Triple<ImageVector, String, String>) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LigneConversation(e: Etat, c: Conversation, ouvrir: () -> Unit, actions: () -> Unit) {
+private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvrir: () -> Unit, actions: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
     val aTraiter = e.aTraiter(c)
     val nonLue = e.estNonLue(c)
     val nb = e.nombreNonLus(c)
-    val fort = aTraiter || nonLue
     Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = ouvrir, onLongClick = actions)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier.fillMaxWidth()
+            .background(cs.surfaceContainerLow, RoundedCornerShape(16.dp))
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = ouvrir, onLongClick = actions)
+            .padding(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Avatar(c.nom, c.source, c.estGroupe, taille = 52.dp)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
+        Avatar(c.nom, c.source, c.estGroupe, taille = 48.dp, bordure = cs.surfaceContainerLow)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(c.nom, style = MaterialTheme.typography.titleMedium,
-                    fontWeight = if (fort) FontWeight.Bold else FontWeight.Medium,
+                Text(c.nom, fontSize = 15.sp, fontWeight = if (nonLue || aTraiter) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Spacer(Modifier.width(6.dp))
+                Text(e.libelleSource(c), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(), maxLines = 1)
                 if (e.etat(c).sourdine) {
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Outlined.NotificationsOff, "Sourdine", Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (c.source == Source.SMS) {
-                    Spacer(Modifier.width(6.dp))
-                    val rcs = c.cle in e.rcs
-                    Etiquette(if (rcs) "RCS" else "SMS", Source.SMS.teinte(), plein = rcs)
+                    Icon(Icons.Outlined.NotificationsOff, "Sourdine", Modifier.size(14.dp), tint = cs.onSurfaceVariant)
                 }
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
-                Text(dateCourte(c.derniere), style = MaterialTheme.typography.labelMedium,
-                    color = if (fort) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (nonLue) FontWeight.SemiBold else FontWeight.Normal)
+                Text(dateCourte(c.derniere), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    color = if (nb > 0) cs.primary else cs.onSurfaceVariant)
             }
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.Top) {
-                val s = e.synthese(c)
-                val enCours = c.cle in e.resumesEnCours
-                val apercu = when {
-                    s != null -> s.resume
-                    enCours -> "Résumé en cours…"
-                    else -> c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + m.texteUtile } ?: ""
-                }
-                if (s != null || enCours) {
-                    Icon(Icons.Outlined.AutoAwesome, "Résumé IA", Modifier.padding(top = 2.dp, end = 4.dp).size(14.dp), tint = Color(0xFFD94DBF))
-                }
-                Text(apercu, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
-                    color = if (nonLue) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f))
-                if (nb > 0) { Spacer(Modifier.width(8.dp)); Badge(containerColor = MaterialTheme.colorScheme.primary) { Text(compte(nb)) } }
+            val s = e.synthese(c)
+            val enCours = c.cle in e.resumesEnCours
+            val apercu = when {
+                s != null -> s.resume
+                enCours -> "Résumé en cours…"
+                else -> c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + m.texteUtile } ?: ""
             }
-            if (aTraiter) {
-                Spacer(Modifier.height(6.dp))
-                Text("Réponse attendue", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = orangeAttente,
-                    modifier = Modifier.background(orangeAttente.copy(alpha = 0.14f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp))
+            Row {
+                if (s != null || enCours) Icon(Icons.Outlined.AutoAwesome, "Résumé IA", Modifier.padding(top = 2.dp, end = 4.dp).size(14.dp), tint = Color(0xFF6A4BD6))
+                Text(apercu, fontSize = 14.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = if (nonLue) cs.onSurface else cs.onSurfaceVariant)
+            }
+            if (aTraiter || nb > 0) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (aTraiter) Text("Réponse attendue", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onTertiaryContainer,
+                    modifier = Modifier.background(cs.tertiaryContainer, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+                Spacer(Modifier.weight(1f))
+                if (nb > 0) Box(Modifier.defaultMinSize(minWidth = 22.dp).height(22.dp).background(cs.primary, RoundedCornerShape(11.dp)).padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center) {
+                    Text(compte(nb), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = cs.onPrimary)
+                }
             }
         }
     }
 }
 
-/** Feuille d'actions (appui long sur une conversation). Toutes LOCALES sauf « Refaire le résumé » (Ollama). */
+/** Panneau d'actions (appui long ou ⋮). Toutes LOCALES sauf « Résumé IA » (Ollama sur votre serveur). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Row(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(c.nom, c.source, c.estGroupe, taille = 44.dp)
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text(c.nom, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "", style = MaterialTheme.typography.bodySmall, color = c.source.teinte())
+    val cs = MaterialTheme.colorScheme
+    ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = cs.surfaceContainerLow) {
+        Column(Modifier.padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 12.dp)) {
+            Row(Modifier.padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Avatar(c.nom, c.source, c.estGroupe, taille = 40.dp, bordure = cs.surfaceContainerLow)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(c.nom, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "", fontSize = 12.sp, color = c.source.teinte())
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            // Trois actions rapides
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (Moteur.cfg.ollamaConfigure) TuileAction("Résumé IA", Icons.Outlined.AutoAwesome, Color(0xFF6A4BD6), Modifier.weight(1f)) { Moteur.regenerer(c); fermer() }
+                if (e.estNonLue(c)) TuileAction("Lu", Icons.Outlined.MarkEmailRead, cs.primary, Modifier.weight(1f)) { Moteur.marquerLue(c); fermer() }
+                else TuileAction("Non lu", Icons.Outlined.MarkEmailUnread, cs.primary, Modifier.weight(1f)) { Moteur.marquerNonLue(c); fermer() }
+                TuileAction("Traitée", Icons.Outlined.TaskAlt, Color(0xFF1E7A47), Modifier.weight(1f)) { Moteur.marquerTraitee(c); fermer() }
+            }
+            Spacer(Modifier.height(8.dp))
+            val rapides = setOf("Marquer comme lu", "Marquer comme non lu", "Marquer comme traitée", "Refaire le résumé IA")
+            actionsConversation(e, c).filter { it.libelle !in rapides }.forEach { a ->
+                Row(Modifier.fillMaxWidth().height(52.dp).clickable { a.faire(); fermer() }.padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(a.icone, null, tint = cs.onSurface)
+                    Spacer(Modifier.width(14.dp))
+                    Text(a.libelle, fontSize = 15.sp)
+                }
             }
         }
-        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        actionsConversation(e, c).forEach { a ->
-            ElementAction(a.icone, a.libelle) { a.faire(); fermer() }
-        }
-        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun TuileAction(libelle: String, icone: ImageVector, teinte: Color, modifier: Modifier, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier.height(76.dp)
+            .background(cs.background, RoundedCornerShape(16.dp))
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(16.dp))
+            .clickable(onClick = clic),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icone, null, tint = teinte)
+        Spacer(Modifier.height(6.dp))
+        Text(libelle, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }

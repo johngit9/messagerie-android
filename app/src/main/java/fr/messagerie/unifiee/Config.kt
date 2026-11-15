@@ -40,6 +40,7 @@ class Config(context: Context) {
     // Affichage : échelle de toute l'interface et de la taille du texte (en %)
     var zoom: Int get() = p.getInt("zoom", 100); set(v) = p.edit().putInt("zoom", v).apply()
     var tailleTexte: Int get() = p.getInt("tailleTexte", 100); set(v) = p.edit().putInt("tailleTexte", v).apply()
+    var couleursDynamiques: Boolean get() = p.getBoolean("dynamique", false); set(v) = p.edit().putBoolean("dynamique", v).apply()
     var verifierMaj: Boolean get() = p.getBoolean("verifierMaj", true); set(v) = p.edit().putBoolean("verifierMaj", v).apply()
 
     // Historique des fichiers importés (gardé dans les données privées de l'appli)

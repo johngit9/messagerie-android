@@ -228,7 +228,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 Rubrique(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée", ouvrir)
             }
             Groupe("Préférences") {
-                Rubrique(Page.Affichage, "Interface ${Affichage.zoom} % · texte ${Affichage.texte} %", ouvrir)
+                Rubrique(Page.Affichage, "Interface ${Affichage.zoom} % · texte ${Affichage.texte} %" + if (Affichage.dynamique) " · Material You" else "", ouvrir)
                 Rubrique(Page.Notifications, (if (cfg.notifications) "Notifications activées" else "Notifications coupées") +
                     (if (cfg.veilleArrierePlan) " · à l'écoute en arrière-plan" else ""), ouvrir)
                 Rubrique(Page.Confidentialite, if (cfg.envoyerReactions) "Réactions transmises · aucun accusé de lecture" else "Réactions gardées sur le téléphone", ouvrir)
@@ -374,6 +374,11 @@ private fun PageAffichage() {
     Text("Taille du texte", fontWeight = FontWeight.Medium)
     Choix(listOf(85 to "Petit", 100 to "Normal", 115 to "Grand", 130 to "Très grand"), Affichage.texte) {
         Affichage.texte = it; cfg.tailleTexte = it
+    }
+    if (android.os.Build.VERSION.SDK_INT >= 31) {
+        HorizontalDivider()
+        Interrupteur("Couleurs de mon fond d'écran (Material You)", Affichage.dynamique,
+            "Sinon, les couleurs de l'appli (bleu) sont utilisées.") { Affichage.dynamique = it; cfg.couleursDynamiques = it }
     }
     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {

@@ -27,7 +27,24 @@ import androidx.compose.ui.platform.LocalContext
 import fr.messagerie.unifiee.ui.EcranConversation
 import fr.messagerie.unifiee.ui.EcranListe
 import fr.messagerie.unifiee.ui.EcranReglages
-import fr.messagerie.unifiee.ui.Filtre
+import fr.messagerie.unifiee.ui.ConversationVM
+import fr.messagerie.unifiee.ui.ListeVM
+import android.net.Uri
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     private val cleDemandee = mutableStateOf<String?>(null)
@@ -77,10 +94,12 @@ fun Theme(contenu: @Composable () -> Unit) {
         surfaceVariant = Color(0xFFECEEF2), outlineVariant = Color(0xFFECEEF2),
         surfaceContainer = Color(0xFFEFF1F4), surfaceContainerHigh = Color(0xFFE9EBEF), surfaceContainerLow = Color.White,
     )
+    val schema = if (Affichage.dynamique && Build.VERSION.SDK_INT >= 31)
+        (if (sombre) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)) else couleurs
     val d = androidx.compose.ui.platform.LocalDensity.current
     val echelle = androidx.compose.ui.unit.Density(d.density * Affichage.zoom / 100f, d.fontScale * Affichage.texte / 100f)
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides echelle) {
-        MaterialTheme(colorScheme = couleurs, content = contenu)
+        MaterialTheme(colorScheme = schema, content = contenu)
     }
 }
 
@@ -88,35 +107,57 @@ fun Theme(contenu: @Composable () -> Unit) {
 object Affichage {
     var zoom by androidx.compose.runtime.mutableIntStateOf(100)
     var texte by androidx.compose.runtime.mutableIntStateOf(100)
-    fun charger(c: Config) { zoom = c.zoom; texte = c.tailleTexte }
+    var dynamique by mutableStateOf(false)
+    fun charger(c: Config) { zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques }
 }
 
 @Composable
 private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) {
     val etat by Moteur.etat.collectAsState()
-    var reglages by rememberSaveable { mutableStateOf(!Moteur.cfg.configure) }
-    var selection by rememberSaveable { mutableStateOf<String?>(null) }
-    var filtre by remember { mutableStateOf<Filtre>(Filtre.ATraiter) }
+    val nav = rememberNavController()
+    val depart = remember { if (Moteur.cfg.configure) "liste" else "accueil" }
 
+    // Ouverture depuis une notification
     val demande = cleDemandee.value
     androidx.compose.runtime.LaunchedEffect(demande) {
-        if (demande != null) { selection = demande; filtre = Filtre.Tout; reglages = false; cleDemandee.value = null }
+        if (demande != null && Moteur.cfg.configure) {
+            nav.navigate("conversation/" + Uri.encode(demande)) { launchSingleTop = true }
+            cleDemandee.value = null
+        }
     }
 
-    val conv = selection?.let { s -> etat.conversations.firstOrNull { it.cle == s } }
-    when {
-        reglages -> {
-            val accueil = remember { !Moteur.cfg.configure }
-            EcranReglages(etat, accueil = accueil, retour = { reglages = false })
+    NavHost(
+        navController = nav, startDestination = depart,
+        enterTransition = { slideInHorizontally(tween(260)) { it / 4 } + fadeIn(tween(260)) },
+        exitTransition = { slideOutHorizontally(tween(260)) { -it / 8 } + fadeOut(tween(200)) },
+        popEnterTransition = { slideInHorizontally(tween(260)) { -it / 8 } + fadeIn(tween(260)) },
+        popExitTransition = { slideOutHorizontally(tween(260)) { it / 4 } + fadeOut(tween(200)) },
+    ) {
+        composable("liste") {
+            val vm: ListeVM = viewModel()
+            EcranListe(etat, vm,
+                ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } },
+                ouvrirReglages = { nav.navigate("reglages") { launchSingleTop = true } })
         }
-        conv != null -> {
-            BackHandler { selection = null }
-            EcranConversation(etat, conv, retour = { selection = null })
+        composable("conversation/{cle}") { entree ->
+            val cle = entree.arguments?.getString("cle") ?: ""
+            val conv = etat.conversations.firstOrNull { it.cle == cle }
+            if (conv == null) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                    Text("Conversation introuvable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                val vm: ConversationVM = viewModel(key = cle) { ConversationVM(cle) }
+                EcranConversation(etat, conv, vm, retour = { nav.popBackStack() })
+            }
         }
-        else -> EcranListe(
-            etat, filtre, onFiltre = { filtre = it },
-            ouvrir = { selection = it }, ouvrirReglages = { reglages = true },
-            selection = selection,
-        )
+        composable("reglages") {
+            EcranReglages(etat, accueil = false, retour = { nav.popBackStack() })
+        }
+        composable("accueil") {
+            EcranReglages(etat, accueil = true, retour = {
+                nav.navigate("liste") { popUpTo("accueil") { inclusive = true } }
+            })
+        }
     }
 }

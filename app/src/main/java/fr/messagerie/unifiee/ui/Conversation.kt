@@ -45,7 +45,6 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -104,12 +103,14 @@ private sealed class Ligne(val cle: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
+fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -> Unit) {
     val portee = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
-    var historique by remember(c.cle) { mutableStateOf(c.messages) }
-    var total by remember(c.cle) { mutableIntStateOf(0) }
-    var chargement by remember { mutableStateOf(false) }
+    val historique by vm.historique.collectAsState()
+    val total by vm.total.collectAsState()
+    val chargement by vm.chargement.collectAsState()
+    val reactions by vm.reactions.collectAsState()
+    val mesReactions by vm.mesReactions.collectAsState()
     var brouillon by rememberSaveable(c.cle) { mutableStateOf("") }
     var brouillonAvant by remember(c.cle) { mutableStateOf<String?>(null) }
     var reponseA by remember(c.cle) { mutableStateOf<Message?>(null) }
@@ -119,20 +120,10 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
     var menuIA by remember { mutableStateOf(false) }
     // Date de lecture à l'ouverture : place le repère « Nouveaux messages ».
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
-    var reactions by remember(c.cle) { mutableStateOf<Map<String, List<Reaction>>>(emptyMap()) }
-    var mesReactions by remember(c.cle) { mutableStateOf<Map<String, MaReaction>>(emptyMap()) }
-    var majReactions by remember(c.cle) { mutableIntStateOf(0) }
-    LaunchedEffect(c.cle, c.derniere, majReactions) {
-        reactions = withContext(Dispatchers.IO) { Moteur.archive.reactions(c.cle) }
-        mesReactions = withContext(Dispatchers.IO) { Moteur.archive.mesReactions(c.cle) }
-    }
-    DisposableEffect(c.cle) { onDispose { Lecteur.arreter() } }
 
     LaunchedEffect(c.cle) { Moteur.marquerLue(c) }   // lu dans l'appli seulement : aucun accusé envoyé
     LaunchedEffect(c.derniere) {
-        val n = maxOf(200, historique.size)
-        historique = withContext(Dispatchers.IO) { Moteur.archive.messages(c.cle, null, n) }
-        total = withContext(Dispatchers.IO) { Moteur.archive.nombreMessages(c.cle) }
+        vm.actualiser(c.messages)
         if (!e.estForcee(c)) Moteur.marquerLue(c)
     }
 
@@ -168,8 +159,13 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Actions") }
+                    IconButton(onClick = { menu = true },
+                        colors = androidx.compose.material3.IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                        Icon(Icons.Outlined.MoreVert, "Actions")
+                    }
+                    Spacer(Modifier.width(4.dp))
                 },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             )
         },
     ) { pad ->
@@ -186,29 +182,11 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                             reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
                             copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
-                            reagir = { emoji ->
-                                portee.launch {
-                                    val err = Moteur.reagir(l.m, c, emoji)
-                                    majReactions++
-                                    when {
-                                        err != null -> afficher("Réaction non transmise : $err")
-                                        emoji == null -> afficher("Réaction retirée")
-                                        Moteur.reactionTransmissible(l.m, c) -> afficher("Réaction $emoji envoyée")
-                                        else -> afficher("Réaction $emoji gardée sur ce téléphone")
-                                    }
-                                }
-                            })
+                            reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } })
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
-                    OutlinedButton(onClick = {
-                        if (!chargement) portee.launch {
-                            chargement = true
-                            val plus = withContext(Dispatchers.IO) { Moteur.archive.messages(c.cle, historique.firstOrNull()?.date, 200) }
-                            historique = plus + historique
-                            chargement = false
-                        }
-                    }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    OutlinedButton(onClick = { vm.plusAnciens() }, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         Text(if (chargement) "Chargement…" else "Messages plus anciens (${total - historique.size})")
                     }
                 }
@@ -312,13 +290,15 @@ private fun Bulle(
         if (c.estGroupe && !moi && afficherAuteur) {
             Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(), modifier = Modifier.padding(start = 10.dp, bottom = 2.dp))
         }
+        val forme = if (moi) RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
         Column(
             Modifier.widthIn(max = 300.dp)
-                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerLow, forme)
+                .then(if (moi) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, forme))
                 .combinedClickable(onClick = {}, onLongClick = { menu = true })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+            val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurface
             when (m.type) {
                 "audio" -> if (m.media != null) LecteurVocal(m, couleur) else
                     Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
