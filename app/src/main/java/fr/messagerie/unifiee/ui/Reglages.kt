@@ -174,7 +174,7 @@ private fun majDisponible(ctx: android.content.Context) =
 
 // MARK: Menu principal
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
@@ -266,15 +266,30 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                         fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     latences.forEach { (src, d) ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            LogoSource(src, 22.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(src.id, modifier = Modifier.weight(1f))
-                            Text("moy. ${duree(d.average().toLong())} · max ${duree(d.max())} · dernier ${duree(d.last())}",
-                                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            LogoSource(src, 26.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(src.libelle, maxLines = 1, fontWeight = FontWeight.Medium)
+                                Text("moyenne ${duree(d.average().toLong())} · max ${duree(d.max())} · dernier ${duree(d.last())}",
+                                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                     if (latences.isNotEmpty()) Text("Sur les 50 derniers messages reçus de chaque messagerie (imports d'historique exclus).",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Appli fermée, Android ne la réveille que toutes les 15 min environ : d'où des délais de plusieurs minutes.
+                    if (latences.any { it.second.average() > 60_000 } && !cfg.veilleArrierePlan) {
+                        Text("Délai élevé : appli fermée, Android ne vérifie que toutes les 15 min environ. Pour recevoir en quelques secondes, " +
+                            "activez « à l'écoute en arrière-plan » (Notifications) et retirez l'appli des économies de batterie.",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Réglage Notifications") }
+                            TextButton(onClick = {
+                                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            }) { Text("Économies de batterie") }
+                        }
+                    }
                 }
             }
 
