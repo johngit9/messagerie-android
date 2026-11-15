@@ -6,7 +6,8 @@ enum class Source(val id: String, val libelle: String, val couleur: Long) {
     SMS("SMS", "SMS / RCS", 0xFF337AFA),
     ELEMENT("Element", "Element", 0xFF0DBD8C),
     TELEGRAM("Telegram", "Telegram", 0xFF29A1D9),
-    LINKEDIN("LinkedIn", "LinkedIn", 0xFF0A66C2);
+    LINKEDIN("LinkedIn", "LinkedIn", 0xFF0A66C2),
+    TEAMS("Teams", "Teams", 0xFF5B5FC7);
 
     companion object {
         fun depuis(id: String): Source? = entries.firstOrNull { it.id == id }

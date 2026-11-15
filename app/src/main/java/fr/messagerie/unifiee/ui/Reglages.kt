@@ -348,6 +348,10 @@ private fun PageElement(version: Int, modifie: () -> Unit) {
     Explication("Relais de votre serveur pour Element (et la correspondance des salons WhatsApp).")
     Champ("Adresse(s) du relais", urls, "http://serveur:8787") { urls = it; cfg.relaisUrls = it; modifie() }
     Champ("Jeton du relais", jeton, "", secret = true) { jeton = it; cfg.relaisJeton = it; modifie() }
+    HorizontalDivider()
+    var teams by remember(version) { mutableStateOf(cfg.teamsUrls) }
+    Explication("Teams (lecture seule) : service du serveur, même jeton que le relais. Laissez vide pour ne pas afficher Teams.")
+    Champ("Adresse(s) du service Teams", teams, "http://serveur:8789") { teams = it; cfg.teamsUrls = it; modifie() }
 }
 
 @Composable

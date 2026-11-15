@@ -2,7 +2,7 @@ name: Compiler l'APK
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     paths-ignore: ['**.md']
   workflow_dispatch:
 
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: apk
+  group: apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -61,6 +61,7 @@ jobs:
           path: Messagerie-v1.${{ github.run_number }}.apk
 
       - name: Publier dans les Releases
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.${{ github.run_number }}

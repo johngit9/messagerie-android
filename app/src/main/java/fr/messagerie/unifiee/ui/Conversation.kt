@@ -198,8 +198,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             }
 
-            // --- Compositeur
-            Surface(tonalElevation = 3.dp) {
+            // --- Compositeur (Teams : lecture seule, on répond depuis l'appli Teams)
+            if (c.source == Source.TEAMS) Surface(tonalElevation = 3.dp) {
+                val ctx = LocalContext.current
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Teams est en lecture seule ici.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Button(onClick = {
+                        val i = ctx.packageManager.getLaunchIntentForPackage("com.microsoft.teams")
+                            ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://teams.microsoft.com"))
+                        runCatching { ctx.startActivity(i) }
+                    }, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) { Text("Ouvrir Teams") }
+                }
+            } else Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     reponseA?.let { m ->
                         Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.12f), RoundedCornerShape(10.dp)).padding(8.dp),

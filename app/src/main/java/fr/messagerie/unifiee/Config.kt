@@ -25,6 +25,9 @@ class Config(context: Context) {
     var relaisUrls: String get() = s("relais.urls"); set(v) = set("relais.urls", v)
     var relaisJeton: String get() = s("relais.jeton"); set(v) = set("relais.jeton", v)
 
+    // Service Teams (lecture seule), même jeton que le relais
+    var teamsUrls: String get() = s("teams.urls"); set(v) = set("teams.urls", v)
+
     // Ollama
     var ollamaUrls: String get() = s("ollama.urls"); set(v) = set("ollama.urls", v)
     var ollamaModele: String get() = s("ollama.modele").ifEmpty { "qwen3:8b" }; set(v) = set("ollama.modele", v)
@@ -48,7 +51,7 @@ class Config(context: Context) {
     fun definirNotif(s: Source, v: String) = p.edit().putString("notif.${s.id}", v).apply()
 
     /** Messagerie rangée en « Pro » par défaut (Element et LinkedIn). */
-    fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN)
+    fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN || s == Source.TEAMS)
     fun definirPro(s: Source, v: Boolean) = p.edit().putBoolean("pro.${s.id}", v).apply()
 
     private fun carte(k: String): Map<String, String> = try {
@@ -101,12 +104,14 @@ class Config(context: Context) {
     val matrixConfigure get() = matrixUrls.isNotEmpty() && matrixJeton.isNotEmpty() && matrixUtilisateur.isNotEmpty()
     val relaisConfigure get() = relaisUrls.isNotEmpty() && relaisJeton.isNotEmpty()
     val ollamaConfigure get() = ollamaUrls.isNotEmpty()
+    val teamsConfigure get() = teamsUrls.isNotEmpty() && relaisJeton.isNotEmpty()
     val configure get() = matrixConfigure || relaisConfigure
 
     /** Exporte tous les réglages dans le format du fichier de configuration (voir messagerie-config.exemple.json). */
     fun exporterJson(): String = JSONObject()
         .put("matrix", JSONObject().put("adresses", matrixUrls).put("utilisateur", matrixUtilisateur).put("jeton", matrixJeton).put("moi", moiFantome))
         .put("relais", JSONObject().put("adresses", relaisUrls).put("jeton", relaisJeton))
+        .put("teams", JSONObject().put("adresses", teamsUrls))
         .put("ollama", JSONObject().put("adresses", ollamaUrls).put("modele", ollamaModele))
         .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan).put("envoyerReactions", envoyerReactions)
         .put("zoom", zoom).put("tailleTexte", tailleTexte)
@@ -143,6 +148,10 @@ class Config(context: Context) {
             adresses(r, "adresses")?.let { relaisUrls = it }
             r.txt("jeton")?.let { relaisJeton = it }
             faits += "relais Element"
+        }
+        j.optJSONObject("teams")?.let { t ->
+            adresses(t, "adresses")?.let { teamsUrls = it }
+            faits += "Teams"
         }
         j.optJSONObject("ollama")?.let { o ->
             adresses(o, "adresses")?.let { ollamaUrls = it }

@@ -182,6 +182,11 @@ object Moteur {
                         EtatSource.Ok(0)
                     } catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
                 }
+                val teams = async {
+                    if (!cfg.teamsConfigure) return@async EtatSource.NonConfigure
+                    try { Teams(cfg).synchroniser(archive); EtatSource.Ok(0) }
+                    catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
+                }
                 if (cfg.matrixConfigure) {
                     val whatsapp = async {
                         // WhatsApp via la passerelle du serveur (correspondance fournie par le relais).
@@ -206,6 +211,7 @@ object Moteur {
                     for (s in listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN)) sources[s] = EtatSource.NonConfigure
                 }
                 sources[Source.ELEMENT] = element.await()
+                sources[Source.TEAMS] = teams.await()
             }
 
             _etat.update { it.copy(sources = sources.toMap()) }
@@ -328,6 +334,7 @@ object Moteur {
         val idCite = cite?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") }
         try {
             when (c.source) {
+                Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
                 Source.ELEMENT -> Relais(cfg).envoyer(c.jid, t, idCite)
                 Source.WHATSAPP -> {
                     val salon = _etat.value.salonsWhatsApp[c.jid] ?: return@withContext "passerelle WhatsApp indisponible"

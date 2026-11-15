@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,8 +29,9 @@ private val chemins = mapOf(
 private val logos = HashMap<Source, ImageVector>()
 
 fun Source.logo(): ImageVector = logos.getOrPut(this) {
+    val d = chemins[this] ?: return@getOrPut androidx.compose.material.icons.Icons.Outlined.Groups
     ImageVector.Builder(id, 24.dp, 24.dp, 24f, 24f)
-        .addPath(PathParser().parsePathString(chemins.getValue(this)).toNodes(), fill = SolidColor(Color.Black))
+        .addPath(PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.Black))
         .build()
 }
 
