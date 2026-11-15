@@ -37,6 +37,26 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.gestures.detectTapGestures
+import fr.messagerie.unifiee.Lecteur
+import fr.messagerie.unifiee.MaReaction
+import fr.messagerie.unifiee.Reaction
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -99,6 +119,14 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
     var menuIA by remember { mutableStateOf(false) }
     // Date de lecture à l'ouverture : place le repère « Nouveaux messages ».
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
+    var reactions by remember(c.cle) { mutableStateOf<Map<String, List<Reaction>>>(emptyMap()) }
+    var mesReactions by remember(c.cle) { mutableStateOf<Map<String, MaReaction>>(emptyMap()) }
+    var majReactions by remember(c.cle) { mutableIntStateOf(0) }
+    LaunchedEffect(c.cle, c.derniere, majReactions) {
+        reactions = withContext(Dispatchers.IO) { Moteur.archive.reactions(c.cle) }
+        mesReactions = withContext(Dispatchers.IO) { Moteur.archive.mesReactions(c.cle) }
+    }
+    DisposableEffect(c.cle) { onDispose { Lecteur.arreter() } }
 
     LaunchedEffect(c.cle) { Moteur.marquerLue(c) }   // lu dans l'appli seulement : aucun accusé envoyé
     LaunchedEffect(c.derniere) {
@@ -155,8 +183,21 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                         is Ligne.NonLus -> Text("— Nouveaux messages —", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         is Ligne.Msg -> Bulle(l.m, c, l.auteur,
+                            reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
-                            copier = { copier(it, l.m.texteUtile); afficher("Texte copié") })
+                            copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
+                            reagir = { emoji ->
+                                portee.launch {
+                                    val err = Moteur.reagir(l.m, c, emoji)
+                                    majReactions++
+                                    when {
+                                        err != null -> afficher("Réaction non transmise : $err")
+                                        emoji == null -> afficher("Réaction retirée")
+                                        Moteur.reactionTransmissible(l.m, c) -> afficher("Réaction $emoji envoyée")
+                                        else -> afficher("Réaction $emoji gardée sur ce téléphone")
+                                    }
+                                }
+                            })
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -252,42 +293,142 @@ private fun copier(ctx: Context, texte: String) {
     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("message", texte))
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+private val emojisRapides = listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "✅", "👀")
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun Bulle(m: Message, c: Conversation, afficherAuteur: Boolean, repondre: () -> Unit, copier: (Context) -> Unit) {
+private fun Bulle(
+    m: Message, c: Conversation, afficherAuteur: Boolean,
+    reactions: List<Reaction>, maReaction: MaReaction?,
+    repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
+) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     val moi = m.deMoi
+    // Mon émoji : celui posé dans l'appli, sinon une réaction « de moi » venue d'un autre appareil.
+    val monEmoji = maReaction?.emoji ?: reactions.firstOrNull { it.deMoi }?.emoji
     Column(Modifier.fillMaxWidth().padding(top = if (afficherAuteur) 6.dp else 1.dp),
         horizontalAlignment = if (moi) Alignment.End else Alignment.Start) {
         if (c.estGroupe && !moi && afficherAuteur) {
             Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(), modifier = Modifier.padding(start = 10.dp, bottom = 2.dp))
         }
-        Box {
-            Column(
-                Modifier.widthIn(max = 300.dp)
-                    .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
-                    .combinedClickable(onClick = {}, onLongClick = { menu = true })
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                when (m.type) {
-                    "audio" -> Text("🎤 Message vocal" + (m.duree?.let { d -> " · %d:%02d".format(d.toInt() / 60, d.toInt() % 60) } ?: ""),
+        Column(
+            Modifier.widthIn(max = 300.dp)
+                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                .combinedClickable(onClick = {}, onLongClick = { menu = true })
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+            when (m.type) {
+                "audio" -> if (m.media != null) LecteurVocal(m, couleur) else
+                    Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
                         color = couleur, fontStyle = FontStyle.Italic)
-                    "image" -> Text("🖼 " + m.texte, color = couleur)
-                    "video" -> Text("🎬 " + m.texte, color = couleur)
-                    "fichier" -> Text("📄 " + m.texte.removePrefix("[fichier] "), color = couleur)
-                    else -> Text(m.texte, color = couleur)
-                }
-                Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))
+                "image" -> Text("🖼 " + m.texte, color = couleur)
+                "video" -> Text("🎬 " + m.texte, color = couleur)
+                "fichier" -> Text("📄 " + m.texte.removePrefix("[fichier] "), color = couleur)
+                else -> Text(m.texte, color = couleur)
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Répondre") }, onClick = { menu = false; repondre() })
-                DropdownMenuItem(text = { Text("Copier le texte") }, onClick = { menu = false; copier(ctx) })
+            Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))
+        }
+        // Réactions sous la bulle
+        val autres = reactions.filter { !it.deMoi }
+        if (autres.isNotEmpty() || monEmoji != null) {
+            val groupes = LinkedHashMap<String, Int>()
+            autres.forEach { groupes[it.emoji] = (groupes[it.emoji] ?: 0) + 1 }
+            if (monEmoji != null) groupes[monEmoji] = (groupes[monEmoji] ?: 0) + 1
+            FlowRow(Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                groupes.forEach { (emoji, n) ->
+                    val aMoi = emoji == monEmoji
+                    Text(
+                        emoji + if (n > 1) " $n" else "", fontSize = 13.sp,
+                        modifier = Modifier
+                            .background(if (aMoi) c.source.teinte().copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                            .border(1.dp, if (aMoi) c.source.teinte() else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                            .clickable { menu = true }
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
             }
         }
     }
+    if (menu) FeuilleMessage(m, c, monEmoji, fermer = { menu = false },
+        reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) })
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
+                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = fermer) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            Text("Réagir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                emojisRapides.forEach { emoji ->
+                    val choisi = emoji == monEmoji
+                    Box(
+                        Modifier.size(42.dp)
+                            .background(if (choisi) c.source.teinte().copy(alpha = 0.2f) else Color.Transparent, CircleShape)
+                            .clickable { reagir(if (choisi) null else emoji) },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(emoji, fontSize = 24.sp) }
+                }
+            }
+            Text(
+                if (Moteur.reactionTransmissible(m, c)) "Votre réaction sera envoyée au contact."
+                else "Votre réaction restera sur ce téléphone.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
+            ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
+            if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
+        }
+    }
+}
+
+/** Lecteur intégré à la bulle d'un message vocal. */
+@Composable
+private fun LecteurVocal(m: Message, couleur: Color) {
+    val etat by Lecteur.etat.collectAsState()
+    val actif = etat.cle == m.cle
+    val dureeMs = if (actif && etat.duree > 0) etat.duree else ((m.duree ?: 0.0) * 1000).toInt()
+    val position = if (actif) etat.position else 0
+    Column(Modifier.width(220.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).background(couleur.copy(alpha = 0.15f), CircleShape).clickable { Lecteur.basculer(m) },
+                contentAlignment = Alignment.Center) {
+                when {
+                    actif && etat.chargement -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = couleur)
+                    actif && etat.enLecture -> Icon(Icons.Outlined.Pause, "Pause", tint = couleur)
+                    else -> Icon(Icons.Outlined.PlayArrow, "Écouter", tint = couleur)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                var largeur by remember { mutableIntStateOf(1) }
+                val fraction = if (dureeMs > 0) (position.toFloat() / dureeMs).coerceIn(0f, 1f) else 0f
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                        .onSizeChanged { largeur = maxOf(1, it.width) }
+                        .pointerInput(m.cle, actif) {
+                            detectTapGestures { p -> if (actif) Lecteur.aller(p.x / largeur) }
+                        },
+                    color = couleur, trackColor = couleur.copy(alpha = 0.25f),
+                )
+                Spacer(Modifier.size(4.dp))
+                Text(
+                    (if (actif && position > 0) minSec(position) + " / " else "🎤 ") + (if (dureeMs > 0) minSec(dureeMs) else "Message vocal"),
+                    fontSize = 12.sp, color = couleur.copy(alpha = 0.85f),
+                )
+            }
+        }
+        if (actif && etat.erreur != null) Text(etat.erreur!!, fontSize = 11.sp, color = couleur, fontStyle = FontStyle.Italic)
+    }
+}
+
+private fun minSec(ms: Int): String { val s = ms / 1000; return "%d:%02d".format(s / 60, s % 60) }
 
 @Composable
 private fun CarteResume(e: Etat, c: Conversation, utiliser: (String) -> Unit) {

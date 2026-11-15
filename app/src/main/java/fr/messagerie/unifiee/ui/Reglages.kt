@@ -86,6 +86,7 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
     var intervalle by remember { mutableStateOf(cfg.intervalle) }
     var notifs by remember { mutableStateOf(cfg.notifications) }
     var veille by remember { mutableStateOf(cfg.veilleArrierePlan) }
+    var reactions by remember { mutableStateOf(cfg.envoyerReactions) }
     var test by remember { mutableStateOf<String?>(null) }
     var fichier by remember { mutableStateOf<String?>(null) }
 
@@ -93,14 +94,14 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
         matrixUrls = cfg.matrixUrls; matrixUser = cfg.matrixUtilisateur; matrixJeton = cfg.matrixJeton; moi = cfg.moiFantome
         relaisUrls = cfg.relaisUrls; relaisJeton = cfg.relaisJeton
         ollamaUrls = cfg.ollamaUrls; ollamaModele = cfg.ollamaModele
-        jours = cfg.jours; intervalle = cfg.intervalle; notifs = cfg.notifications; veille = cfg.veilleArrierePlan
+        jours = cfg.jours; intervalle = cfg.intervalle; notifs = cfg.notifications; veille = cfg.veilleArrierePlan; reactions = cfg.envoyerReactions
     }
 
     fun enregistrerSansQuitter() {
         cfg.matrixUrls = matrixUrls; cfg.matrixUtilisateur = matrixUser; cfg.matrixJeton = matrixJeton; cfg.moiFantome = moi
         cfg.relaisUrls = relaisUrls; cfg.relaisJeton = relaisJeton
         cfg.ollamaUrls = ollamaUrls; cfg.ollamaModele = ollamaModele
-        cfg.jours = jours; cfg.intervalle = intervalle; cfg.notifications = notifs; cfg.veilleArrierePlan = veille
+        cfg.jours = jours; cfg.intervalle = intervalle; cfg.notifications = notifs; cfg.veilleArrierePlan = veille; cfg.envoyerReactions = reactions
     }
 
     fun enregistrer() {
@@ -190,6 +191,7 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
             Choix(listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min", 900 to "15 min"), intervalle) { intervalle = it }
             Interrupteur("Notifier quand une réponse est attendue", notifs) { notifs = it }
             Interrupteur("Rester à l'écoute en arrière-plan (notification permanente)", veille) { veille = it }
+            Interrupteur("Transmettre mes réactions (émoticônes) aux contacts", reactions) { reactions = it }
 
             Button(onClick = { enregistrer() }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp), shape = RoundedCornerShape(14.dp)) {
                 Icon(Icons.Outlined.Check, null); Spacer(Modifier.width(8.dp)); Text("Enregistrer", style = MaterialTheme.typography.titleSmall)

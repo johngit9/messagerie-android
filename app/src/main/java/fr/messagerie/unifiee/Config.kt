@@ -33,6 +33,8 @@ class Config(context: Context) {
     var jours: Int get() = p.getInt("jours", 3); set(v) = p.edit().putInt("jours", v).apply()
     var intervalle: Int get() = p.getInt("intervalle", 60); set(v) = p.edit().putInt("intervalle", v).apply()
     var notifications: Boolean get() = p.getBoolean("notifications", true); set(v) = p.edit().putBoolean("notifications", v).apply()
+    /** Transmettre vos émoticônes aux contacts (sinon elles restent sur ce téléphone). */
+    var envoyerReactions: Boolean get() = p.getBoolean("reactions", true); set(v) = p.edit().putBoolean("reactions", v).apply()
     var veilleArrierePlan: Boolean get() = p.getBoolean("veille", false); set(v) = p.edit().putBoolean("veille", v).apply()
 
     /** Les messages plus anciens comptent comme lus (fixé au premier lancement : maintenant − 24 h). */
@@ -52,7 +54,7 @@ class Config(context: Context) {
         .put("matrix", JSONObject().put("adresses", matrixUrls).put("utilisateur", matrixUtilisateur).put("jeton", matrixJeton).put("moi", moiFantome))
         .put("relais", JSONObject().put("adresses", relaisUrls).put("jeton", relaisJeton))
         .put("ollama", JSONObject().put("adresses", ollamaUrls).put("modele", ollamaModele))
-        .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan)
+        .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan).put("envoyerReactions", envoyerReactions)
         .toString(2)
 
     /**
@@ -109,6 +111,7 @@ class Config(context: Context) {
         if (j.has("jours")) { jours = j.optInt("jours", jours); faits += "préférences" }
         if (j.has("intervalle")) intervalle = j.optInt("intervalle", intervalle)
         if (j.has("notifications")) notifications = j.optBoolean("notifications", notifications)
+        if (j.has("envoyerReactions")) envoyerReactions = j.optBoolean("envoyerReactions", envoyerReactions)
         if (j.has("veille")) veilleArrierePlan = j.optBoolean("veille", veilleArrierePlan)
         return faits.distinct()
     }

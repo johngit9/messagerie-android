@@ -316,6 +316,74 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    // MARK: Réactions — uniquement sur un appui de l'utilisateur
+
+    /** Une réaction peut-elle être transmise au contact ? (message Matrix, hors Element, réglage activé) */
+    fun reactionTransmissible(m: Message, c: Conversation): Boolean =
+        cfg.envoyerReactions && c.source != Source.ELEMENT && m.cle.substringAfter(':').startsWith("$") && salonDe(c) != null
+
+    private fun salonDe(c: Conversation): String? =
+        if (c.source == Source.WHATSAPP) _etat.value.salonsWhatsApp[c.jid] else c.jid
+
+    /** Pose (emoji) ou retire (null) votre réaction. Renvoie null si tout va bien, sinon le message d'erreur. */
+    suspend fun reagir(m: Message, c: Conversation, emoji: String?): String? = withContext(Dispatchers.IO) {
+        try {
+            val avant = archive.maReaction(m.cle)
+            if (avant?.idEnvoi != null && avant.salon != null) {
+                Matrix(cfg).retirerReaction(avant.salon, avant.idEnvoi)
+                archive.oublierReaction(avant.idEnvoi)
+            }
+            if (emoji == null) { archive.definirMaReaction(m.cle, null); return@withContext null }
+            var salon: String? = null; var id: String? = null
+            if (reactionTransmissible(m, c)) {
+                salon = salonDe(c)
+                id = Matrix(cfg).reagir(salon!!, m.cle.substringAfter(':'), emoji).takeIf { it.isNotEmpty() }
+            }
+            archive.definirMaReaction(m.cle, MaReaction(m.cle, c.cle, emoji, salon, id))
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    // MARK: Médias (lecture seule)
+
+    /** Fichier local d'un média (téléchargé une fois, puis gardé en cache). */
+    suspend fun fichierMedia(m: Message): java.io.File = withContext(Dispatchers.IO) {
+        val media = m.media ?: throw IllegalStateException("média absent")
+        val parts = media.split('#')
+        val ref = parts[0]
+        val mime = parts.getOrNull(1) ?: "application/octet-stream"
+        val dossier = java.io.File(app.cacheDir, if (m.type == "audio") "vocaux" else "medias").apply { mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(ref.toByteArray())
+            .take(12).joinToString("") { "%02x".format(it) }
+        val f = java.io.File(dossier, "$hash.${extension(mime, m.type)}")
+        if (f.exists() && f.length() > 0) return@withContext f
+        val donnees = when {
+            ref.startsWith("mxc://") -> Matrix(cfg).media(ref)
+            ref.startsWith("element:") -> Relais(cfg).media(ref.removePrefix("element:"))
+            else -> throw IllegalStateException("média introuvable")
+        }
+        val tmp = java.io.File(dossier, f.name + ".part")
+        tmp.writeBytes(donnees)
+        tmp.renameTo(f)
+        f
+    }
+
+    private fun extension(mime: String, type: String): String {
+        val m = mime.lowercase()
+        return when {
+            "ogg" in m || "opus" in m -> "ogg"
+            "amr" in m -> "amr"
+            "3gpp" in m -> "3gp"
+            "mp4" in m && type == "audio" -> "m4a"
+            "aac" in m -> "aac"
+            "mpeg" in m && type == "audio" -> "mp3"
+            "wav" in m -> "wav"
+            "webm" in m -> "webm"
+            else -> android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(m)
+                ?: when (type) { "audio" -> "mp3"; "image" -> "jpg"; "video" -> "mp4"; else -> "bin" }
+        }
+    }
+
     // MARK: Notifications
 
     private fun notifierSiBesoin(c: Conversation) {

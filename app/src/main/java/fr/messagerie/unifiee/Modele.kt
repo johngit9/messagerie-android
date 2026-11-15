@@ -62,3 +62,9 @@ sealed class EtatSource {
 }
 
 fun cleConv(source: Source, jid: String) = "${source.id}:$jid"
+
+/** Réaction (émoji) posée sur un message, par un contact ou par vous. */
+data class Reaction(val cle: String, val cible: String, val conv: String, val emoji: String, val auteur: String, val deMoi: Boolean)
+
+/** Votre réaction choisie dans l'appli. `idEnvoi` : identifiant Matrix si elle a été transmise au contact. */
+data class MaReaction(val cible: String, val conv: String, val emoji: String, val salon: String?, val idEnvoi: String?)

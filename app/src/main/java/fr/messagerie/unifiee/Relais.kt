@@ -112,6 +112,14 @@ class Relais(private val cfg: Config) {
         return r
     }
 
+    /** Télécharge (et déchiffre côté relais) le média d'un message Element — lecture seule. */
+    fun media(eventId: String): ByteArray {
+        connecter()
+        val r = Http.requete("$base/media?event=${Http.enc(eventId)}", jeton = jeton, delaiMs = 30_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "média")
+        return r.corps
+    }
+
     /** Envoie une réponse Element — UNIQUEMENT sur le bouton « Envoyer ». */
     fun envoyer(salon: String, texte: String, reponseA: String?) {
         connecter()

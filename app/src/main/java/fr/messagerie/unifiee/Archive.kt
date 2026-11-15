@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Archive permanente de tous les messages (toutes sources), avec recherche plein texte,
  * et état local (lu / non lu, à traiter, sourdine, résumés IA). Fichier privé de l'appli.
  */
-class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 1) {
+class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 2) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
@@ -31,9 +31,20 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         db.execSQL("""CREATE TABLE etats (cle TEXT PRIMARY KEY, lue INTEGER DEFAULT 0, forcee INTEGER DEFAULT 0,
             traitee INTEGER DEFAULT 0, notifiee INTEGER DEFAULT 0, manuel INTEGER DEFAULT 0, sourdine INTEGER DEFAULT 0)""")
         db.execSQL("""CREATE TABLE syntheses (cle TEXT PRIMARY KEY, resume TEXT, action INTEGER, reponse TEXT, pour INTEGER)""")
+        creerReactions(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, ancienne: Int, nouvelle: Int) {}
+    private fun creerReactions(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS reactions (cle TEXT PRIMARY KEY, cible TEXT NOT NULL, conv TEXT NOT NULL,
+            emoji TEXT NOT NULL, auteur TEXT, de_moi INTEGER DEFAULT 0)""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS reactions_conv ON reactions(conv)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS mes_reactions (cible TEXT PRIMARY KEY, conv TEXT NOT NULL, emoji TEXT NOT NULL,
+            salon TEXT, id_envoi TEXT)""")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, ancienne: Int, nouvelle: Int) {
+        if (ancienne < 2) creerReactions(db)
+    }
 
     private inline fun <T> Cursor.lignes(f: (Cursor) -> T): List<T> = use { c ->
         val r = ArrayList<T>()
@@ -99,6 +110,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             for (c in cles) {
                 db.delete("messages", "cle = ?", arrayOf(c))
                 db.delete("recherche", "cle = ?", arrayOf(c))
+                db.delete("reactions", "cle = ? OR cible = ?", arrayOf(c, c))
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -123,6 +135,53 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         if (valeur == null) writableDatabase.delete("curseurs", "nom = ?", arrayOf(nom))
         else writableDatabase.insertWithOnConflict("curseurs", null,
             ContentValues().apply { put("nom", nom); put("valeur", valeur) }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    // MARK: Réactions
+
+    @Synchronized
+    fun enregistrerReactions(rs: List<Reaction>) {
+        if (rs.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (r in rs) db.insertWithOnConflict("reactions", null, ContentValues().apply {
+                put("cle", r.cle); put("cible", r.cible); put("conv", r.conv); put("emoji", r.emoji)
+                put("auteur", r.auteur); put("de_moi", if (r.deMoi) 1 else 0)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    /** Réactions reçues d'une conversation, par message visé. */
+    fun reactions(conv: String): Map<String, List<Reaction>> =
+        readableDatabase.rawQuery("SELECT * FROM reactions WHERE conv = ?", arrayOf(conv)).lignes { c ->
+            Reaction(c.s("cle") ?: "", c.s("cible") ?: "", c.s("conv") ?: "", c.s("emoji") ?: "", c.s("auteur") ?: "", c.l("de_moi") == 1L)
+        }.groupBy { it.cible }
+
+    /** Oublie une réaction envoyée puis retirée (son identifiant d'événement). */
+    @Synchronized
+    fun oublierReaction(idEvenement: String) {
+        writableDatabase.delete("reactions", "cle LIKE ?", arrayOf("%:" + idEvenement))
+    }
+
+    fun mesReactions(conv: String): Map<String, MaReaction> =
+        readableDatabase.rawQuery("SELECT * FROM mes_reactions WHERE conv = ?", arrayOf(conv)).lignes { c ->
+            MaReaction(c.s("cible") ?: "", c.s("conv") ?: "", c.s("emoji") ?: "", c.s("salon"), c.s("id_envoi"))
+        }.associateBy { it.cible }
+
+    fun maReaction(cible: String): MaReaction? =
+        readableDatabase.rawQuery("SELECT * FROM mes_reactions WHERE cible = ?", arrayOf(cible)).lignes { c ->
+            MaReaction(c.s("cible") ?: "", c.s("conv") ?: "", c.s("emoji") ?: "", c.s("salon"), c.s("id_envoi"))
+        }.firstOrNull()
+
+    @Synchronized
+    fun definirMaReaction(cible: String, r: MaReaction?) {
+        val db = writableDatabase
+        if (r == null) { db.delete("mes_reactions", "cible = ?", arrayOf(cible)); return }
+        db.insertWithOnConflict("mes_reactions", null, ContentValues().apply {
+            put("cible", r.cible); put("conv", r.conv); put("emoji", r.emoji); put("salon", r.salon); put("id_envoi", r.idEnvoi)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
     // MARK: Lecture

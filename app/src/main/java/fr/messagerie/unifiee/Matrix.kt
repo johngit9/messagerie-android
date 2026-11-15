@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 class Matrix(private val cfg: Config) {
     companion object {
         @Volatile var derniereBonne: String? = null
-        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
     }
 
     var base = ""
@@ -61,6 +61,35 @@ class Matrix(private val cfg: Config) {
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
             "PUT", jeton, contenu.toString(), 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
+    }
+
+    /** Pose une réaction — UNIQUEMENT sur un appui de l'utilisateur. Renvoie l'identifiant de la réaction. */
+    fun reagir(salon: String, cible: String, emoji: String): String {
+        connecter()
+        val txn = "messagerie-" + UUID.randomUUID()
+        val contenu = JSONObject().put("m.relates_to",
+            JSONObject().put("rel_type", "m.annotation").put("event_id", cible).put("key", emoji))
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.reaction/${Http.enc(txn)}",
+            "PUT", jeton, contenu.toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "réaction")
+        return JSONObject(r.texte).optString("event_id")
+    }
+
+    /** Retire une réaction envoyée depuis l'appli — UNIQUEMENT sur un appui de l'utilisateur. */
+    fun retirerReaction(salon: String, idReaction: String) {
+        connecter()
+        val txn = "messagerie-" + UUID.randomUUID()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/redact/${Http.enc(idReaction)}/${Http.enc(txn)}",
+            "PUT", jeton, "{}", 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "réaction")
+    }
+
+    /** Télécharge un média mxc://serveur/id (lecture seule). */
+    fun media(mxc: String): ByteArray {
+        connecter()
+        val chemin = mxc.removePrefix("mxc://")
+        return try { telecharger("/_matrix/client/v1/media/download/$chemin") }
+        catch (_: Exception) { telecharger("/_matrix/media/v3/download/$chemin") }
     }
 
     /** Attente longue (30 s max) ; lecture seule. Renvoie le nouveau jeton et s'il y a du nouveau. */
@@ -116,9 +145,9 @@ class SyncPont(
         private val autres = ConcurrentHashMap<String, Set<String>>()
         fun viderCache() { cache.clear() }
 
-        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
-        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction"]}"""
+        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction"]}"""
     }
 
     /** Lectures faites sur vos autres appareils : conversation → date. Simplement lues, jamais envoyées. */
@@ -275,8 +304,19 @@ class SyncPont(
     private fun enregistrer(evenements: List<JSONObject>, conv: String, info: InfoSalon, moi: String?): Pair<Int, Int> {
         val lot = ArrayList<Message>()
         val supprimes = ArrayList<String>()
+        val reactions = ArrayList<Reaction>()
         for (e in evenements) {
             val eid = e.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
+            if (e.optString("type") == "m.reaction") {
+                val rel = e.optJSONObject("content")?.optJSONObject("m.relates_to") ?: continue
+                val cible = rel.optString("event_id"); val cle = rel.optString("key")
+                val exp = e.optString("sender")
+                if (rel.optString("rel_type") != "m.annotation" || cible.isEmpty() || cle.isEmpty()) continue
+                val deMoi = exp == m.utilisateur || exp == moi
+                reactions.add(Reaction("${pont.source.id}:$eid", "${pont.source.id}:$cible", conv, cle,
+                    if (deMoi) "Vous" else info.membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un", deMoi))
+                continue
+            }
             if (e.optString("type") == "m.room.redaction") {
                 val r = e.optString("redacts").ifEmpty { e.optJSONObject("content")?.optString("redacts") ?: "" }
                 if (r.isNotEmpty()) supprimes.add("${pont.source.id}:$r")
@@ -288,6 +328,7 @@ class SyncPont(
         val nouveaux = lot.filter { it.cle !in deja }
         archive.enregistrerMessages(nouveaux)
         archive.supprimerMessages(supprimes)
+        archive.enregistrerReactions(reactions)
         return lot.size to nouveaux.size
     }
 
