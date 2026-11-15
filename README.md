@@ -61,7 +61,7 @@ L'APK est produit dans `app/build/outputs/apk/release/`. Chaque envoi sur `main`
 
 ## Limites actuelles
 
-- Les vocaux se lisent dans la bulle (appui sur ▶). Les photos, vidéos et documents sont signalés mais pas encore affichés.
+- Les vocaux se lisent dans la bulle (appui sur ▶). Les photos s'affichent dans la conversation (plein écran au toucher) ; vidéos et documents s'ouvrent avec l'appli de votre choix.
 - Réactions : celles des contacts s'affichent sous les messages ; un appui long sur un message permet de réagir. Votre réaction n'est transmise que sur votre appui, et seulement si « Transmettre mes réactions » est activé dans les Réglages (sinon elle reste sur le téléphone).
 - Pas encore de transcription des vocaux ni de résumé d'un message isolé.
 - L'ancien mode WhatsApp « lecture de la base WhatsApp Desktop » de la version Mac n'existe pas sur Android :

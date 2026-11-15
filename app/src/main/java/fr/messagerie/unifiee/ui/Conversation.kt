@@ -182,7 +182,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
                             copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
-                            reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } })
+                            reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } },
+                            afficherMessage = { afficher(it) })
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -279,6 +280,7 @@ private fun Bulle(
     m: Message, c: Conversation, afficherAuteur: Boolean,
     reactions: List<Reaction>, maReaction: MaReaction?,
     repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
+    afficherMessage: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -303,9 +305,8 @@ private fun Bulle(
                 "audio" -> if (m.media != null) LecteurVocal(m, couleur) else
                     Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
                         color = couleur, fontStyle = FontStyle.Italic)
-                "image" -> Text("🖼 " + m.texte, color = couleur)
-                "video" -> Text("🎬 " + m.texte, color = couleur)
-                "fichier" -> Text("📄 " + m.texte.removePrefix("[fichier] "), color = couleur)
+                "image" -> PhotoMessage(m, couleur)
+                "video", "fichier" -> FichierMessage(m, couleur, afficherMessage)
                 else -> Text(m.texte, color = couleur)
             }
             Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))
