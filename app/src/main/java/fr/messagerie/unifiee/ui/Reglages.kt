@@ -575,6 +575,8 @@ private fun PageNotifications(version: Int) {
     var veille by remember(version) { mutableStateOf(cfg.veilleArrierePlan) }
     var fond by remember(version) { mutableStateOf(cfg.synchroArrierePlan) }
 
+    EtatNotifications()
+    HorizontalDivider()
     Text("Par messagerie", fontWeight = FontWeight.SemiBold)
     Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")
     key(maj) {
@@ -909,4 +911,47 @@ private fun RapportPlantage() {
             }
         }
     }
+}
+
+/** Vérification : autorisations Android, canaux, batterie, et notification d'essai locale. */
+@Composable
+private fun EtatNotifications() {
+    val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    var verif by remember { mutableIntStateOf(0) }
+    // Revérifie au retour des réglages Android
+    val cycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(cycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, ev -> if (ev == androidx.lifecycle.Lifecycle.Event.ON_RESUME) verif++ }
+        cycle.lifecycle.addObserver(obs); onDispose { cycle.lifecycle.removeObserver(obs) }
+    }
+    val nm = androidx.core.app.NotificationManagerCompat.from(ctx)
+    val autorisees = remember(verif) { nm.areNotificationsEnabled() }
+    val coupes = remember(verif) {
+        Source.entries.filter { s -> nm.getNotificationChannel("${Moteur.CANAL_MESSAGES}.${s.id}")?.importance == android.app.NotificationManager.IMPORTANCE_NONE }
+    }
+    val batterieLibre = remember(verif) { ctx.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }
+    @Composable fun Ligne(ok: Boolean, texte: String, action: String?, faire: () -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).background(if (ok) Color(0xFF2F9E44) else cs.error, CircleShape))
+            Spacer(Modifier.width(10.dp))
+            Text(texte, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            if (action != null) TextButton(onClick = faire) { Text(action) }
+        }
+    }
+    fun ouvrirAppli() = runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    Text("Vérification", fontWeight = FontWeight.SemiBold)
+    Ligne(autorisees, if (autorisees) "Notifications autorisées par Android" else "Notifications bloquées par Android", if (autorisees) null else "Autoriser") { ouvrirAppli() }
+    Ligne(coupes.isEmpty(), if (coupes.isEmpty()) "Aucune messagerie coupée dans Android" else "Coupées dans Android : " + coupes.joinToString { it.libelle },
+        if (coupes.isEmpty()) null else "Ouvrir") { ouvrirAppli() }
+    Ligne(batterieLibre, if (batterieLibre) "Batterie sans restriction" else "Économie de batterie active : réception retardée", if (batterieLibre) null else "Changer") {
+        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+    Ligne(Moteur.cfg.veilleArrierePlan, if (Moteur.cfg.veilleArrierePlan) "À l'écoute en arrière-plan" else "Appli fermée : vérification toutes les 15 min environ", null) {}
+    Explication("Appli ouverte, aucune notification n'est affichée : les messages apparaissent directement dans la liste.")
+    OutlinedButton(onClick = {
+        Moteur.notificationEssai(Source.WHATSAPP)
+        android.widget.Toast.makeText(ctx, if (autorisees) "Notification d'essai affichée" else "Bloquée : autorisez d'abord les notifications", android.widget.Toast.LENGTH_SHORT).show()
+    }) { Text("Tester une notification") }
 }

@@ -563,9 +563,13 @@ object Moteur {
         val maintenant = System.currentTimeMillis()
         val depuis = archive.curseur("vu.jusqua")?.toLongOrNull()
         archive.definirCurseur("vu.jusqua", maintenant.toString())
-        if (depuis == null) return   // premier passage : rien à signaler
+        // Messages déjà vus (clés) : un message arrivé en retard, daté d'avant le dernier passage, compte quand même.
+        val vus = archive.curseur("vu.cles")?.split("\n")?.toHashSet() ?: hashSetOf()
         val e = _etat.value
-        val nouveaux = e.conversations.flatMap { c -> c.messages.filter { !it.deMoi && it.date > depuis }.map { c to it } }
+        val recents = e.conversations.flatMap { c -> c.messages.filter { !it.deMoi && it.date > maintenant - 6 * 3_600_000L }.map { c to it } }
+        archive.definirCurseur("vu.cles", recents.map { it.second.cle }.takeLast(3000).joinToString("\n"))
+        if (depuis == null) return   // premier passage : rien à signaler
+        val nouveaux = recents.filter { (_, m) -> m.cle !in vus && (m.date > depuis || vus.isNotEmpty()) }
         if (nouveaux.isEmpty()) return
         // Délai : seulement pour des messages arrivés « en direct » (moins de 10 min).
         nouveaux.groupBy { it.first.source }.forEach { (s, l) ->
@@ -580,6 +584,13 @@ object Moteur {
             if (cfg.notif(c.source) != "tous" || e.etat(c).sourdine || c.cle == convOuverte) return@forEach
             notifierMessages(c, l.map { it.second })
         }
+    }
+
+    /** Notification d'essai, locale (rien n'est envoyé sur le réseau). */
+    fun notificationEssai(s: Source) {
+        val c = Conversation("essai", s, "essai", "Messagerie (essai)", false, System.currentTimeMillis(), emptyList())
+        notifierMessages(c, listOf(Message("essai:" + System.currentTimeMillis(), "essai", System.currentTimeMillis(), false,
+            "Messagerie", "Ceci est une notification d'essai ${s.libelle}.")))
     }
 
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
