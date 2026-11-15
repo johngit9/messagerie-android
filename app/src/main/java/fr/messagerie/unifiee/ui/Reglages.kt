@@ -4,6 +4,25 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -117,7 +136,7 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("Réglages") },
-            navigationIcon = { if (retour != null) TextButton(onClick = retour) { Text("←", fontSize = 22.sp) } },
+            navigationIcon = { if (retour != null) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
         )
     }) { pad ->
         Column(
@@ -172,7 +191,9 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
             Interrupteur("Notifier quand une réponse est attendue", notifs) { notifs = it }
             Interrupteur("Rester à l'écoute en arrière-plan (notification permanente)", veille) { veille = it }
 
-            Button(onClick = { enregistrer() }, modifier = Modifier.fillMaxWidth()) { Text("Enregistrer") }
+            Button(onClick = { enregistrer() }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp), shape = RoundedCornerShape(14.dp)) {
+                Icon(Icons.Outlined.Check, null); Spacer(Modifier.width(8.dp)); Text("Enregistrer", style = MaterialTheme.typography.titleSmall)
+            }
 
             Section("Discrétion")
             Text(
@@ -200,15 +221,31 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
 }
 
 @Composable private fun Section(t: String) {
-    HorizontalDivider(Modifier.padding(top = 8.dp))
-    Text(t, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    val icone = when {
+        t.startsWith("Fichier") -> Icons.Outlined.Description
+        t.startsWith("Serveur") -> Icons.Outlined.Dns
+        t.startsWith("Relais") -> Icons.Outlined.Lock
+        t.startsWith("IA") -> Icons.Outlined.AutoAwesome
+        t.startsWith("Actualisation") -> Icons.Outlined.Notifications
+        t.startsWith("Discrétion") -> Icons.Outlined.Shield
+        else -> Icons.Outlined.Info
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(32.dp)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icone, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 @Composable private fun Champ(libelle: String, valeur: String, aide: String, secret: Boolean = false, maj: (String) -> Unit) {
     OutlinedTextField(
         value = valeur, onValueChange = maj, label = { Text(libelle) },
         placeholder = { if (aide.isNotEmpty()) Text(aide, fontSize = 12.sp) },
-        singleLine = true, modifier = Modifier.fillMaxWidth(),
+        singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
         visualTransformation = if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else KeyboardType.Uri),
     )

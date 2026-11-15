@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import fr.messagerie.unifiee.ui.EcranConversation
 import fr.messagerie.unifiee.ui.EcranListe
@@ -61,11 +62,18 @@ class MainActivity : ComponentActivity() {
 fun Theme(contenu: @Composable () -> Unit) {
     val sombre = isSystemInDarkTheme()
     val ctx = LocalContext.current
-    val couleurs = when {
-        Build.VERSION.SDK_INT >= 31 -> if (sombre) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        sombre -> darkColorScheme()
-        else -> lightColorScheme()
-    }
+    // Palette de la marque (indigo), identique sur tous les téléphones.
+    val couleurs = if (sombre) darkColorScheme(
+        primary = Color(0xFFB9C3FF), onPrimary = Color(0xFF14267B), primaryContainer = Color(0xFF2E3F92), onPrimaryContainer = Color(0xFFDDE1FF),
+        secondary = Color(0xFFC3C5DD), secondaryContainer = Color(0xFF424659), onSecondaryContainer = Color(0xFFDFE1F9),
+        background = Color(0xFF111318), surface = Color(0xFF111318),
+        surfaceContainer = Color(0xFF1D1F25), surfaceContainerHigh = Color(0xFF282A2F), surfaceContainerLow = Color(0xFF191B20),
+    ) else lightColorScheme(
+        primary = Color(0xFF4355B9), onPrimary = Color.White, primaryContainer = Color(0xFFDEE0FF), onPrimaryContainer = Color(0xFF00105C),
+        secondary = Color(0xFF5B5D72), secondaryContainer = Color(0xFFE0E1F9), onSecondaryContainer = Color(0xFF181A2C),
+        background = Color(0xFFFBF8FF), surface = Color(0xFFFBF8FF),
+        surfaceContainer = Color(0xFFEFEDF4), surfaceContainerHigh = Color(0xFFE9E7EF), surfaceContainerLow = Color(0xFFF5F2FA),
+    )
     MaterialTheme(colorScheme = couleurs, content = contenu)
 }
 

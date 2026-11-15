@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +28,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -118,19 +127,20 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
         snackbarHost = { SnackbarHost(snack) },
         topBar = {
             TopAppBar(
-                navigationIcon = { TextButton(onClick = retour) { Text("←", fontSize = 22.sp) } },
+                navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
                 title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(c.nom, c.source, c.estGroupe, taille = 38.dp)
+                    Spacer(Modifier.width(12.dp))
                     Column {
                         Text(c.nom, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "",
                             style = MaterialTheme.typography.labelMedium, color = c.source.teinte())
                     }
+                    }
                 },
                 actions = {
-                    Box {
-                        TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 22.sp) }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) { MenuConversation(e, c) { menu = false } }
-                    }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Actions") }
                 },
             )
         },
@@ -173,7 +183,7 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                                 Text("En réponse à ${m.auteur}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
                                 Text(m.texteUtile, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
                             }
-                            TextButton(onClick = { reponseA = null }) { Text("✕") }
+                            IconButton(onClick = { reponseA = null }) { Icon(Icons.Outlined.Close, "Annuler la réponse") }
                         }
                     }
                     // Réponse proposée par l'IA : jamais insérée d'office, seulement sur votre appui.
@@ -195,7 +205,7 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                         if (Moteur.cfg.ollamaConfigure) Box {
                             OutlinedButton(onClick = { menuIA = true }, enabled = brouillon.isNotBlank() && !iaEnCours,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
-                                if (iaEnCours) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("✨")
+                                if (iaEnCours) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.AutoAwesome, "Améliorer avec l'IA")
                             }
                             DropdownMenu(expanded = menuIA, onDismissRequest = { menuIA = false }) {
                                 Ollama.Facon.entries.forEach { f ->
@@ -227,13 +237,15 @@ fun EcranConversation(e: Etat, c: Conversation, retour: () -> Unit) {
                             enabled = brouillon.isNotBlank() && !envoi,
                             colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte()),
                         ) {
-                            if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White) else Text("Envoyer")
+                            if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                            else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer")
                         }
                     }
                 }
             }
         }
     }
+    if (menu) FeuilleActions(e, c) { menu = false }
 }
 
 private fun copier(ctx: Context, texte: String) {

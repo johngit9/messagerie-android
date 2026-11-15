@@ -36,6 +36,10 @@ android {
 
     buildTypes {
         release {
+            // R8 : retire le code inutilisé (la bibliothèque d'icônes est très grosse sinon).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("publication") ?: signingConfigs.getByName("debug")
         }
     }
@@ -52,6 +56,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.core.ktx)

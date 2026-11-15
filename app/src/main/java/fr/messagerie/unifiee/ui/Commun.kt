@@ -1,6 +1,25 @@
 package fr.messagerie.unifiee.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.MarkEmailRead
+import androidx.compose.material.icons.outlined.MarkEmailUnread
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
+import fr.messagerie.unifiee.Conversation
+import fr.messagerie.unifiee.Etat
+import fr.messagerie.unifiee.Moteur
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -77,8 +96,8 @@ fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp) {
                 Brush.verticalGradient(listOf(Color.hsv(teinte, 0.45f, 0.85f), Color.hsv(teinte, 0.65f, 0.62f))), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(if (groupe) "👥" else initiales, color = Color.White, fontWeight = FontWeight.SemiBold,
-                fontSize = (taille.value * 0.36f).sp)
+            if (groupe) Icon(Icons.Outlined.Group, "Groupe", tint = Color.White, modifier = Modifier.size(taille * 0.5f))
+            else Text(initiales, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = (taille.value * 0.36f).sp)
         }
         Box(
             Modifier.align(Alignment.BottomEnd).size(taille * 0.38f)
@@ -101,4 +120,30 @@ fun Etiquette(texte: String, couleur: Color, plein: Boolean = false) {
         color = if (plein) Color.White else couleur,
         modifier = Modifier.background(if (plein) couleur else couleur.copy(alpha = 0.15f), RoundedCornerShape(5.dp))
             .padding(horizontal = 5.dp, vertical = 1.dp))
+}
+
+/** Une action sur une conversation. */
+class Action(val libelle: String, val icone: ImageVector, val faire: () -> Unit)
+
+/** Actions communes (liste et conversation). Toutes LOCALES sauf « Refaire le résumé » (Ollama). */
+fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
+    if (e.estNonLue(c)) add(Action("Marquer comme lu", Icons.Outlined.MarkEmailRead) { Moteur.marquerLue(c) })
+    else add(Action("Marquer comme non lu", Icons.Outlined.MarkEmailUnread) { Moteur.marquerNonLue(c) })
+    add(Action(if (e.etat(c).manuel) "Retirer de « À traiter »" else "Ajouter à « À traiter »", Icons.Outlined.Flag) { Moteur.basculerATraiter(c) })
+    add(Action("Marquer comme traitée", Icons.Outlined.TaskAlt) { Moteur.marquerTraitee(c) })
+    if (e.etat(c).sourdine) add(Action("Réactiver les notifications", Icons.Outlined.Notifications) { Moteur.basculerSourdine(c) })
+    else add(Action("Mettre en sourdine", Icons.Outlined.NotificationsOff) { Moteur.basculerSourdine(c) })
+    if (Moteur.cfg.ollamaConfigure) add(Action("Refaire le résumé IA", Icons.Outlined.AutoAwesome) { Moteur.regenerer(c) })
+}
+
+@Composable
+fun ElementAction(icone: ImageVector, libelle: String, clic: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = clic).padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icone, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(20.dp))
+        Text(libelle, style = MaterialTheme.typography.bodyLarge)
+    }
 }
