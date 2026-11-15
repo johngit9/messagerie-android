@@ -40,6 +40,9 @@ jobs:
           if [ -n "$CLE" ]; then
             echo "$CLE" | base64 -d > "$RUNNER_TEMP/cle.jks"
             echo "CLE_SIGNATURE_FICHIER=$RUNNER_TEMP/cle.jks" >> "$GITHUB_ENV"
+            echo "Signature : clé fixe du dépôt"
+          else
+            echo "::warning::Signature : clé de débogage (secrets CLE_SIGNATURE_* absents)"
           fi
 
       - name: Compiler
