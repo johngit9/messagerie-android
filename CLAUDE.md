@@ -31,6 +31,8 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 | `Config.kt` | Réglages (SharedPreferences), import/export JSON, historique des imports |
 | `MiseAJour.kt` | Vérifie la dernière Release GitHub publique, télécharge et installe l'APK |
 | `Lecteur.kt` | Lecture des vocaux (MediaPlayer) |
+| `SynchroArrierePlan.kt` | WorkManager : synchro toutes les 15 min appli fermée (réglage « Vérifier régulièrement ») |
+| `ui/Medias.kt` | Photos (Coil, plein écran), vidéos et documents ouverts via FileProvider |
 | `ui/Liste.kt`, `ui/Conversation.kt`, `ui/Reglages.kt`, `ui/Commun.kt` | Écrans Compose |
 | `ui/VueModeles.kt` | ViewModel par écran : `ListeVM` (filtres, recherche hors fil d'affichage), `ConversationVM` (historique, réactions) |
 | `MainActivity.kt` | Thème (palette des maquettes ou Material You en option, échelle `Affichage`) et Navigation Compose (`liste`, `conversation/{cle}`, `reglages`, `accueil`) avec transitions |

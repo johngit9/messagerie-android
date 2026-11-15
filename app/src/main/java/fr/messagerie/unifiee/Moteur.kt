@@ -280,6 +280,9 @@ object Moteur {
         }
     }
 
+    /** Attend la fin des résumés en cours (synchro en arrière-plan). */
+    suspend fun attendreResumes() { fileIA?.join() }
+
     /** Résume une conversation ; false si Ollama ne répond pas. */
     suspend fun resumer(c: Conversation): Boolean {
         _etat.update { it.copy(resumesEnCours = it.resumesEnCours + c.cle) }

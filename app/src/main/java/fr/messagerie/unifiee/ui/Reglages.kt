@@ -125,6 +125,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
 
     fun quitter() {
         if (connexionsModifiees) Moteur.redemarrer()
+        fr.messagerie.unifiee.SynchroArrierePlan.programmer(ctx)
         ServiceVeille.mettreAJour(ctx)
         connexionsModifiees = false
         retour()
@@ -399,6 +400,10 @@ private fun PageNotifications(version: Int) {
     Interrupteur("Notifier quand une réponse est attendue", notifs) { notifs = it; cfg.notifications = it }
     Interrupteur("Rester à l'écoute en arrière-plan", veille, "Affiche une notification permanente ; utile pour être prévenu appli fermée.") {
         veille = it; cfg.veilleArrierePlan = it; ServiceVeille.mettreAJour(ctx)
+    }
+    var fond by remember(version) { mutableStateOf(cfg.synchroArrierePlan) }
+    Interrupteur("Vérifier régulièrement appli fermée", fond, "Environ toutes les 15 min, sans notification permanente (géré par Android).") {
+        fond = it; cfg.synchroArrierePlan = it; fr.messagerie.unifiee.SynchroArrierePlan.programmer(ctx)
     }
     HorizontalDivider()
     Text("Vérification de secours toutes les :")
