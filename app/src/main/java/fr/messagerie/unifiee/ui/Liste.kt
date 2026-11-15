@@ -73,6 +73,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -118,10 +119,10 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             },
-            bottomBar = { if (sources.size > 1) BarreSources(e, sources, source) { vm.source.value = it } },
         ) { pad ->
             Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
-                Entete(e, vue, genre, espace, source, visibles.size, recherche,
+                Entete(e, vue, genre, espace, source, visibles.size, recherche, sources,
+                    choisirSource = { vm.source.value = it },
                     choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
                     choisirEspace = { vm.espace.value = it },
                     ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
@@ -160,6 +161,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
 @Composable
 private fun Entete(
     e: Etat, vue: Vue, genre: Genre, espace: Espace, source: Source?, nombre: Int, recherche: String,
+    sources: List<Source>, choisirSource: (Source?) -> Unit,
     choisirGenre: (Genre) -> Unit, choisirEspace: (Espace) -> Unit,
     ouvrirTiroir: () -> Unit, ouvrirReglages: () -> Unit, chercher: (String) -> Unit, choisirVue: (Vue) -> Unit,
 ) {
@@ -221,6 +223,8 @@ private fun Entete(
             }
             if (recherche.isNotEmpty()) IconButton(onClick = { chercher("") }) { Icon(Icons.Outlined.Close, "Effacer") }
         }
+        // Messageries : rangée de logos (anneau de couleur s'il y a du non lu)
+        if (sources.size > 1) RangeeSources(e, sources, source, choisirSource)
         // Pastilles de vue
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Vue.entries.forEach { v ->
@@ -260,6 +264,48 @@ private fun PastilleVue(libelle: String, n: Int, choisie: Boolean, clic: () -> U
 }
 
 /** Barre du bas : une entrée par messagerie, plus « Tout ». */
+@Composable
+private fun RangeeSources(e: Etat, sources: List<Source>, choisie: Source?, choisir: (Source?) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        RondSource("Toutes", null, choisie == null, e.nombreMessagesNonLus(null), erreur = false) { choisir(null) }
+        sources.forEach { s ->
+            RondSource(s.id, s, choisie == s, e.nombreMessagesNonLus(s), erreur = e.sources[s] is EtatSource.Erreur) {
+                choisir(if (choisie == s) null else s)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RondSource(nom: String, source: Source?, choisi: Boolean, n: Int, erreur: Boolean, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val couleur = source?.let { Color(it.couleur) } ?: cs.onSurface
+    Column(
+        Modifier.width(62.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = clic).padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            // Anneau : plein si choisi, à la couleur de la messagerie s'il y a du non lu
+            Box(Modifier.size(52.dp).border(
+                if (choisi) 3.dp else 2.dp,
+                when { choisi -> cs.primary; n > 0 -> couleur; else -> cs.outlineVariant }, CircleShape))
+            if (source != null) LogoSource(source, 40.dp)
+            else Box(Modifier.size(40.dp).background(cs.onSurface, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Inbox, null, tint = cs.surface, modifier = Modifier.size(20.dp))
+            }
+            if (n > 0) Box(Modifier.align(Alignment.TopEnd).defaultMinSize(minWidth = 20.dp).height(20.dp)
+                .background(cs.primary, CircleShape).border(2.dp, cs.background, CircleShape).padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center) {
+                Text(compte(n), color = cs.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+            if (erreur) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).background(cs.error, CircleShape).border(2.dp, cs.background, CircleShape))
+        }
+        Text(nom, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontWeight = if (choisi) FontWeight.Bold else FontWeight.Medium,
+            color = if (choisi) cs.primary else cs.onSurfaceVariant)
+    }
+}
+
 @Composable
 private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, choisir: (Source?) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp) {
