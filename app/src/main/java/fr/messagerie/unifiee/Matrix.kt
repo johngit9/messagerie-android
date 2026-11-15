@@ -423,6 +423,11 @@ class SyncPont(
                 texte = when (type) { "image" -> "[photo]"; "video" -> "[vidéo]"; else -> "[fichier] $corps" }
                 val nom = c.optString("filename").ifEmpty { corps }.replace("#", "")
                 c.optString("url").takeIf { it.isNotEmpty() }?.let { media = it + "#" + (info?.optString("mimetype")?.ifEmpty { null } ?: "application/octet-stream") + "#" + nom }
+                // Vidéo : vignette fournie par la passerelle (4e champ) et durée
+                if (type == "video") {
+                    info?.optString("thumbnail_url")?.takeIf { it.startsWith("mxc://") }?.let { v -> media = media?.plus("#" + v) }
+                    duree = info?.ts("duration")?.let { it / 1000.0 }
+                }
             }
             "m.location" -> { type = "autre"; texte = "[position]" }
             else -> if (corps.isEmpty()) return null

@@ -53,6 +53,8 @@ import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
 import fr.messagerie.unifiee.Message
 import fr.messagerie.unifiee.Moteur
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.PlayArrow
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -154,4 +156,72 @@ private fun ouvrirAvec(ctx: Context, f: File, m: Message) {
             Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Ouvrir avec")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: Exception) {}
+}
+
+/** Vidéo dans la bulle : aperçu (vignette) avec bouton lecture ; lecture dans l'appli au toucher. */
+@Composable
+fun VideoMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
+    if (m.media == null) { FichierMessage(m, couleur, afficher); return }
+    val portee = rememberCoroutineScope()
+    var essai by remember { mutableStateOf(0) }
+    val apercu by produceState<File?>(null, m.cle, essai) { value = Moteur.vignetteVideo(m, telecharger = essai > 0) }
+    var chargement by remember { mutableStateOf(false) }
+    var lecture by remember { mutableStateOf<File?>(null) }
+    Box(
+        Modifier.width(240.dp).heightIn(min = 140.dp, max = 320.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF15171C))
+            .clickable(enabled = !chargement) {
+                chargement = true
+                portee.launch {
+                    runCatching { Moteur.fichierMedia(m) }
+                        .onSuccess { lecture = it; if (apercu == null) essai++ }
+                        .onFailure { afficher("Vidéo indisponible : ${it.message ?: it.javaClass.simpleName}") }
+                    chargement = false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        apercu?.let { AsyncImage(model = it, contentDescription = "Aperçu de la vidéo", contentScale = ContentScale.Crop,
+            modifier = Modifier.matchParentSize()) }
+        Box(Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape), contentAlignment = Alignment.Center) {
+            if (chargement) CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 2.dp, color = Color.White)
+            else Icon(Icons.Outlined.PlayArrow, "Lire la vidéo", tint = Color.White, modifier = Modifier.size(34.dp))
+        }
+        m.duree?.takeIf { it > 0 }?.let { d ->
+            val s = d.toInt()
+            Text("${s / 60}:${"%02d".format(s % 60)}", color = Color.White, fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp))
+        }
+        if (apercu == null && !chargement) Text("Vidéo", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+    }
+    lecture?.let { f -> LecteurVideo(f, m) { lecture = null } }
+}
+
+/** Lecteur vidéo plein écran (commandes Android standard). */
+@Composable
+private fun LecteurVideo(f: File, m: Message, fermer: () -> Unit) {
+    val ctx = LocalContext.current
+    Dialog(onDismissRequest = fermer, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { c ->
+                    android.widget.VideoView(c).apply {
+                        val commandes = android.widget.MediaController(c)
+                        commandes.setAnchorView(this)
+                        setMediaController(commandes)
+                        setVideoPath(f.absolutePath)
+                        setOnPreparedListener { start() }
+                    }
+                },
+                onRelease = { it.stopPlayback() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth().align(Alignment.TopStart).statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = fermer) { Icon(Icons.Outlined.Close, "Fermer", tint = Color.White) }
+                Text(m.auteur + " · " + heure(m.date), color = Color.White, modifier = Modifier.weight(1f))
+                IconButton(onClick = { ouvrirAvec(ctx, f, m) }) { Icon(Icons.Outlined.OpenInNew, "Ouvrir avec…", tint = Color.White) }
+            }
+        }
+    }
 }

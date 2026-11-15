@@ -455,7 +455,8 @@ private fun Bulle(
                     Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
                         color = couleur, fontStyle = FontStyle.Italic)
                 "image" -> PhotoMessage(m, couleur)
-                "video", "fichier" -> FichierMessage(m, couleur, afficherMessage)
+                "video" -> VideoMessage(m, couleur, afficherMessage)
+                "fichier" -> FichierMessage(m, couleur, afficherMessage)
                 else -> Text(m.texte, color = couleur)
             }
             Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.End))

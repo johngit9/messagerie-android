@@ -494,6 +494,41 @@ object Moteur {
         f
     }
 
+    /** Fichier déjà téléchargé d'un média (sans le télécharger), ou null. */
+    fun mediaEnCache(m: Message): java.io.File? {
+        val parts = m.media?.split('#') ?: return null
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(parts[0].toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        return java.io.File(java.io.File(app.cacheDir, "medias"), "$hash.${extension(parts.getOrNull(1) ?: "", m.type)}").takeIf { it.exists() && it.length() > 0 }
+    }
+
+    /**
+     * Aperçu d'une vidéo : vignette envoyée par la messagerie, sinon image tirée de la vidéo
+     * si elle est déjà sur le téléphone (ou si telecharger = true). null si aucun aperçu possible.
+     */
+    suspend fun vignetteVideo(m: Message, telecharger: Boolean = false): java.io.File? = withContext(Dispatchers.IO) {
+        val parts = m.media?.split('#') ?: return@withContext null
+        val dossier = java.io.File(app.cacheDir, "medias").apply { mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(parts[0].toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        val f = java.io.File(dossier, "$hash-apercu.jpg")
+        if (f.exists() && f.length() > 0) return@withContext f
+        val octets: ByteArray? = parts.getOrNull(3)?.takeIf { it.startsWith("mxc://") }?.let { v -> runCatching { Matrix(cfg).media(v) }.getOrNull() }
+            ?: run {
+                val video = mediaEnCache(m) ?: if (telecharger) runCatching { fichierMedia(m) }.getOrNull() else null
+                video?.let { v ->
+                    runCatching {
+                        val r = android.media.MediaMetadataRetriever()
+                        try {
+                            r.setDataSource(v.absolutePath)
+                            val image = r.getFrameAtTime(1_000_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: r.frameAtTime
+                            java.io.ByteArrayOutputStream().also { image?.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
+                        } finally { r.release() }
+                    }.getOrNull()?.takeIf { it.isNotEmpty() }
+                }
+            }
+        if (octets == null) return@withContext null
+        f.writeBytes(octets); f
+    }
+
     private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()
 
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
