@@ -251,6 +251,26 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 }, ouvrir, pastille = majDisponible(ctx))
             }
 
+            // Latence de réception : heure du message sur le serveur → arrivée sur ce téléphone
+            val latences = Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
+            Groupe("Latence de réception (serveur → téléphone)") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (latences.isEmpty()) Text("Pas encore mesurée : elle s'affichera après les prochains messages reçus.",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    latences.forEach { (src, d) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LogoSource(src, 22.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(src.id, modifier = Modifier.weight(1f))
+                            Text("moy. ${duree(d.average().toLong())} · max ${duree(d.max())} · dernier ${duree(d.last())}",
+                                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (latences.isNotEmpty()) Text("Sur les 50 derniers messages reçus de chaque messagerie (imports d'historique exclus).",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
             if (e.statistiques.isNotEmpty()) Groupe("Messages archivés") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Source.entries.forEach { s ->
