@@ -400,6 +400,11 @@ class SyncPont(
     /** Convertit un événement Matrix en message (texte, vocal, photo…). */
     private fun messageMatrix(e: JSONObject, membres: Map<String, String>, moi: String?, cle: String, conv: String): Message? {
         val ts = e.ts("origin_server_ts") ?: return null
+        // Heure d'arrivée sur le serveur (Synapse donne l'âge de l'événement) : sert à découper la latence.
+        e.optJSONObject("unsigned")?.optLong("age", -1L)?.takeIf { it >= 0 }?.let { age ->
+            val surServeur = System.currentTimeMillis() - age
+            if (surServeur - ts in 0..3_600_000L) ArriveesServeur.noter(cle, surServeur)
+        }
         val c = e.optJSONObject("content") ?: return null
         val exp = e.optString("sender").takeIf { it.isNotEmpty() } ?: return null
         if (c.optJSONObject("m.relates_to")?.optString("rel_type") == "m.replace") return null
@@ -426,4 +431,11 @@ class SyncPont(
         val auteur = if (deMoi) "Vous" else membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un"
         return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree)
     }
+}
+
+/** Heure d'arrivée de chaque nouveau message sur le serveur (mémoire seulement, quelques centaines au plus). */
+object ArriveesServeur {
+    private val heures = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    fun noter(cle: String, heure: Long) { if (heures.size > 2000) heures.clear(); heures[cle] = heure }
+    fun prendre(cle: String): Long? = heures.remove(cle)
 }

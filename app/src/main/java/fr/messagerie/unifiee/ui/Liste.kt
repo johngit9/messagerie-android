@@ -225,8 +225,8 @@ private fun Entete(
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Vue.entries.forEach { v ->
                 val n = when (v) {
-                    Vue.ATraiter -> e.nombreATraiter
-                    Vue.NonLus -> e.nombreMessagesNonLus(source)
+                    Vue.ATraiter -> e.nombreATraiter(source, espace.pro)
+                    Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro)
                     else -> 0
                 }
                 PastilleVue(v.libelle, n, v == vue) { choisirVue(v) }
@@ -267,9 +267,9 @@ private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, chois
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround) {
-                OngletSource("Tout", null, choisie == null, e.nombreMessagesNonLus(null), erreur = false) { choisir(null) }
+                OngletSource("Tout", null, choisie == null, e.nombreMessagesNonLus(null, espace.pro), erreur = false) { choisir(null) }
                 sources.forEach { s ->
-                    OngletSource(s.id, s, choisie == s, e.nombreMessagesNonLus(s), erreur = e.sources[s] is EtatSource.Erreur) { choisir(s) }
+                    OngletSource(s.id, s, choisie == s, e.nombreMessagesNonLus(s, espace.pro), erreur = e.sources[s] is EtatSource.Erreur) { choisir(s) }
                 }
             }
         }

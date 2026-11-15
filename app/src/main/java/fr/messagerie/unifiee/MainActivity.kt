@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun Theme(contenu: @Composable () -> Unit) {
-    val sombre = isSystemInDarkTheme()
+    val sombre = when (Affichage.theme) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
     val ctx = LocalContext.current
     // Palette de la marque (indigo), identique sur tous les téléphones.
     val couleurs = if (sombre) darkColorScheme(
@@ -109,8 +109,18 @@ fun Theme(contenu: @Composable () -> Unit) {
         surfaceVariant = Color(0xFFECEEF2), outlineVariant = Color(0xFFECEEF2),
         surfaceContainer = Color(0xFFEFF1F4), surfaceContainerHigh = Color(0xFFE9EBEF), surfaceContainerLow = Color.White,
     )
-    val schema = if (Affichage.dynamique && Build.VERSION.SDK_INT >= 31)
+    val base = if (Affichage.dynamique && Build.VERSION.SDK_INT >= 31)
         (if (sombre) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)) else couleurs
+    // Couleur principale choisie dans Réglages > Apparence
+    val schema = Affichage.accent.takeIf { it != 0L && !Affichage.dynamique }?.let { a ->
+        val c = Color(a)
+        if (sombre) base.copy(
+            primary = androidx.compose.ui.graphics.lerp(c, Color.White, 0.35f), onPrimary = Color(0xFF111318),
+            primaryContainer = androidx.compose.ui.graphics.lerp(c, Color(0xFF111318), 0.55f), onPrimaryContainer = Color.White)
+        else base.copy(
+            primary = c, onPrimary = Color.White,
+            primaryContainer = androidx.compose.ui.graphics.lerp(c, Color.White, 0.85f), onPrimaryContainer = androidx.compose.ui.graphics.lerp(c, Color.Black, 0.45f))
+    } ?: base
     val d = androidx.compose.ui.platform.LocalDensity.current
     val echelle = androidx.compose.ui.unit.Density(d.density * Affichage.zoom / 100f, d.fontScale * Affichage.texte / 100f)
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides echelle) {
@@ -123,7 +133,14 @@ object Affichage {
     var zoom by androidx.compose.runtime.mutableIntStateOf(100)
     var texte by androidx.compose.runtime.mutableIntStateOf(100)
     var dynamique by mutableStateOf(false)
-    fun charger(c: Config) { zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques }
+    var theme by androidx.compose.runtime.mutableIntStateOf(0)
+    var accent by androidx.compose.runtime.mutableLongStateOf(0L)
+    /** Couleurs choisies par messagerie (absentes = couleur d'origine). */
+    val couleurs = androidx.compose.runtime.mutableStateMapOf<Source, Long>()
+    fun charger(c: Config) {
+        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent
+        couleurs.clear(); Source.entries.forEach { s -> c.couleur(s).takeIf { it != 0L }?.let { couleurs[s] = it } }
+    }
 }
 
 @Composable

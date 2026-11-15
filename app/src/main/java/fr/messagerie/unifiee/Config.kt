@@ -73,6 +73,22 @@ class Config(context: Context) {
     var epinglees: List<String>
         get() = try { org.json.JSONArray(p.getString("epinglees", "[]")).let { a -> (0 until a.length()).map { a.getString(it) } } } catch (_: Exception) { emptyList() }
         set(v) = p.edit().putString("epinglees", org.json.JSONArray(v).toString()).apply()
+    /** Thème : 0 = comme le téléphone, 1 = clair, 2 = sombre. */
+    var theme: Int get() = p.getInt("theme", 0); set(v) = p.edit().putInt("theme", v).apply()
+    /** Couleur principale de l'appli (0 = bleu d'origine). */
+    var accent: Long get() = p.getLong("accent", 0L); set(v) = p.edit().putLong("accent", v).apply()
+    /** Couleur choisie pour une messagerie (0 = couleur d'origine). */
+    fun couleur(s: Source): Long = p.getLong("couleur.${s.id}", 0L)
+    fun definirCouleur(s: Source, v: Long) = p.edit().putLong("couleur.${s.id}", v).apply()
+    fun couleurEffective(s: Source): Long = couleur(s).takeIf { it != 0L } ?: s.couleur
+    /** Heures de silence des notifications (-1 = désactivé), de debut à fin, en heures pleines. */
+    var silenceDebut: Int get() = p.getInt("silenceDebut", -1); set(v) = p.edit().putInt("silenceDebut", v).apply()
+    var silenceFin: Int get() = p.getInt("silenceFin", 7); set(v) = p.edit().putInt("silenceFin", v).apply()
+    fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
+        val d = silenceDebut; val f = silenceFin
+        if (d < 0 || d == f) return false
+        return if (d < f) heure in d until f else heure >= d || heure < f
+    }
     var couleursDynamiques: Boolean get() = p.getBoolean("dynamique", false); set(v) = p.edit().putBoolean("dynamique", v).apply()
     var verifierMaj: Boolean get() = p.getBoolean("verifierMaj", true); set(v) = p.edit().putBoolean("verifierMaj", v).apply()
 

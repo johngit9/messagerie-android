@@ -29,7 +29,7 @@ enum class Vue(val libelle: String) { Toutes("Toutes"), NonLus("Non lues"), ATra
 /** Discussions à deux ou groupes. */
 enum class Genre(val libelle: String) { Tous("Tous"), Discussions("Discussions"), Groupes("Groupes") }
 /** Vues Pro / Perso. */
-enum class Espace(val libelle: String) { Tout("Tout"), Perso("Perso"), Pro("Pro") }
+enum class Espace(val libelle: String, val pro: Boolean?) { Tout("Tout", null), Perso("Perso", false), Pro("Pro", true) }
 
 /** Liste des conversations : filtres et recherche calculés hors du fil d'affichage. */
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)

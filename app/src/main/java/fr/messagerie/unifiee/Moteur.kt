@@ -67,8 +67,10 @@ data class Etat(
     fun nombreNonLus(c: Conversation): Int { val d = luJusqua(c); return c.messages.count { !it.deMoi && it.date > d } }
     fun estForcee(c: Conversation) = etat(c).forcee == c.derniere
     fun estNonLue(c: Conversation) = estForcee(c) || nombreNonLus(c) > 0
-    fun nombreMessagesNonLus(s: Source?) = conversations.filter { s == null || it.source == s }
-        .sumOf { maxOf(nombreNonLus(it), if (estForcee(it)) 1 else 0) }
+    /** Non-lus (messages) d'une messagerie, en option seulement Pro (true) ou Perso (false) ; archivées exclues. */
+    fun nombreMessagesNonLus(s: Source?, pro: Boolean? = null) =
+        conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && !estArchivee(it) }
+            .sumOf { maxOf(nombreNonLus(it), if (estForcee(it)) 1 else 0) }
 
     val depuis get() = System.currentTimeMillis() - jours * 86_400_000L
 
@@ -81,7 +83,9 @@ data class Etat(
         return s.actionRequise && e.traitee != c.derniere
     }
 
-    val nombreATraiter get() = conversations.count { aTraiter(it) }
+    val nombreATraiter get() = conversations.count { aTraiter(it) && !estArchivee(it) }
+    fun nombreATraiter(s: Source?, pro: Boolean?) =
+        conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && aTraiter(it) && !estArchivee(it) }
     fun libelleSource(c: Conversation) = if (c.cle in rcs) "RCS" else c.source.id
 }
 
@@ -548,7 +552,12 @@ object Moteur {
     const val CANAL_MESSAGES = "messages"
 
     /** Délais de réception mesurés (ms) : date d'arrivée sur le téléphone − date du message sur le serveur. */
-    fun delais(s: Source): List<Long> = archive.curseur("delais.${s.id}")?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList()
+    fun delais(s: Source): List<Long> = liste("delais.${s.id}")
+    /** Découpage : réseau officiel → serveur (passerelle), et serveur → téléphone. */
+    fun delaisPasserelle(s: Source): List<Long> = liste("delais.pont.${s.id}")
+    fun delaisTelephone(s: Source): List<Long> = liste("delais.tel.${s.id}")
+    private fun liste(k: String) = archive.curseur(k)?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList()
+    private fun ajouter(k: String, v: List<Long>) { if (v.isNotEmpty()) archive.definirCurseur(k, (liste(k) + v).takeLast(50).joinToString(",")) }
 
     private fun nouveauxMessages() {
         val maintenant = System.currentTimeMillis()
@@ -560,8 +569,11 @@ object Moteur {
         if (nouveaux.isEmpty()) return
         // Délai : seulement pour des messages arrivés « en direct » (moins de 10 min).
         nouveaux.groupBy { it.first.source }.forEach { (s, l) ->
-            val mesures = l.map { maintenant - it.second.date }.filter { it in 0..3_600_000 }
-            if (mesures.isNotEmpty()) archive.definirCurseur("delais.${s.id}", (delais(s) + mesures).takeLast(50).joinToString(","))
+            val enDirect = l.filter { maintenant - it.second.date in 0..3_600_000 }
+            ajouter("delais.${s.id}", enDirect.map { maintenant - it.second.date })
+            val decoupes = enDirect.mapNotNull { (_, m) -> ArriveesServeur.prendre(m.cle)?.let { srv -> (srv - m.date) to (maintenant - srv) } }
+            ajouter("delais.pont.${s.id}", decoupes.map { it.first.coerceAtLeast(0) })
+            ajouter("delais.tel.${s.id}", decoupes.map { it.second.coerceAtLeast(0) })
         }
         if (auPremierPlan) return
         nouveaux.filter { maintenant - it.second.date < 3_600_000 }.groupBy { it.first }.forEach { (c, l) ->
@@ -588,8 +600,12 @@ object Moteur {
             .setSmallIcon(R.drawable.ic_bulle)
             .setSubText(libelle(c))
             .setStyle(style)
-            .setColor(c.source.couleur.toInt())
+            .setColor(cfg.couleurEffective(c.source).toInt())
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // Chiffre sur l'icône (si le lanceur du téléphone l'affiche) : non-lus de la conversation
+            .setNumber(_etat.value.conversations.firstOrNull { it.cle == c.cle }?.let { _etat.value.nombreNonLus(it) }?.coerceAtLeast(msgs.size) ?: msgs.size)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+            .setSilent(cfg.enSilence())
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setGroup("messages")
@@ -618,6 +634,9 @@ object Moteur {
             .setStyle(NotificationCompat.BigTextStyle().bigText(s.resume))
             .setContentIntent(pi)
             .setAutoCancel(true)
+            .setNumber(_etat.value.nombreNonLus(c).coerceAtLeast(1))
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+            .setSilent(cfg.enSilence())
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }

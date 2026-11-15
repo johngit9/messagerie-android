@@ -53,7 +53,7 @@ import java.util.Locale
 val degradeIA = Brush.linearGradient(listOf(Color(0xFFFA7340), Color(0xFFD94DBF), Color(0xFF5973FF)))
 val orangeAttente = Color(0xFFE8833A)
 
-fun Source.teinte() = Color(couleur)
+fun Source.teinte() = Color(fr.messagerie.unifiee.Affichage.couleurs[this] ?: couleur)
 
 private fun memeJour(a: Calendar, b: Calendar) = a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
 
