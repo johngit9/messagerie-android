@@ -18,6 +18,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 - Signature : clé fixe dans les secrets `CLE_SIGNATURE_BASE64`, `CLE_SIGNATURE_MDP`, `CLE_SIGNATURE_ALIAS`. Le journal doit afficher « Signature : clé fixe du dépôt » ; sinon l'APK ne s'installera pas par-dessus.
 - Versions : catalogue `gradle/libs.versions.toml` (AGP 9.4, Kotlin 2.2, Gradle 9.6, compileSdk 37, minSdk 26). R8 + réduction des ressources actifs en release.
 - Les modifications de `*.md` seules ne déclenchent pas de compilation.
+- **Après chaque version, lancer le workflow « Tester le démarrage »** (`test-demarrage.yml`, `workflow_dispatch`) : il installe la dernière Release dans un émulateur et affiche le plantage éventuel. R8 casse ce qui passe par réflexion (ex. base Room de WorkManager) : ajouter les règles dans `app/proguard-rules.pro`.
 
 ## Architecture (`app/src/main/java/fr/messagerie/unifiee/`)
 
