@@ -106,8 +106,8 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     val conv = selection?.let { s -> etat.conversations.firstOrNull { it.cle == s } }
     when {
         reglages -> {
-            BackHandler(enabled = Moteur.cfg.configure) { reglages = false }
-            EcranReglages(etat, retour = if (Moteur.cfg.configure) ({ reglages = false }) else null)
+            val accueil = remember { !Moteur.cfg.configure }
+            EcranReglages(etat, accueil = accueil, retour = { reglages = false })
         }
         conv != null -> {
             BackHandler { selection = null }

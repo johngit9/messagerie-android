@@ -116,7 +116,7 @@ private object EtatMaj {
  * Chaque changement est enregistré aussitôt ; les connexions sont relancées en quittant les Réglages.
  */
 @Composable
-fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
+fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
     val cfg = Moteur.cfg
     val ctx = LocalContext.current
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
@@ -127,9 +127,9 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
         if (connexionsModifiees) Moteur.redemarrer()
         ServiceVeille.mettreAJour(ctx)
         connexionsModifiees = false
-        retour?.invoke()
+        retour()
     }
-    BackHandler(enabled = page != null || retour != null) { if (page != null) page = null else quitter() }
+    BackHandler(enabled = page != null || Moteur.cfg.configure) { if (page != null) page = null else quitter() }
 
     LaunchedEffect(Unit) { if (cfg.verifierMaj && !EtatMaj.verifie) verifierMaj(ctx) }
 
@@ -141,7 +141,7 @@ fun EcranReglages(e: Etat, retour: (() -> Unit)?) {
         },
         label = "reglages",
     ) { p ->
-        if (p == null) Menu(e, retour?.let { { quitter() } }, ouvrir = { page = it })
+        if (p == null) Menu(e, accueil, quitter = { quitter() }, ouvrir = { page = it })
         else PageReglage(p.titre, retour = { page = null }) {
             when (p) {
                 Page.Matrix -> PageMatrix(version) { connexionsModifiees = true }
@@ -170,20 +170,20 @@ private fun majDisponible(ctx: android.content.Context) =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Menu(e: Etat, retour: (() -> Unit)?, ouvrir: (Page) -> Unit) {
+private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
     val ctx = LocalContext.current
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("Réglages") },
-            navigationIcon = { if (retour != null) IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
+            navigationIcon = { if (!accueil) IconButton(onClick = quitter) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
         )
     }) { pad ->
         Column(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (retour == null) {
+            if (accueil) {
                 Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Bienvenue", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
@@ -257,11 +257,8 @@ private fun Menu(e: Etat, retour: (() -> Unit)?, ouvrir: (Page) -> Unit) {
                 }
             }
 
-            if (retour == null) Button(
-                onClick = {
-                    Moteur.redemarrer(); ServiceVeille.mettreAJour(ctx)
-                    (ctx as? android.app.Activity)?.recreate()
-                },
+            if (accueil) Button(
+                onClick = { Moteur.redemarrer(); quitter() },
                 enabled = cfg.configure,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp), shape = RoundedCornerShape(14.dp),
             ) { Text(if (cfg.configure) "Commencer" else "Renseignez d'abord une connexion") }
