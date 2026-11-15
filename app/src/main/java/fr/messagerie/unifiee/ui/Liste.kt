@@ -118,7 +118,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             },
-            bottomBar = { if (sources.size > 1) BarreSources(e, sources, source) { vm.source.value = it } },
+            bottomBar = { if (sources.size > 1) BarreSources(e, sources, source, espace) { vm.source.value = it } },
         ) { pad ->
             Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
                 Entete(e, vue, genre, espace, source, visibles.size, recherche,
@@ -261,7 +261,7 @@ private fun PastilleVue(libelle: String, n: Int, choisie: Boolean, clic: () -> U
 
 /** Barre du bas : une entrée par messagerie, plus « Tout ». */
 @Composable
-private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, choisir: (Source?) -> Unit) {
+private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, espace: Espace, choisir: (Source?) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp) {
         Column {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

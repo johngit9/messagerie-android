@@ -84,6 +84,7 @@ import fr.messagerie.unifiee.Etat
 import fr.messagerie.unifiee.EtatSource
 import fr.messagerie.unifiee.MiseAJour
 import fr.messagerie.unifiee.Moteur
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
@@ -585,7 +586,7 @@ private fun PageNotifications(version: Int) {
             val modes = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
             androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 modes.forEachIndexed { i, (v, l) ->
-                    androidx.compose.material3.SegmentedButton(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ },
+                    SegmentedButton(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ },
                         shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
                         label = { Text(l, fontSize = 12.sp, maxLines = 1) })
                 }
