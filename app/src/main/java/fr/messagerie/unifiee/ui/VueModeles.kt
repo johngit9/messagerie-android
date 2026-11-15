@@ -25,14 +25,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Vues de la liste (pastilles en haut). */
-enum class Vue(val libelle: String) { ATraiter("À traiter"), NonLus("Non lus"), Toutes("Toutes"), Groupes("Groupes") }
+enum class Vue(val libelle: String) { ATraiter("À traiter"), NonLus("Non lus"), Toutes("Toutes"), Archivees("Archivées") }
+/** Discussions à deux ou groupes. */
+enum class Genre(val libelle: String) { Tous("Tous"), Discussions("Discussions"), Groupes("Groupes") }
+/** Vues Pro / Perso. */
+enum class Espace(val libelle: String) { Tout("Tout"), Perso("Perso"), Pro("Pro") }
 
 /** Liste des conversations : filtres et recherche calculés hors du fil d'affichage. */
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class ListeVM : ViewModel() {
     val vue = MutableStateFlow(Vue.ATraiter)
     val source = MutableStateFlow<Source?>(null)
+    val genre = MutableStateFlow(Genre.Tous)
+    val espace = MutableStateFlow(Espace.Tout)
     val recherche = MutableStateFlow("")
+    private data class Filtres(val vue: Vue, val source: Source?, val genre: Genre, val espace: Espace)
+    private val filtres = combine(vue, source, genre, espace) { v, s, g, es -> Filtres(v, s, g, es) }
     /** Conversation ouverte en dernier : reste visible dans « Non lus » au retour. */
     var derniereOuverte: String? = null
 
@@ -42,18 +50,22 @@ class ListeVM : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     val visibles: StateFlow<List<Conversation>> =
-        combine(Moteur.etat, vue, source, recherche, trouvees) { e, v, s, q, t ->
+        combine(Moteur.etat, filtres, recherche, trouvees) { e, f, q, t ->
             var l = e.conversations.asSequence()
-            if (s != null) l = l.filter { it.source == s }
-            l = when (v) {
-                Vue.ATraiter -> l.filter { e.aTraiter(it) }
-                Vue.NonLus -> l.filter { e.estNonLue(it) || it.cle == derniereOuverte }
-                Vue.Toutes -> l
-                Vue.Groupes -> l.filter { it.estGroupe }
+            if (f.source != null) l = l.filter { it.source == f.source }
+            l = when (f.genre) { Genre.Tous -> l; Genre.Discussions -> l.filter { !it.estGroupe }; Genre.Groupes -> l.filter { it.estGroupe } }
+            l = when (f.espace) { Espace.Tout -> l; Espace.Perso -> l.filter { !e.estPro(it) }; Espace.Pro -> l.filter { e.estPro(it) } }
+            l = when (f.vue) {
+                Vue.ATraiter -> l.filter { e.aTraiter(it) && !e.estArchivee(it) }
+                Vue.NonLus -> l.filter { (e.estNonLue(it) || it.cle == derniereOuverte) && !e.estArchivee(it) }
+                Vue.Toutes -> l.filter { !e.estArchivee(it) }
+                Vue.Archivees -> l.filter { e.estArchivee(it) }
             }
             val r = q.trim()
             if (r.isNotEmpty()) l = l.filter { c -> c.nom.contains(r, true) || c.cle in t || e.synthese(c)?.resume?.contains(r, true) == true }
-            l.toList()
+            // Épinglées en tête (dans leur ordre), puis le reste par date.
+            val (ep, reste) = l.toList().partition { e.estEpinglee(it) }
+            ep.sortedBy { e.epinglees.indexOf(it.cle) } + reste
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 }
 

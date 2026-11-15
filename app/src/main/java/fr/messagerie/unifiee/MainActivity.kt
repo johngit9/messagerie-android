@@ -29,6 +29,7 @@ import fr.messagerie.unifiee.ui.EcranListe
 import fr.messagerie.unifiee.ui.EcranReglages
 import fr.messagerie.unifiee.ui.ConversationVM
 import fr.messagerie.unifiee.ui.ListeVM
+import fr.messagerie.unifiee.ui.EcranNouveau
 import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -66,8 +67,14 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra("cle")?.let { cleDemandee.value = it }
     }
 
+    override fun onPause() {
+        super.onPause()
+        Moteur.auPremierPlan = false
+    }
+
     override fun onResume() {
         super.onResume()
+        Moteur.auPremierPlan = true
         if (Moteur.cfg.configure) {
             Moteur.demarrer()
             Moteur.actualiserMaintenant()
@@ -137,7 +144,13 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
             val vm: ListeVM = viewModel()
             EcranListe(etat, vm,
                 ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } },
-                ouvrirReglages = { nav.navigate("reglages") { launchSingleTop = true } })
+                ouvrirReglages = { nav.navigate("reglages") { launchSingleTop = true } },
+                nouveau = { nav.navigate("nouveau") { launchSingleTop = true } })
+        }
+        composable("nouveau") {
+            EcranNouveau(etat, retour = { nav.popBackStack() }, ouvrir = { cle ->
+                nav.navigate("conversation/" + Uri.encode(cle)) { popUpTo("nouveau") { inclusive = true } }
+            })
         }
         composable("conversation/{cle}") { entree ->
             val cle = entree.arguments?.getString("cle") ?: ""

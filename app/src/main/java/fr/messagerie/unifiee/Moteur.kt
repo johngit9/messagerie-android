@@ -41,7 +41,16 @@ data class Etat(
     val resumesEnCours: Set<String> = emptySet(),
     val jours: Int = 3,
     val debutLecture: Long = 0,
+    val pro: Set<Source> = emptySet(),
+    val categories: Map<String, String> = emptyMap(),
+    val archivees: Map<String, Long> = emptyMap(),
+    val epinglees: List<String> = emptyList(),
 ) {
+    fun estPro(c: Conversation) = categories[c.cle]?.let { it == "pro" } ?: (c.source in pro)
+    /** Archivée tant qu'aucun message n'est reçu après l'archivage. */
+    fun estArchivee(c: Conversation) = archivees[c.cle]?.let { a -> c.messages.none { !it.deMoi && it.date > a } } ?: false
+    fun estEpinglee(c: Conversation) = c.cle in epinglees
+
     fun etat(c: Conversation) = etats[c.cle] ?: EtatConv()
 
     fun synthese(c: Conversation): Synthese? = syntheses[c.cle]?.takeIf { it.pourLeMessageDu == c.derniere }
@@ -92,6 +101,7 @@ object Moteur {
         app = context.applicationContext
         cfg = Config(app)
         archive = Archive(app)
+        chargerOrganisation()
         _etat.update { it.copy(jours = cfg.jours, debutLecture = cfg.debutLecture,
             rcs = archive.curseur("sms.rcs")?.split("\n")?.filter { s -> s.isNotEmpty() }?.toSet() ?: emptySet()) }
         if (Build.VERSION.SDK_INT >= 26) {
@@ -201,6 +211,7 @@ object Moteur {
             _etat.update { it.copy(sources = sources.toMap()) }
             recharger()
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
+            nouveauxMessages()
             lancerResumes()
         } finally {
             _etat.update { it.copy(enCours = false, importEnCours = null) }
@@ -382,6 +393,23 @@ object Moteur {
         f
     }
 
+    private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()
+
+    /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
+    suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
+        photos[conv]?.let { return@withContext it }
+        val mxc = archive.avatar(conv) ?: return@withContext null
+        val dossier = java.io.File(app.cacheDir, "avatars").apply { mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(mxc.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        val f = java.io.File(dossier, "$hash.img")
+        if (!f.exists() || f.length() == 0L) {
+            val donnees = runCatching { Matrix(cfg).miniature(mxc) }.getOrNull() ?: return@withContext null
+            f.writeBytes(donnees)
+        }
+        photos[conv] = f
+        f
+    }
+
     private fun extension(mime: String, type: String): String {
         val m = mime.lowercase()
         return when {
@@ -400,10 +428,91 @@ object Moteur {
 
     // MARK: Notifications
 
+    // MARK: Organisation (locale) : pro / perso, épingler, archiver
+
+    fun chargerOrganisation() {
+        _etat.update { it.copy(pro = Source.entries.filter { s -> cfg.pro(s) }.toSet(), categories = cfg.categories,
+            archivees = cfg.archivees, epinglees = cfg.epinglees) }
+    }
+    fun classer(c: Conversation, categorie: String?) {
+        cfg.categories = if (categorie == null) cfg.categories - c.cle else cfg.categories + (c.cle to categorie)
+        chargerOrganisation()
+    }
+    fun basculerEpingle(c: Conversation) {
+        val l = cfg.epinglees
+        if (c.cle in l) cfg.epinglees = l - c.cle
+        else { cfg.epinglees = l + c.cle; cfg.archivees = cfg.archivees - c.cle }
+        chargerOrganisation()
+    }
+    fun basculerArchive(c: Conversation) {
+        if (_etat.value.estArchivee(c)) cfg.archivees = cfg.archivees - c.cle
+        else { cfg.archivees = cfg.archivees + (c.cle to System.currentTimeMillis()); cfg.epinglees = cfg.epinglees - c.cle }
+        chargerOrganisation()
+    }
+
+    // MARK: Nouveaux messages : notification et délai de réception
+
+    /** Appli visible (pas de notification alors) et conversation ouverte. */
+    @Volatile var auPremierPlan = false
+    @Volatile var convOuverte: String? = null
+    const val CANAL_MESSAGES = "messages"
+
+    /** Délais de réception mesurés (ms) : date d'arrivée sur le téléphone − date du message sur le serveur. */
+    fun delais(s: Source): List<Long> = archive.curseur("delais.${s.id}")?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList()
+
+    private fun nouveauxMessages() {
+        val maintenant = System.currentTimeMillis()
+        val depuis = archive.curseur("vu.jusqua")?.toLongOrNull()
+        archive.definirCurseur("vu.jusqua", maintenant.toString())
+        if (depuis == null) return   // premier passage : rien à signaler
+        val e = _etat.value
+        val nouveaux = e.conversations.flatMap { c -> c.messages.filter { !it.deMoi && it.date > depuis }.map { c to it } }
+        if (nouveaux.isEmpty()) return
+        // Délai : seulement pour des messages arrivés « en direct » (moins de 10 min).
+        nouveaux.groupBy { it.first.source }.forEach { (s, l) ->
+            val mesures = l.map { maintenant - it.second.date }.filter { it in 0..3_600_000 }
+            if (mesures.isNotEmpty()) archive.definirCurseur("delais.${s.id}", (delais(s) + mesures).takeLast(50).joinToString(","))
+        }
+        if (auPremierPlan) return
+        nouveaux.filter { maintenant - it.second.date < 3_600_000 }.groupBy { it.first }.forEach { (c, l) ->
+            if (cfg.notif(c.source) != "tous" || e.etat(c).sourdine || c.cle == convOuverte) return@forEach
+            notifierMessages(c, l.map { it.second })
+        }
+    }
+
+    private fun notifierMessages(c: Conversation, msgs: List<Message>) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val canal = "$CANAL_MESSAGES.${c.source.id}"
+        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH))
+        val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(app, c.cle.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val moi = androidx.core.app.Person.Builder().setName("Vous").build()
+        val style = NotificationCompat.MessagingStyle(moi).setConversationTitle(if (c.estGroupe) c.nom else null).setGroupConversation(c.estGroupe)
+        msgs.takeLast(6).forEach { m ->
+            style.addMessage(m.texteUtile, m.date, androidx.core.app.Person.Builder().setName(if (c.estGroupe) m.auteur else c.nom).build())
+        }
+        val n = NotificationCompat.Builder(app, canal)
+            .setSmallIcon(R.drawable.ic_bulle)
+            .setSubText(libelle(c))
+            .setStyle(style)
+            .setColor(c.source.couleur.toInt())
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .setGroup("messages")
+            .build()
+        try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
+    }
+
+    private fun libelle(c: Conversation) = _etat.value.libelleSource(c)
+
     private fun notifierSiBesoin(c: Conversation) {
         val e = _etat.value
         val ec = e.etat(c)
-        if (!cfg.notifications || ec.sourdine || !e.aTraiter(c) || ec.notifiee == c.derniere) return
+        if (!cfg.notifications || cfg.notif(c.source) == "aucun" || ec.sourdine || !e.aTraiter(c) || ec.notifiee == c.derniere) return
         val s = e.synthese(c) ?: return
         majEtat(c.cle) { it.copy(notifiee = c.derniere) }
         if (Build.VERSION.SDK_INT >= 33 &&

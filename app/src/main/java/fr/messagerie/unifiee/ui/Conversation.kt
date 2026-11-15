@@ -121,7 +121,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     // Date de lecture à l'ouverture : place le repère « Nouveaux messages ».
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
 
-    LaunchedEffect(c.cle) { Moteur.marquerLue(c) }   // lu dans l'appli seulement : aucun accusé envoyé
+    LaunchedEffect(c.cle) { Moteur.marquerLue(c) }
+    androidx.compose.runtime.DisposableEffect(c.cle) {
+        Moteur.convOuverte = c.cle
+        androidx.core.app.NotificationManagerCompat.from(Moteur.app).cancel(c.cle.hashCode())
+        onDispose { if (Moteur.convOuverte == c.cle) Moteur.convOuverte = null }
+    }   // lu dans l'appli seulement : aucun accusé envoyé
     LaunchedEffect(c.derniere) {
         vm.actualiser(c.messages)
         if (!e.estForcee(c)) Moteur.marquerLue(c)
@@ -149,7 +154,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 navigationIcon = { IconButton(onClick = retour) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(c.nom, c.source, c.estGroupe, taille = 38.dp)
+                    Avatar(c.nom, c.source, c.estGroupe, taille = 38.dp, cle = c.cle)
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(c.nom, maxLines = 1, overflow = TextOverflow.Ellipsis)

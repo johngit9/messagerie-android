@@ -15,6 +15,11 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Work
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.Icon
 import androidx.compose.ui.graphics.vector.ImageVector
 import fr.messagerie.unifiee.Conversation
@@ -30,6 +35,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -79,7 +86,7 @@ fun jourComplet(ms: Long): String {
 fun heure(ms: Long): String = SimpleDateFormat("HH:mm", Locale.FRANCE).format(Date(ms))
 
 @Composable
-fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bordure: Color = MaterialTheme.colorScheme.surface) {
+fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bordure: Color = MaterialTheme.colorScheme.surface, cle: String? = null) {
     val initiales = nom.split(' ', '-').filter { it.firstOrNull()?.isLetter() == true }.take(2)
         .joinToString("") { it.first().uppercase() }.ifEmpty { "#" }
     val teinte = (nom.fold(0) { a, c -> (a * 31 + c.code) and 0xFFFF } % 360).toFloat()
@@ -91,11 +98,14 @@ fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bor
             if (groupe) Icon(Icons.Outlined.Group, "Groupe", tint = Color.White, modifier = Modifier.size(taille * 0.5f))
             else Text(initiales, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = (taille.value * 0.36f).sp)
         }
-        Box(
-            Modifier.align(Alignment.BottomEnd).size(taille * 0.38f)
-                .border(2.dp, bordure, CircleShape)
-                .background(source.teinte(), CircleShape),
-        )
+        if (cle != null) {
+            val photo by androidx.compose.runtime.produceState<java.io.File?>(null, cle) { value = Moteur.photoContact(cle) }
+            photo?.let { f ->
+                coil3.compose.AsyncImage(model = f, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(taille).clip(CircleShape))
+            }
+        }
+        LogoSource(source, taille * 0.42f, Modifier.align(Alignment.BottomEnd).border(2.dp, bordure, CircleShape))
     }
 }
 
@@ -126,6 +136,12 @@ fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
     if (e.etat(c).sourdine) add(Action("Réactiver les notifications", Icons.Outlined.Notifications) { Moteur.basculerSourdine(c) })
     else add(Action("Mettre en sourdine", Icons.Outlined.NotificationsOff) { Moteur.basculerSourdine(c) })
     if (Moteur.cfg.ollamaConfigure) add(Action("Refaire le résumé IA", Icons.Outlined.AutoAwesome) { Moteur.regenerer(c) })
+    add(Action(if (e.estEpinglee(c)) "Désépingler" else "Épingler en haut", Icons.Outlined.PushPin) { Moteur.basculerEpingle(c) })
+    add(Action(if (e.estArchivee(c)) "Désarchiver" else "Archiver", Icons.Outlined.Archive) { Moteur.basculerArchive(c) })
+    val manuel = e.categories[c.cle]
+    if (e.estPro(c)) add(Action("Ranger en Perso", Icons.Outlined.Person) { Moteur.classer(c, if (c.source in e.pro) "perso" else null) })
+    else add(Action("Ranger en Pro", Icons.Outlined.Work) { Moteur.classer(c, if (c.source in e.pro) null else "pro") })
+    if (manuel != null) add(Action("Classer selon la messagerie", Icons.Outlined.Restore) { Moteur.classer(c, null) })
 }
 
 @Composable

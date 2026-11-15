@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Archive permanente de tous les messages (toutes sources), avec recherche plein texte,
  * et état local (lu / non lu, à traiter, sourdine, résumés IA). Fichier privé de l'appli.
  */
-class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 2) {
+class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 3) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
@@ -32,6 +32,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             traitee INTEGER DEFAULT 0, notifiee INTEGER DEFAULT 0, manuel INTEGER DEFAULT 0, sourdine INTEGER DEFAULT 0)""")
         db.execSQL("""CREATE TABLE syntheses (cle TEXT PRIMARY KEY, resume TEXT, action INTEGER, reponse TEXT, pour INTEGER)""")
         creerReactions(db)
+        creerAvatars(db)
     }
 
     private fun creerReactions(db: SQLiteDatabase) {
@@ -44,6 +45,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
 
     override fun onUpgrade(db: SQLiteDatabase, ancienne: Int, nouvelle: Int) {
         if (ancienne < 2) creerReactions(db)
+        if (ancienne < 3) creerAvatars(db)
     }
 
     private inline fun <T> Cursor.lignes(f: (Cursor) -> T): List<T> = use { c ->
@@ -136,6 +138,26 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         else writableDatabase.insertWithOnConflict("curseurs", null,
             ContentValues().apply { put("nom", nom); put("valeur", valeur) }, SQLiteDatabase.CONFLICT_REPLACE)
     }
+
+    // MARK: Photos de contact
+
+    private fun creerAvatars(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS avatars (conv TEXT PRIMARY KEY, mxc TEXT NOT NULL)")
+    }
+
+    @Synchronized
+    fun definirAvatars(a: Map<String, String>) {
+        if (a.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for ((conv, mxc) in a) db.insertWithOnConflict("avatars", null, ContentValues().apply { put("conv", conv); put("mxc", mxc) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun avatar(conv: String): String? =
+        readableDatabase.rawQuery("SELECT mxc FROM avatars WHERE conv = ?", arrayOf(conv)).lignes { it.getString(0) }.firstOrNull()
 
     // MARK: Réactions
 

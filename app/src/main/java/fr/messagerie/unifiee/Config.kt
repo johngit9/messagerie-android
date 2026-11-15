@@ -41,6 +41,29 @@ class Config(context: Context) {
     var zoom: Int get() = p.getInt("zoom", 100); set(v) = p.edit().putInt("zoom", v).apply()
     var tailleTexte: Int get() = p.getInt("tailleTexte", 100); set(v) = p.edit().putInt("tailleTexte", v).apply()
     var synchroArrierePlan: Boolean get() = p.getBoolean("synchroFond", true); set(v) = p.edit().putBoolean("synchroFond", v).apply()
+    var notifTousMessages: Boolean get() = p.getBoolean("notifTous", true); set(v) = p.edit().putBoolean("notifTous", v).apply()
+
+    /** Notifications par messagerie : "tous" (chaque message), "attendue" (réponse attendue), "aucun". */
+    fun notif(s: Source): String = p.getString("notif.${s.id}", "tous")!!
+    fun definirNotif(s: Source, v: String) = p.edit().putString("notif.${s.id}", v).apply()
+
+    /** Messagerie rangée en « Pro » par défaut (Element et LinkedIn). */
+    fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN)
+    fun definirPro(s: Source, v: Boolean) = p.edit().putBoolean("pro.${s.id}", v).apply()
+
+    private fun carte(k: String): Map<String, String> = try {
+        val o = JSONObject(p.getString(k, "{}")!!); o.keys().asSequence().associateWith { o.optString(it) }
+    } catch (_: Exception) { emptyMap() }
+    private fun ecrireCarte(k: String, m: Map<String, String>) = p.edit().putString(k, JSONObject(m).toString()).apply()
+
+    /** Classement manuel d'une conversation : "pro" ou "perso". */
+    var categories: Map<String, String> get() = carte("categories"); set(v) = ecrireCarte("categories", v)
+    /** Conversations archivées → date d'archivage. */
+    var archivees: Map<String, Long> get() = carte("archivees").mapValues { it.value.toLongOrNull() ?: 0 }; set(v) = ecrireCarte("archivees", v.mapValues { it.value.toString() })
+    /** Conversations épinglées, dans l'ordre. */
+    var epinglees: List<String>
+        get() = try { org.json.JSONArray(p.getString("epinglees", "[]")).let { a -> (0 until a.length()).map { a.getString(it) } } } catch (_: Exception) { emptyList() }
+        set(v) = p.edit().putString("epinglees", org.json.JSONArray(v).toString()).apply()
     var couleursDynamiques: Boolean get() = p.getBoolean("dynamique", false); set(v) = p.edit().putBoolean("dynamique", v).apply()
     var verifierMaj: Boolean get() = p.getBoolean("verifierMaj", true); set(v) = p.edit().putBoolean("verifierMaj", v).apply()
 

@@ -36,6 +36,8 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.Menu
@@ -88,8 +90,10 @@ import fr.messagerie.unifiee.Source
 import kotlinx.coroutines.launch
 
 @Composable
-fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: () -> Unit) {
+fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: () -> Unit, nouveau: () -> Unit) {
     val vue by vm.vue.collectAsState()
+    val genre by vm.genre.collectAsState()
+    val espace by vm.espace.collectAsState()
     val source by vm.source.collectAsState()
     val recherche by vm.recherche.collectAsState()
     val visibles by vm.visibles.collectAsState()
@@ -107,10 +111,18 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
     ) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
+            floatingActionButton = {
+                androidx.compose.material3.ExtendedFloatingActionButton(
+                    onClick = nouveau, icon = { Icon(Icons.Outlined.Edit, null) }, text = { Text("Nouveau") },
+                    containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+            },
             bottomBar = { if (sources.size > 1) BarreSources(e, sources, source) { vm.source.value = it } },
         ) { pad ->
             Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
-                Entete(e, vue, source, visibles.size, recherche,
+                Entete(e, vue, genre, espace, source, visibles.size, recherche,
+                    choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
+                    choisirEspace = { vm.espace.value = it },
                     ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
                     chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it })
 
@@ -122,6 +134,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                             q.isNotEmpty() -> Triple(Icons.Outlined.Search, "Aucun résultat", "Rien ne correspond à « $q ».")
                             vue == Vue.ATraiter -> Triple(Icons.Outlined.DoneAll, "Tout est à jour", "Personne n'attend de réponse de votre part.")
                             vue == Vue.NonLus -> Triple(Icons.Outlined.DoneAll, "Tout est lu", "")
+                            vue == Vue.Archivees -> Triple(Icons.Outlined.Inbox, "Aucune conversation archivée", "Appui long sur une conversation pour l'archiver.")
                             else -> Triple(Icons.Outlined.Forum, "Aucune conversation", "")
                         },
                     )
@@ -144,7 +157,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
 
 @Composable
 private fun Entete(
-    e: Etat, vue: Vue, source: Source?, nombre: Int, recherche: String,
+    e: Etat, vue: Vue, genre: Genre, espace: Espace, source: Source?, nombre: Int, recherche: String,
+    choisirGenre: (Genre) -> Unit, choisirEspace: (Espace) -> Unit,
     ouvrirTiroir: () -> Unit, ouvrirReglages: () -> Unit, chercher: (String) -> Unit, choisirVue: (Vue) -> Unit,
 ) {
     Column(Modifier.statusBarsPadding().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
@@ -173,6 +187,17 @@ private fun Entete(
                 },
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp),
             )
+        }
+        // Vues Perso / Pro
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            Espace.entries.forEachIndexed { i, es ->
+                androidx.compose.material3.SegmentedButton(
+                    selected = espace == es, onClick = { choisirEspace(es) },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, Espace.entries.size),
+                    icon = {},
+                    label = { Text(es.libelle, fontSize = 13.sp) },
+                )
+            }
         }
         // Recherche
         Row(
@@ -204,6 +229,9 @@ private fun Entete(
                 }
                 PastilleVue(v.libelle, n, v == vue) { choisirVue(v) }
             }
+            Box(Modifier.padding(horizontal = 2.dp).size(1.dp, 26.dp).align(Alignment.CenterVertically).background(MaterialTheme.colorScheme.outlineVariant))
+            PastilleVue(Genre.Discussions.libelle, 0, genre == Genre.Discussions) { choisirGenre(Genre.Discussions) }
+            PastilleVue(Genre.Groupes.libelle, 0, genre == Genre.Groupes) { choisirGenre(Genre.Groupes) }
         }
     }
 }
@@ -237,9 +265,9 @@ private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, chois
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround) {
-                OngletSource("Tout", MaterialTheme.colorScheme.onSurface, choisie == null, e.nombreMessagesNonLus(null), erreur = false) { choisir(null) }
+                OngletSource("Tout", null, choisie == null, e.nombreMessagesNonLus(null), erreur = false) { choisir(null) }
                 sources.forEach { s ->
-                    OngletSource(s.id, s.teinte(), choisie == s, e.nombreMessagesNonLus(s), erreur = e.sources[s] is EtatSource.Erreur) { choisir(s) }
+                    OngletSource(s.id, s, choisie == s, e.nombreMessagesNonLus(s), erreur = e.sources[s] is EtatSource.Erreur) { choisir(s) }
                 }
             }
         }
@@ -247,7 +275,7 @@ private fun BarreSources(e: Etat, sources: List<Source>, choisie: Source?, chois
 }
 
 @Composable
-private fun OngletSource(nom: String, point: Color, choisi: Boolean, n: Int, erreur: Boolean, clic: () -> Unit) {
+private fun OngletSource(nom: String, source: Source?, choisi: Boolean, n: Int, erreur: Boolean, clic: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier.defaultMinSize(minWidth = 56.dp, minHeight = 52.dp)
@@ -256,8 +284,11 @@ private fun OngletSource(nom: String, point: Color, choisi: Boolean, n: Int, err
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box {
-            Box(Modifier.size(12.dp).background(point, CircleShape))
-            if (erreur) Box(Modifier.align(Alignment.TopEnd).size(6.dp).background(cs.error, CircleShape))
+            if (source != null) LogoSource(source, 22.dp)
+            else Box(Modifier.size(22.dp).background(cs.onSurface, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Inbox, null, tint = cs.surface, modifier = Modifier.size(13.dp))
+            }
+            if (erreur) Box(Modifier.align(Alignment.TopEnd).size(8.dp).background(cs.error, CircleShape))
         }
         Text(nom + if (n > 0) " · ${compte(n)}" else "", fontSize = 11.sp, maxLines = 1,
             fontWeight = if (choisi) FontWeight.Bold else FontWeight.Medium,
@@ -320,11 +351,7 @@ private fun ElementTiroir(libelle: String, icone: ImageVector, clic: () -> Unit)
 }
 
 @Composable
-fun PastilleSource(s: Source, taille: Dp = 24.dp) {
-    Box(Modifier.size(taille).background(s.teinte(), RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
-        Text(s.libelle.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (taille.value * 0.5f).sp)
-    }
-}
+fun PastilleSource(s: Source, taille: Dp = 24.dp) = LogoSource(s, taille)
 
 private fun compte(n: Int) = if (n > 999) "999+" else "$n"
 
@@ -360,7 +387,7 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
             .padding(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Avatar(c.nom, c.source, c.estGroupe, taille = 48.dp, bordure = cs.surfaceContainerLow)
+        Avatar(c.nom, c.source, c.estGroupe, taille = 48.dp, bordure = cs.surfaceContainerLow, cle = c.cle)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -371,6 +398,10 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
                 if (e.etat(c).sourdine) {
                     Spacer(Modifier.width(4.dp))
                     Icon(Icons.Outlined.NotificationsOff, "Sourdine", Modifier.size(14.dp), tint = cs.onSurfaceVariant)
+                }
+                if (e.estEpinglee(c)) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Outlined.PushPin, "Épinglée", Modifier.size(14.dp), tint = cs.primary)
                 }
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
@@ -411,7 +442,7 @@ fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
         containerColor = cs.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 12.dp)) {
             Row(Modifier.padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Avatar(c.nom, c.source, c.estGroupe, taille = 40.dp, bordure = cs.surfaceContainerLow)
+                Avatar(c.nom, c.source, c.estGroupe, taille = 40.dp, bordure = cs.surfaceContainerLow, cle = c.cle)
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(c.nom, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

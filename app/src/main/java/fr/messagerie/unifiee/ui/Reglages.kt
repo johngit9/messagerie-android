@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Shield
@@ -60,6 +61,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +98,7 @@ private enum class Page(val titre: String, val icone: ImageVector) {
     Matrix("Serveur Matrix", Icons.Outlined.Dns),
     Element("Relais Element", Icons.Outlined.Hub),
     IA("Intelligence artificielle", Icons.Outlined.AutoAwesome),
+    Messageries("Messageries", Icons.Outlined.Forum),
     Affichage("Affichage et taille", Icons.Outlined.TextFields),
     Notifications("Notifications et actualisation", Icons.Outlined.Notifications),
     Confidentialite("Confidentialité", Icons.Outlined.Shield),
@@ -148,6 +151,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
                 Page.Matrix -> PageMatrix(version) { connexionsModifiees = true }
                 Page.Element -> PageElement(version) { connexionsModifiees = true }
                 Page.IA -> PageIA(version)
+                Page.Messageries -> PageMessageries(e)
                 Page.Affichage -> PageAffichage()
                 Page.Notifications -> PageNotifications(version)
                 Page.Confidentialite -> PageConfidentialite(version)
@@ -229,6 +233,9 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 Rubrique(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée", ouvrir)
             }
             Groupe("Préférences") {
+                val actives = Source.entries.filter { e.statistiques[it] != null }
+                Rubrique(Page.Messageries, if (actives.isEmpty()) "Pro / Perso, notifications, délai de réception"
+                    else actives.joinToString(" · ") { it.id + if (e.pro.contains(it)) " (pro)" else "" }, ouvrir)
                 Rubrique(Page.Affichage, "Interface ${Affichage.zoom} % · texte ${Affichage.texte} %" + if (Affichage.dynamique) " · Material You" else "", ouvrir)
                 Rubrique(Page.Notifications, (if (cfg.notifications) "Notifications activées" else "Notifications coupées") +
                     (if (cfg.veilleArrierePlan) " · à l'écoute en arrière-plan" else ""), ouvrir)
@@ -397,7 +404,8 @@ private fun PageNotifications(version: Int) {
     var intervalle by remember(version) { mutableIntStateOf(cfg.intervalle) }
     var notifs by remember(version) { mutableStateOf(cfg.notifications) }
     var veille by remember(version) { mutableStateOf(cfg.veilleArrierePlan) }
-    Interrupteur("Notifier quand une réponse est attendue", notifs) { notifs = it; cfg.notifications = it }
+    Explication("Le type de notification se choisit pour chaque messagerie dans « Messageries ».")
+    Interrupteur("Notifier quand une réponse est attendue", notifs, "Selon le résumé de l'IA.") { notifs = it; cfg.notifications = it }
     Interrupteur("Rester à l'écoute en arrière-plan", veille, "Affiche une notification permanente ; utile pour être prévenu appli fermée.") {
         veille = it; cfg.veilleArrierePlan = it; ServiceVeille.mettreAJour(ctx)
     }
@@ -409,6 +417,59 @@ private fun PageNotifications(version: Int) {
     Text("Vérification de secours toutes les :")
     Explication("Les nouveaux messages arrivent en temps réel ; cette vérification sert de filet de sécurité.")
     Choix(listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min", 900 to "15 min"), intervalle) { intervalle = it; cfg.intervalle = it }
+}
+
+private fun duree(ms: Long) = when {
+    ms < 1000 -> "$ms ms"
+    ms < 60_000 -> "%.0f s".format(ms / 1000.0)
+    ms < 3_600_000 -> "${ms / 60_000} min ${(ms / 1000) % 60} s"
+    else -> "${ms / 3_600_000} h ${(ms / 60_000) % 60} min"
+}
+
+/** Chaque messagerie : état, Pro / Perso, notifications, délai de réception (serveur → téléphone). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PageMessageries(e: Etat) {
+    val cfg = Moteur.cfg
+    var maj by remember { mutableIntStateOf(0) }
+    Explication("Pro / Perso sert aux vues de la liste ; une conversation peut aussi être classée à la main (appui long). " +
+        "Le délai est mesuré entre l'heure du message sur le serveur et son arrivée sur ce téléphone.")
+    val sources = Source.entries.filter { e.statistiques[it] != null || e.sources[it] is EtatSource.Ok || e.sources[it] is EtatSource.Erreur }
+    if (sources.isEmpty()) Explication("Aucune messagerie connectée pour l'instant.")
+    sources.forEach { s ->
+        key(s, maj) {
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LogoSource(s, 36.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(s.libelle, fontWeight = FontWeight.SemiBold)
+                            val st = e.sources[s]
+                            Text(when (st) {
+                                is EtatSource.Erreur -> "Erreur : ${st.message}"
+                                else -> e.statistiques[s]?.let { "${it.first} conversations · ${it.second} messages" } ?: "Connectée"
+                            }, fontSize = 12.sp, maxLines = 2,
+                                color = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Interrupteur("Ranger en « Pro »", cfg.pro(s)) { cfg.definirPro(s, it); Moteur.chargerOrganisation(); maj++ }
+                    Text("Notifications", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val modes = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        modes.forEach { (v, l) ->
+                            FilterChip(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ }, label = { Text(l, fontSize = 13.sp) })
+                        }
+                    }
+                    val d = remember(s) { Moteur.delais(s) }
+                    if (d.isNotEmpty()) {
+                        val moyen = d.average().toLong()
+                        Text("Délai de réception : ${duree(moyen)} en moyenne, ${duree(d.max())} au plus (${d.size} derniers messages)", fontSize = 13.sp)
+                    } else Text("Délai de réception : pas encore mesuré", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
 }
 
 @Composable

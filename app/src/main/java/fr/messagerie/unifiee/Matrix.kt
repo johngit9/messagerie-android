@@ -92,6 +92,14 @@ class Matrix(private val cfg: Config) {
         catch (_: Exception) { telecharger("/_matrix/media/v3/download/$chemin") }
     }
 
+    /** Miniature carrée d'une image mxc:// (photos de contact). */
+    fun miniature(mxc: String, taille: Int = 128): ByteArray {
+        connecter()
+        val chemin = mxc.removePrefix("mxc://") + "?width=$taille&height=$taille&method=crop"
+        return try { telecharger("/_matrix/client/v1/media/thumbnail/$chemin") }
+        catch (_: Exception) { try { telecharger("/_matrix/media/v3/thumbnail/$chemin") } catch (_: Exception) { media(mxc) } }
+    }
+
     /** Attente longue (30 s max) ; lecture seule. Renvoie le nouveau jeton et s'il y a du nouveau. */
     fun attendreNouveautes(depuis: String?): Pair<String, Boolean> {
         connecter()
@@ -126,7 +134,7 @@ data class Pont(val prefixe: String, val source: Source, val curseur: String) {
     }
 }
 
-class InfoSalon(val membres: Map<String, String>, val nom: String?)
+class InfoSalon(val membres: Map<String, String>, val nom: String?, val avatars: Map<String, String> = emptyMap(), val avatarSalon: String? = null)
 
 /**
  * Synchronisation d'une passerelle vers l'archive. Lecture seule (GET).
@@ -199,12 +207,17 @@ class SyncPont(
             lot.map { id ->
                 async(Dispatchers.IO) {
                     val membres = HashMap<String, String>()
+                    val avatars = HashMap<String, String>()
                     val j = runCatching { m.get("/_matrix/client/v3/rooms/${Http.enc(id)}/joined_members") }.getOrNull()
-                    j?.optJSONObject("joined")?.let { o -> for (u in o.keys()) membres[u] = o.optJSONObject(u)?.optString("display_name")?.takeIf { it.isNotEmpty() && it != "null" } ?: u }
+                    j?.optJSONObject("joined")?.let { o -> for (u in o.keys()) {
+                        membres[u] = o.optJSONObject(u)?.optString("display_name")?.takeIf { it.isNotEmpty() && it != "null" } ?: u
+                        o.optJSONObject(u)?.optString("avatar_url")?.takeIf { it.startsWith("mxc://") }?.let { avatars[u] = it }
+                    } }
                     if (membres.keys.none { it.startsWith(pont.prefixe) }) return@async null
                     if (correspondance != null && correspondance[id] == null) return@async null
                     val nom = runCatching { m.get("/_matrix/client/v3/rooms/${Http.enc(id)}/state/m.room.name/").optString("name") }.getOrNull()?.takeIf { it.isNotEmpty() }
-                    id to InfoSalon(membres, nom)
+                    val avatarSalon = runCatching { m.get("/_matrix/client/v3/rooms/${Http.enc(id)}/state/m.room.avatar/").optString("url") }.getOrNull()?.takeIf { it.startsWith("mxc://") }
+                    id to InfoSalon(membres, nom, avatars, avatarSalon)
                 }
             }.awaitAll().filterNotNull().forEach { (id, i) -> infos[id] = i }
         }
@@ -237,6 +250,14 @@ class SyncPont(
                 if (correspondance != null) j.endsWith("@g.us") else contacts.size > 1, 0, emptyList())
         }
         archive.enregistrerConversations(convs, garderNoms = correspondance != null)
+
+        // Photos de contact : celle du salon (groupes), sinon celle du contact (discussions).
+        val photos = HashMap<String, String>()
+        for ((id, i) in infos) {
+            val contacts = i.avatars.filterKeys { it.startsWith(pont.prefixe) && it != moi }
+            (i.avatarSalon ?: contacts.values.singleOrNull() ?: contacts.values.firstOrNull().takeIf { contacts.size == 1 })?.let { photos[cle(id)] = it }
+        }
+        archive.definirAvatars(photos)
 
         val enRcs = HashSet<String>()
         if (salonsDepart != null) for (id in salonsDepart.keys()) {
