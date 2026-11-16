@@ -569,6 +569,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                         val valeurChamp = if (champ.text == brouillon) champ
                             else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
                         val fautesActuelles = if (fautes.first == brouillon) fautes.second else emptyList()
+                        val rougeFaute = MaterialTheme.colorScheme.error
                         OutlinedTextField(
                             value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -577,7 +578,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             // Fautes soulignées en rouge
                             visualTransformation = if (fautesActuelles.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None
                                 else androidx.compose.ui.text.input.VisualTransformation { texte ->
-                                    val souligne = androidx.compose.ui.text.SpanStyle(color = MaterialTheme.colorScheme.error,
+                                    val souligne = androidx.compose.ui.text.SpanStyle(color = rougeFaute,
                                         textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
                                     val a = androidx.compose.ui.text.buildAnnotatedString {
                                         append(texte)
