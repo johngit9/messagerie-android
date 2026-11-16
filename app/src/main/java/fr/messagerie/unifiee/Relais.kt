@@ -160,4 +160,11 @@ class Relais(private val cfg: Config) {
         val r = Http.requete("$base/presence", "POST", jeton, JSONObject().put("presence", etat).toString(), 10_000)
         if (r.code != 200) throw ErreurHttp(r.code, "présence")
     }
+
+    /** Supprime pour tout le monde un de VOS messages Element — UNIQUEMENT après votre confirmation. */
+    fun supprimer(salon: String, eventId: String) {
+        connecter()
+        val r = Http.requete("$base/supprimer", "POST", jeton, JSONObject().put("salon", salon).put("event_id", eventId).toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "suppression")
+    }
 }

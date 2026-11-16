@@ -133,6 +133,15 @@ class Matrix(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "présence")
     }
 
+    /** Supprime un message pour tout le monde (rédaction Matrix, reprise par la passerelle) — UNIQUEMENT après confirmation. */
+    fun supprimerPourTous(salon: String, eventId: String) {
+        connecter()
+        val txn = "messagerie-" + UUID.randomUUID()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/redact/${Http.enc(eventId)}/${Http.enc(txn)}",
+            "PUT", jeton, JSONObject().put("reason", "Supprimé par l'expéditeur").toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "suppression")
+    }
+
     /** Transfère un message (texte ou pièce jointe déjà sur le serveur) — UNIQUEMENT après confirmation de l'utilisateur. */
     fun envoyerContenu(salon: String, contenu: JSONObject): String {
         connecter()

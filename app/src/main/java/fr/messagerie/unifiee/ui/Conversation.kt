@@ -673,14 +673,42 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         AlertDialog(
             onDismissRequest = { aSupprimer = null },
             title = { Text(if (cles.size > 1) "Supprimer ${cles.size} messages ?" else "Supprimer ce message ?") },
-            text = { Text("Supprimé de Messagerie seulement : le message reste chez vos contacts et dans ${c.source.libelle}.") },
-            confirmButton = { TextButton(onClick = {
-                aSupprimer = null; quitterSelection()
-                Moteur.supprimerMessages(cles.toList())
-                portee.launch { kotlinx.coroutines.delay(400); vm.actualiser(c.messages) }
-                afficher(if (cles.size > 1) "${cles.size} messages supprimés" else "Message supprimé")
-            }) { Text("Supprimer", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { aSupprimer = null }) { Text("Annuler") } },
+            text = {
+                val tous = historique.filter { it.cle in cles }
+                val partout = tous.count { Moteur.supprimablePourTous(it, c) }
+                Text(when {
+                    partout == tous.size -> "« Pour tout le monde » le supprime aussi chez vos contacts et dans ${c.source.libelle} (définitif)."
+                    partout > 0 -> "$partout de vos messages peuvent être supprimés pour tout le monde ; les autres seulement dans Messagerie."
+                    else -> "Seuls vos propres messages peuvent être supprimés pour tout le monde : ici, la suppression se fera dans Messagerie seulement."
+                })
+            },
+            confirmButton = {
+                val choisis = historique.filter { it.cle in cles }
+                Column(horizontalAlignment = Alignment.End) {
+                    if (choisis.any { Moteur.supprimablePourTous(it, c) }) TextButton(onClick = {
+                        aSupprimer = null; quitterSelection()
+                        portee.launch {
+                            val (n, err) = Moteur.supprimerPourTous(choisis, c)
+                            // Ceux qui ne pouvaient pas l'être partout : dans Messagerie seulement
+                            val reste = choisis.filter { !Moteur.supprimablePourTous(it, c) }.map { it.cle }
+                            if (reste.isNotEmpty()) Moteur.supprimerMessages(reste)
+                            kotlinx.coroutines.delay(400); vm.actualiser(c.messages)
+                            afficher(when {
+                                err == null -> "$n message" + (if (n > 1) "s supprimés" else " supprimé") + " pour tout le monde"
+                                n > 0 -> "$n supprimé(s) pour tout le monde, mais : $err"
+                                else -> "Échec : $err"
+                            })
+                        }
+                    }) { Text("Pour tout le monde", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = {
+                        aSupprimer = null; quitterSelection()
+                        Moteur.supprimerMessages(cles.toList())
+                        portee.launch { kotlinx.coroutines.delay(400); vm.actualiser(c.messages) }
+                        afficher(if (cles.size > 1) "${cles.size} messages supprimés de Messagerie" else "Message supprimé de Messagerie")
+                    }) { Text("Dans Messagerie seulement") }
+                    TextButton(onClick = { aSupprimer = null }) { Text("Annuler") }
+                }
+            },
         )
     }
     if (transfert) FeuilleTransfert(e, selection.size, fermer = { transfert = false }) { d -> transfert = false; destination = d }
@@ -828,7 +856,7 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
             if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
             ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
-            ElementAction(Icons.Outlined.DeleteOutline, "Supprimer de Messagerie") { supprimer() }
+            ElementAction(Icons.Outlined.DeleteOutline, "Supprimer") { supprimer() }
         }
     }
 }

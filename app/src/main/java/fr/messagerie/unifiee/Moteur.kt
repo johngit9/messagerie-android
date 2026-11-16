@@ -743,6 +743,33 @@ object Moteur {
         portee.launch(Dispatchers.IO) { runCatching { archive.effacerMessages(cles); recharger() } }
     }
 
+    /** Peut-on supprimer ce message pour tout le monde ? (le vôtre, déjà sur le serveur, hors Teams) */
+    fun supprimablePourTous(m: Message, c: Conversation) =
+        m.deMoi && c.source != Source.TEAMS && m.cle.substringAfter(':').startsWith("$") &&
+            (if (c.source == Source.ELEMENT) cfg.relaisConfigure else cfg.matrixConfigure)
+
+    /**
+     * Supprime VOS messages pour tout le monde (WhatsApp, Telegram… via la passerelle ; Element via le relais),
+     * puis de Messagerie. UNIQUEMENT après confirmation. Renvoie (supprimés partout, erreur éventuelle).
+     */
+    suspend fun supprimerPourTous(messages: List<Message>, c: Conversation): Pair<Int, String?> = withContext(Dispatchers.IO) {
+        var n = 0; var err: String? = null
+        val salon = if (c.source == Source.ELEMENT) c.jid else salonPourEnvoi(c)
+        val faits = ArrayList<String>()
+        for (m in messages.filter { supprimablePourTous(it, c) }) {
+            val eid = m.cle.substringAfter(':')
+            try {
+                if (salon == null) throw Exception("discussion introuvable sur le serveur")
+                if (c.source == Source.ELEMENT) Relais(cfg).supprimer(salon, eid) else Matrix(cfg).supprimerPourTous(salon, eid)
+                faits += m.cle; n++
+            } catch (e: Exception) {
+                err = if (e is ErreurHttp && e.code == 404 && c.source == Source.ELEMENT) "le relais Element ne sait pas encore supprimer" else (e.message ?: e.toString())
+            }
+        }
+        runCatching { archive.effacerMessages(faits); recharger() }
+        n to err
+    }
+
     /** Supprime une conversation DANS MESSAGERIE seulement ; elle revient si un nouveau message arrive. */
     fun supprimerConversation(c: Conversation) {
         val jusqua = maxOf(c.derniere, System.currentTimeMillis())
