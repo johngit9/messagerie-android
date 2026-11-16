@@ -24,6 +24,8 @@ class Matrix(private val cfg: Config) {
     var base = ""
         private set
     val utilisateur get() = cfg.matrixUtilisateur
+    /** Statut de présence choisi (paramètre set_presence des /sync). */
+    val presence get() = cfg.presence
     private val jeton get() = cfg.matrixJeton
 
     /** Essaie la dernière adresse qui a marché, puis les autres dans l'ordre saisi. */
@@ -282,7 +284,7 @@ class SyncPont(
     }
 
     private suspend fun incremental(jeton: String, infos: Map<String, InfoSalon>, moi: String?): Int {
-        val rep = m.get("/_matrix/client/v3/sync?set_presence=${cfg.presence}&timeout=0&since=${Http.enc(jeton)}&filter=${Http.enc(FILTRE_SYNC)}")
+        val rep = m.get("/_matrix/client/v3/sync?set_presence=${m.presence}&timeout=0&since=${Http.enc(jeton)}&filter=${Http.enc(FILTRE_SYNC)}")
         var total = 0
         val salons = rep.optJSONObject("rooms")?.optJSONObject("join")
         if (salons != null) for (id in salons.keys()) {
@@ -328,7 +330,7 @@ class SyncPont(
         }
 
         // Jeton de départ (pris AVANT la remontée), derniers messages et accusés de lecture.
-        val depart = runCatching { m.get("/_matrix/client/v3/sync?set_presence=${cfg.presence}&timeout=0&filter=${Http.enc(FILTRE_DEPART)}", 30_000) }.getOrNull()
+        val depart = runCatching { m.get("/_matrix/client/v3/sync?set_presence=${m.presence}&timeout=0&filter=${Http.enc(FILTRE_DEPART)}", 30_000) }.getOrNull()
         val salonsDepart = depart?.optJSONObject("rooms")?.optJSONObject("join")
 
         // Le fantôme qui vous représente : présent dans bien plus de conversations que les autres.
