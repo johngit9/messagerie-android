@@ -675,7 +675,21 @@ object Moteur {
      * l'appli n'envoie jamais son propre indicateur). Appelle maj avec les noms (liste vide = personne).
      */
     suspend fun suivreSaisie(c: Conversation, maj: (List<String>) -> Unit) = withContext(Dispatchers.IO) {
-        if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext
+        // Element : on demande au relais toutes les 3 s (il s'arrête si le relais ne connaît pas cette route)
+        if (c.source == Source.ELEMENT) {
+            if (!cfg.relaisConfigure) return@withContext
+            val r = Relais(cfg)
+            var avant: List<String>? = null
+            var echecs = 0
+            while (true) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val l = runCatching { r.saisie(c.jid) }.getOrNull()
+                if (l == null) { if (++echecs >= 3) { maj(emptyList()); return@withContext } }
+                else { echecs = 0; if (l != avant) { maj(l); avant = l } }
+                delay(3_000)
+            }
+        }
+        if (!cfg.matrixConfigure || c.source == Source.TEAMS) return@withContext
         val salon = salonDe(c) ?: return@withContext
         val m = Matrix(cfg)
         val noms = runCatching { m.membres(salon) }.getOrDefault(emptyMap())

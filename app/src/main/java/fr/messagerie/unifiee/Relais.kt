@@ -141,4 +141,14 @@ class Relais(private val cfg: Config) {
         val r = Http.requete("$base/lu-prive", "POST", jeton, d.toString(), 10_000)
         if (r.code != 200) throw ErreurHttp(r.code, "lu privé")
     }
+
+    /** Qui écrit dans ce salon Element (lecture seule ; rien n'est envoyé). null si le relais ne le sait pas. */
+    fun saisie(salon: String): List<String>? {
+        connecter()
+        val r = Http.requete("$base/saisie?salon=${Http.enc(salon)}", jeton = jeton, delaiMs = 8_000)
+        if (r.code != 200) return null
+        return JSONObject(r.texte).optJSONArray("ecrivent")?.let { a ->
+            (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("nom")?.ifEmpty { null } }
+        }
+    }
 }
