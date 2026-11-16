@@ -3,6 +3,8 @@ package fr.messagerie.unifiee.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
@@ -154,5 +156,36 @@ fun ElementAction(icone: ImageVector, libelle: String, clic: () -> Unit) {
         Icon(icone, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(20.dp))
         Text(libelle, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+
+/** Choix du statut de la conversation (réponse attendue / pas de réponse / automatique). */
+@Composable
+fun ChoixStatut(e: Etat, c: Conversation, apres: () -> Unit = {}) {
+    val cs = MaterialTheme.colorScheme
+    val actuel = Moteur.statutChoisi(c)
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("Statut", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                Moteur.Statut.ATTENDUE to "Réponse attendue",
+                Moteur.Statut.AUCUNE to "Pas de réponse",
+                Moteur.Statut.AUTO to "Automatique",
+            ).forEach { (st, libelle) ->
+                val choisi = st == actuel
+                Text(libelle, fontSize = 13.sp, fontWeight = if (choisi) FontWeight.Bold else FontWeight.Medium,
+                    color = if (choisi) cs.onPrimary else cs.onSurface, maxLines = 1,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                        .background(if (choisi) cs.primary else cs.surfaceVariant)
+                        .clickable { Moteur.choisirStatut(c, st); apres() }
+                        .padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        if (actuel == Moteur.Statut.AUTO) Text(
+            if (e.aTraiter(c)) "Automatique : l'IA pense qu'une réponse est attendue." else "Automatique : décidé par l'IA (et les mentions @ dans les groupes).",
+            fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+        if (actuel == Moteur.Statut.AUCUNE) Text("Jusqu'au prochain message reçu.", fontSize = 12.sp, color = cs.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, top = 6.dp))
     }
 }

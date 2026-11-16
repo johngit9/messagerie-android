@@ -362,6 +362,20 @@ object Moteur {
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
     /** Met (ou retire) plusieurs conversations dans « À traiter » d'un coup. */
+    /** Statut choisi par vous : réponse attendue, pas de réponse (jusqu'au prochain message), ou décision automatique (IA / mention). */
+    enum class Statut { ATTENDUE, AUCUNE, AUTO }
+    fun statutChoisi(c: Conversation): Statut {
+        val e = _etat.value.etat(c)
+        return when { e.manuel -> Statut.ATTENDUE; e.traitee != 0L && e.traitee >= c.derniere -> Statut.AUCUNE; else -> Statut.AUTO }
+    }
+    fun choisirStatut(c: Conversation, st: Statut) = majEtat(c.cle) {
+        when (st) {
+            Statut.ATTENDUE -> it.copy(manuel = true, traitee = 0)
+            Statut.AUCUNE -> it.copy(manuel = false, traitee = c.derniere)
+            Statut.AUTO -> it.copy(manuel = false, traitee = 0)
+        }
+    }
+
     /** Met dans « À traiter », ou l'en retire (y compris si c'est l'IA ou une mention qui l'y avait mise). */
     fun mettreATraiter(c: Conversation, oui: Boolean) = majEtat(c.cle) { if (oui) it.copy(manuel = true, traitee = 0) else it.copy(manuel = false, traitee = c.derniere) }
     fun basculerATraiter(c: Conversation) = mettreATraiter(c, !_etat.value.aTraiter(c))

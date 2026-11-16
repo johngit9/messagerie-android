@@ -446,8 +446,21 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
                     color = if (nonLue) cs.onSurface else cs.onSurfaceVariant)
             }
             if (aTraiter || nb > 0) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (aTraiter) Text("Réponse attendue", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onTertiaryContainer,
-                    modifier = Modifier.background(cs.tertiaryContainer, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+                if (aTraiter) Box {
+                    // Toucher l'étiquette pour changer le statut
+                    var menuStatut by remember { mutableStateOf(false) }
+                    Text("Réponse attendue ▾", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onTertiaryContainer,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(cs.tertiaryContainer).clickable { menuStatut = true }
+                            .padding(horizontal = 8.dp, vertical = 2.dp))
+                    androidx.compose.material3.DropdownMenu(expanded = menuStatut, onDismissRequest = { menuStatut = false }) {
+                        val actuel = Moteur.statutChoisi(c)
+                        listOf(Moteur.Statut.ATTENDUE to "Réponse attendue", Moteur.Statut.AUCUNE to "Pas de réponse attendue",
+                            Moteur.Statut.AUTO to "Automatique (IA)").forEach { (st, t) ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text((if (st == actuel) "✓ " else "    ") + t) },
+                                onClick = { menuStatut = false; Moteur.choisirStatut(c, st) })
+                        }
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 if (nb > 0) Box(Modifier.defaultMinSize(minWidth = 22.dp).height(22.dp).background(cs.primary, RoundedCornerShape(11.dp)).padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center) {
@@ -532,6 +545,8 @@ fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
                 if (e.aTraiter(c)) TuileAction("Traitée", Icons.Outlined.TaskAlt, Color(0xFF1E7A47), Modifier.weight(1f)) { Moteur.marquerTraitee(c); fermer() }
                 else TuileAction("À traiter", Icons.Outlined.Flag, Color(0xFFA04A0B), Modifier.weight(1f)) { Moteur.mettreATraiter(c, true); fermer() }
             }
+            Spacer(Modifier.height(10.dp))
+            ChoixStatut(e, c)
             Spacer(Modifier.height(8.dp))
             val rapides = setOf("Marquer comme lu", "Marquer comme non lu", "Marquer comme traitée", "Ajouter à « À traiter »", "Refaire le résumé IA")
             actionsConversation(e, c).filter { it.libelle !in rapides }.forEach { a ->

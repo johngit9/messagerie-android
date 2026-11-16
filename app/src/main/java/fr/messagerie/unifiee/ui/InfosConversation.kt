@@ -135,6 +135,7 @@ fun FeuilleInfos(
                     }
                 }
             }
+            Carte { Box(Modifier.padding(10.dp)) { ChoixStatut(e, c) } }
             // Réglages de la conversation (notifications, Pro/Perso, épingler, archiver…)
             Carte {
                 actionsConversation(e, c).forEachIndexed { i, a ->
