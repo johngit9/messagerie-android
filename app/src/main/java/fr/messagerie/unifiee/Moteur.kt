@@ -724,6 +724,20 @@ object Moteur {
         }
     }
 
+    /**
+     * Applique votre statut de présence (choisi dans les Réglages) au serveur Matrix et au relais Element.
+     * Renvoie la liste des endroits où il a été appliqué et ceux en échec.
+     */
+    suspend fun definirPresence(etat: String): Pair<List<String>, List<String>> = withContext(Dispatchers.IO) {
+        cfg.presence = etat
+        val ok = ArrayList<String>(); val ko = ArrayList<String>()
+        if (cfg.matrixConfigure) runCatching { Matrix(cfg).definirPresence(etat) }
+            .onSuccess { ok += "serveur Matrix (WhatsApp, Telegram, SMS, LinkedIn)" }.onFailure { ko += "serveur Matrix" }
+        if (cfg.relaisConfigure) runCatching { Relais(cfg).presence(etat) }
+            .onSuccess { ok += "Element" }.onFailure { ko += "Element (le relais ne le gère pas encore)" }
+        ok to ko
+    }
+
     fun peutQuitter(c: Conversation) = c.estGroupe && cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
 
     /** Quitte le groupe — UNIQUEMENT après la confirmation de l'utilisateur. Renvoie null si c'est fait. */

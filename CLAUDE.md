@@ -7,7 +7,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 - **Dépôt PUBLIC : aucune donnée personnelle** dans le code, les commits ou les fichiers : ni jeton, clé, adresse IP, nom d'hôte (Tailscale ou autre), numéro, contact ou message. Les adresses et jetons se saisissent dans l'app (Réglages) ou s'importent par fichier JSON (`messagerie-config.exemple.json` = modèle avec des valeurs fictives).
 - Ne jamais committer `messagerie-config.json`, `*.jks`, `*.keystore` (déjà dans `.gitignore`).
 - **Aucun envoi en test** : ne jamais appeler `POST /envoyer` du relais ni envoyer de message ou de réaction pour essayer. Un envoi part seulement sur un appui explicite de l'utilisateur.
-- **Discrétion** : lu / non lu reste local. Ne jamais envoyer d'accusé de lecture (`/receipt`, `read_markers`) ni de présence, ni d'indicateur de saisie (`/typing`).
+- **Discrétion** : lu / non lu reste local. Ne jamais envoyer d'accusé de lecture public (`m.read`) ni d'indicateur de saisie (`/typing`). Exception : Element lu en privé (`/lu-prive` du relais, m.read.private). Présence : seulement le statut choisi par l'utilisateur dans Réglages > Confidentialité (hors ligne par défaut, `set_presence` des /sync = ce choix).
 - Ne pas changer le package `fr.messagerie.unifiee` : sinon Android voit une autre appli (réglages perdus, pas de mise à jour par-dessus).
 - Textes de l'interface, commentaires et messages de commit **en français**.
 

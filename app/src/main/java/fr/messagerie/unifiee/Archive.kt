@@ -103,6 +103,12 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         } finally { db.endTransaction() }
     }
 
+    /** Échos provisoires d'Element (identifiant « ~… ») : doublons du vrai message, à effacer. */
+    fun purgerEchosElement() {
+        val cles = readableDatabase.rawQuery("SELECT cle FROM messages WHERE cle LIKE 'Element:~%'", null).lignes { it.getString(0) }
+        supprimerMessages(cles)
+    }
+
     @Synchronized
     fun supprimerMessages(cles: List<String>) {
         if (cles.isEmpty()) return

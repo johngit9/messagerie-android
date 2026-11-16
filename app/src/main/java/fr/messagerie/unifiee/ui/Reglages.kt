@@ -788,6 +788,28 @@ private fun PageConfidentialite(version: Int) {
     Interrupteur("Transmettre mes réactions aux contacts", reactions,
         "Désactivé, vos émoticônes restent sur ce téléphone. Rien ne part sans votre appui.") { reactions = it; cfg.envoyerReactions = it }
     HorizontalDivider()
+    // Statut de présence choisi par vous
+    val portee = rememberCoroutineScope()
+    var presence by remember(version) { mutableStateOf(cfg.presence) }
+    var retour by remember { mutableStateOf<String?>(null) }
+    Text("Mon statut de présence", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val choix = listOf("offline" to "Hors ligne", "unavailable" to "Absent", "online" to "En ligne")
+        choix.forEachIndexed { i, (v, t) ->
+            SegmentedButton(selected = presence == v, onClick = {
+                presence = v; retour = "Application…"
+                portee.launch {
+                    val (ok, ko) = Moteur.definirPresence(v)
+                    retour = (if (ok.isNotEmpty()) "Appliqué : " + ok.joinToString(", ") + "." else "") +
+                        (if (ko.isNotEmpty()) " Non appliqué : " + ko.joinToString(", ") + "." else "")
+                }
+            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, choix.size), icon = {}) { Text(t) }
+        }
+    }
+    Explication("Ce que vos contacts voient de vous (« en ligne », « absent »), là où la messagerie le transmet. " +
+        "Hors ligne par défaut. WhatsApp ne reprend pas toujours ce statut.")
+    retour?.let { Text(it.trim(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    HorizontalDivider()
     Explication("Aucun accusé de lecture ni indicateur de saisie n'est envoyé : lu / non lu reste sur ce téléphone. " +
         "Aucun message ne part sans votre appui sur « Envoyer ».")
 }

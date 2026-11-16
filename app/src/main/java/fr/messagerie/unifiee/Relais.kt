@@ -37,6 +37,7 @@ class Relais(private val cfg: Config) {
     /** Recopie dans l'archive tout ce que le relais a de nouveau. */
     fun synchroniser(archive: Archive): Int {
         connecter()
+        runCatching { archive.purgerEchosElement() }
         var apres = archive.curseur("element.seq")?.toLongOrNull() ?: 0
         var total = 0
         while (true) {
@@ -47,7 +48,8 @@ class Relais(private val cfg: Config) {
             val lot = ArrayList<Message>()
             val supprimes = ArrayList<String>()
             for (l in lignes) {
-                val eid = l.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
+                // « ~… » = écho provisoire d'un message envoyé : le vrai message arrive ensuite
+                val eid = l.optString("event_id").takeIf { it.isNotEmpty() && !it.startsWith("~") } ?: continue
                 val salon = l.optString("salon").takeIf { it.isNotEmpty() } ?: continue
                 val cle = "Element:$eid"
                 if (l.optInt("supprime") == 1) { supprimes.add(cle); continue }
@@ -150,5 +152,12 @@ class Relais(private val cfg: Config) {
         return JSONObject(r.texte).optJSONArray("ecrivent")?.let { a ->
             (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("nom")?.ifEmpty { null } }
         }
+    }
+
+    /** Votre statut de présence Element (offline / unavailable / online), choisi dans les Réglages. */
+    fun presence(etat: String) {
+        connecter()
+        val r = Http.requete("$base/presence", "POST", jeton, JSONObject().put("presence", etat).toString(), 10_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "présence")
     }
 }
