@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
@@ -667,6 +668,32 @@ object Moteur {
                 if (cur.moveToFirst()) cur.getString(0) else null
             }
         }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Suit qui écrit dans la conversation tant que l'écran est ouvert (réception seulement ;
+     * l'appli n'envoie jamais son propre indicateur). Appelle maj avec les noms (liste vide = personne).
+     */
+    suspend fun suivreSaisie(c: Conversation, maj: (List<String>) -> Unit) = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext
+        val salon = salonDe(c) ?: return@withContext
+        val m = Matrix(cfg)
+        val noms = runCatching { m.membres(salon) }.getOrDefault(emptyMap())
+        val moi = setOf(cfg.matrixUtilisateur, cfg.moiFantome)
+        var jeton: String? = null
+        var echecs = 0
+        while (true) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try {
+                val (suivant, ids) = m.attendreSaisie(salon, jeton)
+                if (jeton != null && ids != null) {
+                    maj(ids.filter { it !in moi && !it.contains("bot:") }
+                        .map { id -> (noms[id] ?: id.substringAfter('@').substringBefore(':')).replace(" (WA)", "") })
+                }
+                jeton = suivant; echecs = 0
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (_: Exception) { if (++echecs > 5) return@withContext; delay(5_000L * echecs) }
+        }
     }
 
     fun peutQuitter(c: Conversation) = c.estGroupe && cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS

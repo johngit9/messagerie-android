@@ -161,6 +161,9 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var menuIA by remember { mutableStateOf(false) }
     var menuAppel by remember { mutableStateOf(false) }
     var menuPlus by remember { mutableStateOf(false) }
+    // « En train d'écrire » : reçu seulement, l'appli n'envoie jamais le sien
+    var ecrivent by remember(c.cle) { mutableStateOf(listOf<String>()) }
+    LaunchedEffect(c.cle) { Moteur.suivreSaisie(c) { ecrivent = it } }
     var infos by remember { mutableStateOf(false) }
     // Sélection de plusieurs messages (copier, transférer)
     var selection by remember(c.cle) { mutableStateOf(setOf<String>()) }
@@ -286,7 +289,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(c.nom, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "",
+                        if (ecrivent.isNotEmpty()) Text(
+                            when {
+                                !c.estGroupe -> "en train d'écrire…"
+                                ecrivent.size == 1 -> "${ecrivent[0]} écrit…"
+                                ecrivent.size == 2 -> "${ecrivent[0]} et ${ecrivent[1]} écrivent…"
+                                else -> "${ecrivent.size} personnes écrivent…"
+                            },
+                            style = MaterialTheme.typography.labelMedium, color = c.source.teinte(), fontStyle = FontStyle.Italic,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        else Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "",
                             style = MaterialTheme.typography.labelMedium, color = c.source.teinte())
                     }
                     }

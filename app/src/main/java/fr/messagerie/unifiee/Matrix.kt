@@ -166,9 +166,33 @@ class Matrix(private val cfg: Config) {
     }
 
     /** Attente longue (30 s max) ; lecture seule. Renvoie le nouveau jeton et s'il y a du nouveau. */
+    /**
+     * « En train d'écrire » dans un salon : attente longue (25 s max), RÉCEPTION seulement.
+     * set_presence=offline : votre présence n'est jamais signalée ; aucun indicateur n'est envoyé.
+     * Renvoie (jeton suivant, identifiants qui écrivent, ou null si rien n'a changé).
+     */
+    fun attendreSaisie(salon: String, depuis: String?): Pair<String, List<String>?> {
+        connecter()
+        val filtre = JSONObject()
+            .put("room", JSONObject().put("rooms", org.json.JSONArray().put(salon))
+                .put("timeline", JSONObject().put("limit", 0)).put("state", JSONObject().put("types", org.json.JSONArray()))
+                .put("ephemeral", JSONObject().put("types", org.json.JSONArray().put("m.typing")))
+                .put("account_data", JSONObject().put("not_types", org.json.JSONArray().put("*"))))
+            .put("presence", JSONObject().put("not_types", org.json.JSONArray().put("*")))
+            .put("account_data", JSONObject().put("not_types", org.json.JSONArray().put("*")))
+        var chemin = "/_matrix/client/v3/sync?set_presence=offline&filter=${Http.enc(filtre.toString())}"
+        chemin += if (depuis != null) "&timeout=25000&since=${Http.enc(depuis)}" else "&timeout=0"
+        val j = get(chemin, 40_000)
+        val ev = j.optJSONObject("rooms")?.optJSONObject("join")?.optJSONObject(salon)
+            ?.optJSONObject("ephemeral")?.optJSONArray("events")?.objets()
+            ?.lastOrNull { it.optString("type") == "m.typing" }
+        val ids = ev?.optJSONObject("content")?.optJSONArray("user_ids")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+        return j.getString("next_batch") to ids
+    }
+
     fun attendreNouveautes(depuis: String?): Pair<String, Boolean> {
         connecter()
-        var chemin = "/_matrix/client/v3/sync?filter=${Http.enc(filtreVeille)}"
+        var chemin = "/_matrix/client/v3/sync?set_presence=offline&filter=${Http.enc(filtreVeille)}"
         chemin += if (depuis != null) "&timeout=30000&since=${Http.enc(depuis)}" else "&timeout=0"
         val j = get(chemin, 45_000)
         val suivant = j.getString("next_batch")
@@ -250,7 +274,7 @@ class SyncPont(
     }
 
     private suspend fun incremental(jeton: String, infos: Map<String, InfoSalon>, moi: String?): Int {
-        val rep = m.get("/_matrix/client/v3/sync?timeout=0&since=${Http.enc(jeton)}&filter=${Http.enc(FILTRE_SYNC)}")
+        val rep = m.get("/_matrix/client/v3/sync?set_presence=offline&timeout=0&since=${Http.enc(jeton)}&filter=${Http.enc(FILTRE_SYNC)}")
         var total = 0
         val salons = rep.optJSONObject("rooms")?.optJSONObject("join")
         if (salons != null) for (id in salons.keys()) {
@@ -296,7 +320,7 @@ class SyncPont(
         }
 
         // Jeton de départ (pris AVANT la remontée), derniers messages et accusés de lecture.
-        val depart = runCatching { m.get("/_matrix/client/v3/sync?timeout=0&filter=${Http.enc(FILTRE_DEPART)}", 30_000) }.getOrNull()
+        val depart = runCatching { m.get("/_matrix/client/v3/sync?set_presence=offline&timeout=0&filter=${Http.enc(FILTRE_DEPART)}", 30_000) }.getOrNull()
         val salonsDepart = depart?.optJSONObject("rooms")?.optJSONObject("join")
 
         // Le fantôme qui vous représente : présent dans bien plus de conversations que les autres.
