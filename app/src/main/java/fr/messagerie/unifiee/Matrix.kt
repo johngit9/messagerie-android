@@ -58,10 +58,21 @@ class Matrix(private val cfg: Config) {
 
     /** Envoie un message — UNIQUEMENT sur le bouton « Envoyer ». */
     /** Envoie un texte — UNIQUEMENT sur le bouton « Envoyer ». Renvoie l'identifiant de l'événement. */
-    fun envoyer(salon: String, texte: String, reponseA: String?): String {
+    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap()): String {
         connecter()
         val txn = "messagerie-" + UUID.randomUUID()
         val contenu = JSONObject().put("msgtype", "m.text").put("body", texte)
+        // Mentions « @Nom » : lien vers le membre (la passerelle en fait une vraie mention @ dans WhatsApp, Telegram…)
+        val presentes = mentions.filterKeys { texte.contains("@$it") }
+        if (presentes.isNotEmpty()) {
+            var html = android.text.TextUtils.htmlEncode(texte)
+            for ((nom, id) in presentes.entries.sortedByDescending { it.key.length }) {
+                html = html.replace("@" + android.text.TextUtils.htmlEncode(nom),
+                    "<a href=\"https://matrix.to/#/" + id + "\">" + android.text.TextUtils.htmlEncode(nom) + "</a>")
+            }
+            contenu.put("format", "org.matrix.custom.html").put("formatted_body", html.replace("\n", "<br>"))
+            contenu.put("m.mentions", JSONObject().put("user_ids", org.json.JSONArray(presentes.values.distinct())))
+        }
         if (reponseA != null) contenu.put("m.relates_to", JSONObject().put("m.in_reply_to", JSONObject().put("event_id", reponseA)))
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
             "PUT", jeton, contenu.toString(), 15_000)

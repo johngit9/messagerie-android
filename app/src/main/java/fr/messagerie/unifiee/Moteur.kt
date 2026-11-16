@@ -387,7 +387,7 @@ object Moteur {
     // MARK: Envoi — uniquement sur le bouton « Envoyer »
 
     /** Renvoie null si envoyé, sinon le message d'erreur. */
-    suspend fun envoyer(texte: String, c: Conversation, cite: Message?): String? = withContext(Dispatchers.IO) {
+    suspend fun envoyer(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String> = emptyMap()): String? = withContext(Dispatchers.IO) {
         val t = texte.trim()
         if (t.isEmpty()) return@withContext "message vide"
         val idCite = cite?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") }
@@ -403,9 +403,9 @@ object Moteur {
                         ?: return@withContext if (_etat.value.salonsWhatsApp.isEmpty())
                             "relais injoignable : impossible de trouver la discussion WhatsApp sur le serveur"
                         else "cette discussion WhatsApp n'est pas reliée au serveur (passerelle)"
-                    Matrix(cfg).envoyer(salon, t, idCite)
+                    Matrix(cfg).envoyer(salon, t, idCite, mentions)
                 }
-                else -> Matrix(cfg).envoyer(c.jid, t, idCite)
+                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions)
             }
             afficherEnvoye(c, eid, t)
             null
@@ -597,7 +597,10 @@ object Moteur {
     // MARK: Groupes — lecture des membres ; quitter seulement après confirmation
 
     /** Membre d'un groupe : nom (si connu) et numéro (si la messagerie en donne un). */
-    data class Membre(val nom: String?, val numero: String?, val moi: Boolean = false)
+    data class Membre(val nom: String?, val numero: String?, val moi: Boolean = false, val id: String = "") {
+        /** Texte affiché après @ dans une mention. */
+        val libelle: String get() = nom ?: numero?.let { "+$it" } ?: id
+    }
 
     /**
      * Membres d'un groupe, hors robots des passerelles. Le nom vient, dans l'ordre : des contacts
@@ -623,7 +626,7 @@ object Moteur {
                 moi -> "Vous"
                 else -> numero?.let { nomContactTelephone(it) } ?: numero?.let { parNumero[it] } ?: propre.takeIf { !estUnNumero(it) && !it.startsWith("@") }
             }
-            Membre(nom, numero, moi)
+            Membre(nom, numero, moi, id)
         }.distinctBy { it.numero ?: it.nom }
             .sortedWith(compareBy<Membre> { !it.moi }.thenBy { it.nom == null }.thenBy { (it.nom ?: it.numero ?: "").lowercase() })
     }

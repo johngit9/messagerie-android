@@ -133,6 +133,13 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     // Versions précédentes du texte avant chaque modification par l'IA (pour revenir en arrière)
     var versionsIA by remember(c.cle) { mutableStateOf(listOf<String>()) }
     var saisieAgrandie by rememberSaveable(c.cle) { mutableStateOf(false) }
+    // Champ de saisie avec position du curseur (pour les mentions @)
+    var champ by remember(c.cle) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+    // Mentions insérées : nom affiché → identifiant du membre
+    var mentions by remember(c.cle) { mutableStateOf(mapOf<String, String>()) }
+    val membresMention by androidx.compose.runtime.produceState<List<Moteur.Membre>>(emptyList(), c.cle) {
+        if (c.estGroupe) value = Moteur.membresGroupe(c).orEmpty().filter { !it.moi && it.id.isNotEmpty() }
+    }
     // Image collée depuis le presse-papiers (copie d'écran…) : envoyée seulement sur « Envoyer »
     var imageCollee by remember(c.cle) { mutableStateOf<Pair<ByteArray, String>?>(null) }
     var imageDispo by remember { mutableStateOf(false) }
@@ -480,10 +487,42 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer le vocal")
                             }
                         }
-                    } else
+                    } else {
+                    // Suggestions de mention : « @ » suivi des premières lettres d'un membre
+                    val avantCurseur = if (champ.text == brouillon) brouillon.take(champ.selection.start.coerceIn(0, brouillon.length)) else brouillon
+                    val saisieMention = Regex("""(?:^|\s)@([^\s@]{0,24})$""").find(avantCurseur)?.groupValues?.get(1)
+                    val proposes = if (saisieMention == null || membresMention.isEmpty()) emptyList() else {
+                        val q = sansAccents(saisieMention)
+                        membresMention.filter { mb ->
+                            q.isEmpty() || sansAccents(mb.libelle).split(' ', '-').any { it.startsWith(q) } || (mb.numero?.contains(q) == true)
+                        }.take(6)
+                    }
+                    if (proposes.isNotEmpty()) Column(
+                        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)).padding(vertical = 4.dp),
+                    ) {
+                        proposes.forEach { mb ->
+                            Row(Modifier.fillMaxWidth().height(48.dp).clickable {
+                                val debut = avantCurseur.length - saisieMention!!.length - 1
+                                val apres = brouillon.substring(avantCurseur.length)
+                                val insere = "@" + mb.libelle + " "
+                                val nouveau = brouillon.substring(0, debut) + insere + apres
+                                brouillon = nouveau
+                                champ = androidx.compose.ui.text.input.TextFieldValue(nouveau, androidx.compose.ui.text.TextRange(debut + insere.length))
+                                mentions = mentions + (mb.libelle to mb.id)
+                            }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Avatar(mb.libelle, c.source, false, taille = 30.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(mb.libelle, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                if (mb.nom != null && mb.numero != null) Text("+" + mb.numero, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val valeurChamp = if (champ.text == brouillon) champ
+                            else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
                         OutlinedTextField(
-                            value = brouillon, onValueChange = { brouillon = it }, enabled = !iaEnCours,
+                            value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
                             placeholder = { Text(if (c.source == Source.SMS) "Écrire un SMS…" else "Écrire une réponse…") },
                             minLines = if (saisieAgrandie) 8 else 2, maxLines = if (saisieAgrandie) 16 else 8,
                             trailingIcon = {
@@ -527,10 +566,10 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             onClick = {
                                 envoi = true
                                 portee.launch {
-                                    val err = Moteur.envoyer(brouillon, c, reponseA)
+                                    val err = Moteur.envoyer(brouillon, c, reponseA, mentions)
                                     envoi = false
                                     if (err == null) {
-                                        brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false
+                                        brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
                                         afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
                                     } else afficher("Échec : $err")
                                 }
@@ -541,6 +580,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                             else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer")
                         }
+                    }
                     }
                 }
             }
@@ -578,6 +618,10 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         )
     }
 }
+
+/** Minuscules sans accents (pour comparer les noms). */
+private fun sansAccents(t: String) = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD)
+    .replace(Regex("\\p{Mn}+"), "").lowercase()
 
 private fun copier(ctx: Context, texte: String) {
     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("message", texte))
