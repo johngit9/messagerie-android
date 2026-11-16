@@ -32,6 +32,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Forum
@@ -100,6 +102,10 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
     val recherche by vm.recherche.collectAsState()
     val visibles by vm.visibles.collectAsState()
     var actionsPour by remember { mutableStateOf<Conversation?>(null) }
+    // Sélection de plusieurs conversations (appui long) pour des actions groupées
+    var choisies by remember { mutableStateOf(setOf<String>()) }
+    fun basculer(c: Conversation) { choisies = if (c.cle in choisies) choisies - c.cle else choisies + c.cle }
+    androidx.activity.compose.BackHandler(enabled = choisies.isNotEmpty()) { choisies = emptySet() }
     val tiroir = rememberDrawerState(DrawerValue.Closed)
     val portee = rememberCoroutineScope()
     val sources = Source.entries.filter { s -> e.statistiques[s] != null || e.sources[s] is EtatSource.Ok || e.sources[s] is EtatSource.Erreur }
@@ -122,7 +128,10 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
             bottomBar = { if (sources.size > 1) BarreSources(e, sources, source, espace) { vm.source.value = it } },
         ) { pad ->
             Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
-                Entete(e, vue, genre, espace, source, visibles.size, recherche,
+                if (choisies.isNotEmpty()) BarreSelection(e, e.conversations.filter { it.cle in choisies },
+                    toutChoisir = { choisies = visibles.map { it.cle }.toSet() },
+                    plus = { cs -> actionsPour = cs }, fin = { choisies = emptySet() })
+                else Entete(e, vue, genre, espace, source, visibles.size, recherche,
                     choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
                     choisirEspace = { vm.espace.value = it },
                     ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
@@ -147,7 +156,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                 ) {
                     items(visibles, key = { it.cle }) { c ->
                         CarteConversation(e, c, Modifier.animateItem(),
-                            ouvrir = { vm.derniereOuverte = c.cle; ouvrir(c.cle) }, actions = { actionsPour = c })
+                            ouvrir = { if (choisies.isNotEmpty()) basculer(c) else { vm.derniereOuverte = c.cle; ouvrir(c.cle) } },
+                            actions = { basculer(c) }, choisie = c.cle in choisies)
                     }
                 }
             }
@@ -377,7 +387,7 @@ private fun EtatVide(contenu: Triple<ImageVector, String, String>) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvrir: () -> Unit, actions: () -> Unit) {
+private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvrir: () -> Unit, actions: () -> Unit, choisie: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val aTraiter = e.aTraiter(c)
     val nonLue = e.estNonLue(c)
@@ -388,14 +398,21 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
     Column(modifier.fillMaxWidth()) {
     Row(
         Modifier.fillMaxWidth()
-            .background(fond, forme)
-            .then(if (design == 1) Modifier else Modifier.border(1.dp, if (design == 2) c.source.teinte().copy(alpha = 0.25f) else cs.outlineVariant, forme))
+            .background(if (choisie) cs.primaryContainer else fond, forme)
+            .then(if (choisie) Modifier.border(2.dp, cs.primary, forme)
+                else if (design == 1) Modifier else Modifier.border(1.dp, if (design == 2) c.source.teinte().copy(alpha = 0.25f) else cs.outlineVariant, forme))
             .clip(forme)
             .combinedClickable(onClick = ouvrir, onLongClick = actions)
             .padding(horizontal = if (design == 1) 4.dp else 12.dp, vertical = when (design) { 1 -> 9.dp; 3 -> 16.dp; else -> 12.dp }),
         verticalAlignment = if (design == 1) Alignment.CenterVertically else Alignment.Top,
     ) {
-        Avatar(c.nom, c.source, c.estGroupe, taille = when (design) { 1 -> 40.dp; 3 -> 56.dp; else -> 48.dp }, bordure = cs.surfaceContainerLow, cle = c.cle)
+        Box {
+            Avatar(c.nom, c.source, c.estGroupe, taille = when (design) { 1 -> 40.dp; 3 -> 56.dp; else -> 48.dp }, bordure = cs.surfaceContainerLow, cle = c.cle)
+            if (choisie) Box(Modifier.align(Alignment.BottomEnd).size(20.dp).background(cs.primary, androidx.compose.foundation.shape.CircleShape)
+                .border(2.dp, cs.surface, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                Text("✓", color = cs.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -441,6 +458,47 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
     }
     if (design == 1) HorizontalDivider(Modifier.padding(start = 56.dp), color = cs.outlineVariant)
     }
+}
+
+/** Barre du haut quand des conversations sont sélectionnées : actions groupées (toutes locales). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BarreSelection(e: Etat, liste: List<Conversation>, toutChoisir: () -> Unit, plus: (Conversation) -> Unit, fin: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var menu by remember { mutableStateOf(false) }
+    val n = liste.size
+    fun pourTous(action: (Conversation) -> Unit) { liste.forEach(action); fin() }
+    androidx.compose.material3.TopAppBar(
+        navigationIcon = { IconButton(onClick = fin) { Icon(Icons.Outlined.Close, "Annuler la sélection") } },
+        title = { Text("$n sélectionnée" + if (n > 1) "s" else "") },
+        actions = {
+            IconButton(onClick = { pourTous { Moteur.mettreATraiter(it, true) } }) { Icon(Icons.Outlined.Flag, "Mettre à traiter") }
+            IconButton(onClick = { pourTous { Moteur.marquerTraitee(it) } }) { Icon(Icons.Outlined.TaskAlt, "Marquer comme traitées") }
+            IconButton(onClick = { pourTous { Moteur.marquerLue(it) } }) { Icon(Icons.Outlined.MarkEmailRead, "Marquer comme lues") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Plus d'actions") }
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    val choix = buildList<Pair<String, () -> Unit>> {
+                        add("Tout sélectionner" to { toutChoisir() })
+                        add("Retirer de « À traiter »" to { pourTous { Moteur.mettreATraiter(it, false) } })
+                        add("Marquer comme non lues" to { pourTous { Moteur.marquerNonLue(it) } })
+                        add("Épingler" to { pourTous { if (!e.estEpinglee(it)) Moteur.basculerEpingle(it) } })
+                        add("Archiver" to { pourTous { if (!e.estArchivee(it)) Moteur.basculerArchive(it) } })
+                        add("Désarchiver" to { pourTous { if (e.estArchivee(it)) Moteur.basculerArchive(it) } })
+                        add("Mettre en sourdine" to { pourTous { if (!e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
+                        add("Réactiver les notifications" to { pourTous { if (e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
+                        add("Ranger en Pro" to { pourTous { if (!e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) null else "pro") } })
+                        add("Ranger en Perso" to { pourTous { if (e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) "perso" else null) } })
+                        if (n == 1) add("Autres actions…" to { val c = liste.first(); fin(); plus(c) })
+                    }
+                    choix.forEach { (t, a) ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(t) }, onClick = { menu = false; a() })
+                    }
+                }
+            }
+        },
+        colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = cs.secondaryContainer),
+    )
 }
 
 /** Panneau d'actions (appui long ou ⋮). Toutes LOCALES sauf « Résumé IA » (Ollama sur votre serveur). */

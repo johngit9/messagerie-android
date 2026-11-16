@@ -231,6 +231,8 @@ class SyncPont(
     val lectures = HashMap<String, Long>()
     /** Jusqu'où vos contacts ont lu (accusés de lecture reçus, jamais envoyés) : conversation → date. */
     val lusParContacts = HashMap<String, Long>()
+    /** Dernière mention de vous (date du message) par conversation. */
+    val mentionsMoi = HashMap<String, Long>()
     /** Conversations SMS passant par RCS. */
     var rcs: Set<String>? = null
 
@@ -429,6 +431,14 @@ class SyncPont(
                 val exp = e.optString("sender")
                 if (rel.optString("rel_type") != "m.annotation" || cible.isEmpty() || cle.isEmpty()) continue
                 val deMoi = exp == m.utilisateur || exp == moi
+        // Vous êtes mentionné (@) : m.mentions ou lien vers votre identifiant dans le texte mis en forme
+        if (!deMoi) {
+            val ids = listOfNotNull(m.utilisateur.takeIf { it.isNotEmpty() }, moi)
+            val cites = c.optJSONObject("m.mentions")?.optJSONArray("user_ids")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+            val html = c.optString("formatted_body")
+            if (ids.any { it in cites || html.contains(it) || html.contains(java.net.URLEncoder.encode(it, "UTF-8")) } &&
+                ts > (mentionsMoi[conv] ?: 0)) mentionsMoi[conv] = ts
+        }
                 reactions.add(Reaction("${pont.source.id}:$eid", "${pont.source.id}:$cible", conv, cle,
                     if (deMoi) "Vous" else info.membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un", deMoi))
                 continue

@@ -41,6 +41,8 @@ data class Etat(
     val rcs: Set<String> = emptySet(),
     /** Conversation → date jusqu'à laquelle le contact a lu vos messages (si la messagerie le transmet). */
     val lusParContacts: Map<String, Long> = emptyMap(),
+    /** Date de la dernière mention de vous (@) par conversation. */
+    val mentions: Map<String, Long> = emptyMap(),
     val salonsWhatsApp: Map<String, String> = emptyMap(),   // jid WhatsApp → salon Matrix
     val enCours: Boolean = false,
     val derniereActualisation: Long? = null,
@@ -81,6 +83,12 @@ data class Etat(
         val e = etat(c)
         if (e.manuel) return true
         if (c.dernierDeMoi || c.derniere < depuis) return false
+        // Groupe : « À traiter » seulement si vous y êtes mentionné depuis votre dernier message
+        if (c.estGroupe) {
+            val mention = mentions[c.cle] ?: return false
+            val monDernier = c.messages.lastOrNull { it.deMoi }?.date ?: 0
+            return mention > monDernier && mention > e.traitee && e.traitee != c.derniere
+        }
         val s = synthese(c) ?: return false
         return s.actionRequise && e.traitee != c.derniere
     }
@@ -280,6 +288,10 @@ object Moteur {
             val s = SyncPont(Matrix(cfg), pont, archive, correspondance).avecMoi(cfg.moiFantome)
             s.synchroniser()
             appliquerLectures(s.lectures)
+            for ((conv, ts) in s.mentionsMoi) {
+                val avant = archive.curseur("mention.$conv")?.toLongOrNull() ?: 0
+                if (ts > avant) archive.definirCurseur("mention.$conv", ts.toString())
+            }
             for ((conv, ts) in s.lusParContacts) {
                 val avant = archive.curseur("luPar.$conv")?.toLongOrNull() ?: 0
                 if (ts > avant) archive.definirCurseur("luPar.$conv", ts.toString())
@@ -316,7 +328,8 @@ object Moteur {
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources,
             etats = archive.etats(), syntheses = archive.syntheses(),
-            lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
+            lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
+            mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 
     private fun majEtat(cle: String, f: (EtatConv) -> EtatConv) {
@@ -339,6 +352,8 @@ object Moteur {
         runCatching { NotificationManagerCompat.from(app).cancelAll() }
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
+    /** Met (ou retire) plusieurs conversations dans « À traiter » d'un coup. */
+    fun mettreATraiter(c: Conversation, oui: Boolean) = majEtat(c.cle) { if (oui) it.copy(manuel = true, traitee = 0) else it.copy(manuel = false) }
     fun basculerATraiter(c: Conversation) = majEtat(c.cle) { if (it.manuel) it.copy(manuel = false) else it.copy(manuel = true, traitee = 0) }
     fun basculerSourdine(c: Conversation) = majEtat(c.cle) { it.copy(sourdine = !it.sourdine) }
 
