@@ -472,23 +472,29 @@ private fun BarreSelection(e: Etat, liste: List<Conversation>, toutChoisir: () -
         navigationIcon = { IconButton(onClick = fin) { Icon(Icons.Outlined.Close, "Annuler la sélection") } },
         title = { Text("$n sélectionnée" + if (n > 1) "s" else "") },
         actions = {
-            IconButton(onClick = { pourTous { Moteur.mettreATraiter(it, true) } }) { Icon(Icons.Outlined.Flag, "Mettre à traiter") }
-            IconButton(onClick = { pourTous { Moteur.marquerTraitee(it) } }) { Icon(Icons.Outlined.TaskAlt, "Marquer comme traitées") }
-            IconButton(onClick = { pourTous { Moteur.marquerLue(it) } }) { Icon(Icons.Outlined.MarkEmailRead, "Marquer comme lues") }
+            // Selon l'état : si toutes sont déjà dans un état, seule l'action inverse est proposée
+            val toutesATraiter = liste.all { e.aTraiter(it) }
+            val toutesLues = liste.none { e.estNonLue(it) }
+            if (toutesATraiter) IconButton(onClick = { pourTous { Moteur.marquerTraitee(it) } }) { Icon(Icons.Outlined.TaskAlt, "Marquer comme traitées") }
+            else IconButton(onClick = { pourTous { Moteur.mettreATraiter(it, true) } }) { Icon(Icons.Outlined.Flag, "Mettre à traiter") }
+            if (toutesLues) IconButton(onClick = { pourTous { Moteur.marquerNonLue(it) } }) { Icon(Icons.Outlined.MarkEmailUnread, "Marquer comme non lues") }
+            else IconButton(onClick = { pourTous { Moteur.marquerLue(it) } }) { Icon(Icons.Outlined.MarkEmailRead, "Marquer comme lues") }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Plus d'actions") }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     val choix = buildList<Pair<String, () -> Unit>> {
                         add("Tout sélectionner" to { toutChoisir() })
-                        add("Retirer de « À traiter »" to { pourTous { Moteur.mettreATraiter(it, false) } })
-                        add("Marquer comme non lues" to { pourTous { Moteur.marquerNonLue(it) } })
-                        add("Épingler" to { pourTous { if (!e.estEpinglee(it)) Moteur.basculerEpingle(it) } })
-                        add("Archiver" to { pourTous { if (!e.estArchivee(it)) Moteur.basculerArchive(it) } })
-                        add("Désarchiver" to { pourTous { if (e.estArchivee(it)) Moteur.basculerArchive(it) } })
-                        add("Mettre en sourdine" to { pourTous { if (!e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
-                        add("Réactiver les notifications" to { pourTous { if (e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
-                        add("Ranger en Pro" to { pourTous { if (!e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) null else "pro") } })
-                        add("Ranger en Perso" to { pourTous { if (e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) "perso" else null) } })
+                        // Chaque action n'apparaît que si au moins une conversation choisie n'est pas déjà dans cet état
+                        if (liste.any { e.aTraiter(it) } && !toutesATraiter) add("Marquer comme traitées" to { pourTous { if (e.aTraiter(it)) Moteur.marquerTraitee(it) } })
+                        if (liste.any { e.estNonLue(it) } && liste.any { !e.estNonLue(it) }) add("Marquer comme non lues" to { pourTous { Moteur.marquerNonLue(it) } })
+                        if (liste.any { !e.estEpinglee(it) }) add("Épingler" to { pourTous { if (!e.estEpinglee(it)) Moteur.basculerEpingle(it) } })
+                        if (liste.any { e.estEpinglee(it) }) add("Désépingler" to { pourTous { if (e.estEpinglee(it)) Moteur.basculerEpingle(it) } })
+                        if (liste.any { !e.estArchivee(it) }) add("Archiver" to { pourTous { if (!e.estArchivee(it)) Moteur.basculerArchive(it) } })
+                        if (liste.any { e.estArchivee(it) }) add("Désarchiver" to { pourTous { if (e.estArchivee(it)) Moteur.basculerArchive(it) } })
+                        if (liste.any { !e.etat(it).sourdine }) add("Mettre en sourdine" to { pourTous { if (!e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
+                        if (liste.any { e.etat(it).sourdine }) add("Réactiver les notifications" to { pourTous { if (e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
+                        if (liste.any { !e.estPro(it) }) add("Ranger en Pro" to { pourTous { if (!e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) null else "pro") } })
+                        if (liste.any { e.estPro(it) }) add("Ranger en Perso" to { pourTous { if (e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) "perso" else null) } })
                         if (n == 1) add("Autres actions…" to { val c = liste.first(); fin(); plus(c) })
                     }
                     choix.forEach { (t, a) ->
@@ -523,10 +529,11 @@ fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
                 if (Moteur.cfg.ollamaConfigure) TuileAction("Résumé IA", Icons.Outlined.AutoAwesome, Color(0xFF6A4BD6), Modifier.weight(1f)) { Moteur.regenerer(c); fermer() }
                 if (e.estNonLue(c)) TuileAction("Lu", Icons.Outlined.MarkEmailRead, cs.primary, Modifier.weight(1f)) { Moteur.marquerLue(c); fermer() }
                 else TuileAction("Non lu", Icons.Outlined.MarkEmailUnread, cs.primary, Modifier.weight(1f)) { Moteur.marquerNonLue(c); fermer() }
-                TuileAction("Traitée", Icons.Outlined.TaskAlt, Color(0xFF1E7A47), Modifier.weight(1f)) { Moteur.marquerTraitee(c); fermer() }
+                if (e.aTraiter(c)) TuileAction("Traitée", Icons.Outlined.TaskAlt, Color(0xFF1E7A47), Modifier.weight(1f)) { Moteur.marquerTraitee(c); fermer() }
+                else TuileAction("À traiter", Icons.Outlined.Flag, Color(0xFFA04A0B), Modifier.weight(1f)) { Moteur.mettreATraiter(c, true); fermer() }
             }
             Spacer(Modifier.height(8.dp))
-            val rapides = setOf("Marquer comme lu", "Marquer comme non lu", "Marquer comme traitée", "Refaire le résumé IA")
+            val rapides = setOf("Marquer comme lu", "Marquer comme non lu", "Marquer comme traitée", "Ajouter à « À traiter »", "Refaire le résumé IA")
             actionsConversation(e, c).filter { it.libelle !in rapides }.forEach { a ->
                 Row(Modifier.fillMaxWidth().height(52.dp).clickable { a.faire(); fermer() }.padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {

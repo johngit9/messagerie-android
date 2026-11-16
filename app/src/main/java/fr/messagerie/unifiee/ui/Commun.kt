@@ -131,8 +131,9 @@ class Action(val libelle: String, val icone: ImageVector, val faire: () -> Unit)
 fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
     if (e.estNonLue(c)) add(Action("Marquer comme lu", Icons.Outlined.MarkEmailRead) { Moteur.marquerLue(c) })
     else add(Action("Marquer comme non lu", Icons.Outlined.MarkEmailUnread) { Moteur.marquerNonLue(c) })
-    add(Action(if (e.etat(c).manuel) "Retirer de « À traiter »" else "Ajouter à « À traiter »", Icons.Outlined.Flag) { Moteur.basculerATraiter(c) })
-    add(Action("Marquer comme traitée", Icons.Outlined.TaskAlt) { Moteur.marquerTraitee(c) })
+    // Seule l'action qui a un sens dans l'état actuel est proposée
+    if (e.aTraiter(c)) add(Action("Marquer comme traitée", Icons.Outlined.TaskAlt) { Moteur.marquerTraitee(c) })
+    else add(Action("Ajouter à « À traiter »", Icons.Outlined.Flag) { Moteur.mettreATraiter(c, true) })
     if (e.etat(c).sourdine) add(Action("Réactiver les notifications", Icons.Outlined.Notifications) { Moteur.basculerSourdine(c) })
     else add(Action("Mettre en sourdine", Icons.Outlined.NotificationsOff) { Moteur.basculerSourdine(c) })
     if (Moteur.cfg.ollamaConfigure) add(Action("Refaire le résumé IA", Icons.Outlined.AutoAwesome) { Moteur.regenerer(c) })

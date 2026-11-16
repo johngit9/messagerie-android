@@ -361,8 +361,9 @@ object Moteur {
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
     /** Met (ou retire) plusieurs conversations dans « À traiter » d'un coup. */
-    fun mettreATraiter(c: Conversation, oui: Boolean) = majEtat(c.cle) { if (oui) it.copy(manuel = true, traitee = 0) else it.copy(manuel = false) }
-    fun basculerATraiter(c: Conversation) = majEtat(c.cle) { if (it.manuel) it.copy(manuel = false) else it.copy(manuel = true, traitee = 0) }
+    /** Met dans « À traiter », ou l'en retire (y compris si c'est l'IA ou une mention qui l'y avait mise). */
+    fun mettreATraiter(c: Conversation, oui: Boolean) = majEtat(c.cle) { if (oui) it.copy(manuel = true, traitee = 0) else it.copy(manuel = false, traitee = c.derniere) }
+    fun basculerATraiter(c: Conversation) = mettreATraiter(c, !_etat.value.aTraiter(c))
     fun basculerSourdine(c: Conversation) = majEtat(c.cle) { it.copy(sourdine = !it.sourdine) }
 
     // MARK: IA
