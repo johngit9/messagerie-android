@@ -706,7 +706,7 @@ private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
                                 Box(Modifier.size(8.dp).background(if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else Color(0xFF2F9E44), CircleShape))
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (st is EtatSource.Erreur) "Erreur : ${st.message}"
-                                    else "Connectée" + (dernier?.let { " · dernier message ${dateCourte(it)}" } ?: ""),
+                                    else "Synchronisée" + (dernier?.let { " · dernier message ${dateCourte(it)}" } ?: ""),
                                     fontSize = 12.sp, maxLines = 2,
                                     color = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -715,6 +715,7 @@ private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
                             Text("$nonLus", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
                         }
                     }
+                    BlocConnexion(e, s)
                     e.statistiques[s]?.let { Text("${it.first} conversations · ${it.second} messages archivés", fontSize = 13.sp) }
                     Interrupteur("Ranger en « Pro »", cfg.pro(s), if (cfg.pro(s)) "Visible dans la vue Pro" else "Visible dans la vue Perso") {
                         cfg.definirPro(s, it); Moteur.chargerOrganisation(); maj++
@@ -734,6 +735,49 @@ private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LigneConnexion(couleur: Color, titre: String, detail: String?) {
+    Row(verticalAlignment = Alignment.Top) {
+        Box(Modifier.padding(top = 5.dp).size(9.dp).background(couleur, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(titre, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            if (detail != null) Text(detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3)
+        }
+    }
+}
+
+/** Connexion d'une messagerie : serveur joint, état de la passerelle (message de son robot), dernier message reçu. */
+@Composable
+private fun BlocConnexion(e: Etat, s: Source) {
+    val cs = MaterialTheme.colorScheme
+    val st = e.sources[s]
+    val passerelle by androidx.compose.runtime.produceState<Moteur.EtatPasserelle?>(null, s, e.derniereActualisation) { value = Moteur.etatPasserelle(s) }
+    val recu = e.conversations.filter { it.source == s }.mapNotNull { c -> c.messages.lastOrNull { !it.deMoi }?.date }.maxOrNull()
+    val vert = Color(0xFF2F9E44); val orange = Color(0xFFD9822B)
+    Column(Modifier.fillMaxWidth().background(cs.background, RoundedCornerShape(14.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Connexion", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = cs.onSurfaceVariant)
+        val serveur = if (s == Source.ELEMENT) "Relais Element (MacBook Pro)" else if (s == Source.TEAMS) "Service Teams (MacBook Pro)" else "Serveur Matrix (MacBook Pro)"
+        if (st is EtatSource.Erreur) LigneConnexion(cs.error, "$serveur injoignable", st.message)
+        else LigneConnexion(vert, "$serveur joint", e.derniereActualisation?.let { "Dernière synchro " + dateCourte(it) + " à " + heure(it) })
+        if (s != Source.ELEMENT && s != Source.TEAMS) {
+            val p = passerelle
+            when {
+                p == null -> LigneConnexion(cs.outline, "Passerelle ${s.libelle} : vérification…", null)
+                p.message == null -> LigneConnexion(cs.outline, "Passerelle ${s.libelle} : état inconnu", "Le robot de la passerelle n'a pas encore écrit.")
+                p.ok == false -> LigneConnexion(cs.error, "Passerelle ${s.libelle} déconnectée",
+                    "« ${p.message} » (${p.date?.let { dateCourte(it) + " " + heure(it) } ?: ""}). Reconnectez ${s.libelle} sur le serveur.")
+                p.ok == true -> LigneConnexion(vert, "Passerelle ${s.libelle} connectée", "« ${p.message} » · ${p.date?.let { dateCourte(it) + " " + heure(it) } ?: ""}")
+                else -> LigneConnexion(orange, "Passerelle ${s.libelle} : à surveiller", "Dernier message du robot : « ${p.message} »")
+            }
+        }
+        val heures = recu?.let { (System.currentTimeMillis() - it) / 3_600_000 }
+        LigneConnexion(if (heures == null || heures >= 24) orange else vert,
+            "Dernier message reçu : " + (recu?.let { dateCourte(it) + " à " + heure(it) } ?: "aucun"),
+            if (heures != null && heures >= 24) "Rien reçu depuis plus d'un jour : vérifiez la connexion de ${s.libelle}." else null)
     }
 }
 

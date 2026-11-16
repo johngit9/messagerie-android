@@ -89,6 +89,8 @@ class Config(context: Context) {
     fun definirSilencePour(s: Source, v: Boolean) = p.edit().putBoolean("silence.${s.id}", v).apply()
     fun enSilence(s: Source): Boolean = silencePour(s) && enSilence()
     /** Présentation de la liste : 0 cartes, 1 liste compacte, 2 bulles (aérée). */
+    /** Serveur Jitsi Meet pour les appels vidéo (meet.jit.si par défaut, ou votre propre serveur). */
+    var jitsi: String get() = s("jitsi").ifEmpty { "https://meet.jit.si" }.trimEnd('/'); set(v) = set("jitsi", v)
     var design: Int get() = p.getInt("design", 0); set(v) = p.edit().putInt("design", v).apply()
     fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
         val d = silenceDebut; val f = silenceFin

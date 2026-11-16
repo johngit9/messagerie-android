@@ -345,10 +345,18 @@ object Moteur {
         runCatching { NotificationManagerCompat.from(app).cancel(c.cle.hashCode()) }   // le chiffre de l'icône baisse
         if (!_etat.value.estNonLue(c)) return
         majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) }
+        luDansElement(c)
+    }
+
+    /** Element : le message lu dans Messagerie apparaît lu dans Element (accusé PRIVÉ, invisible des contacts). */
+    private fun luDansElement(c: Conversation) {
+        if (c.source != Source.ELEMENT || !cfg.relaisConfigure) return
+        val eid = c.messages.lastOrNull()?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") } ?: return
+        portee.launch(Dispatchers.IO) { runCatching { Relais(cfg).luPrive(c.jid, eid) } }
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
-        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) } }
+        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) }; luDansElement(c) }
         runCatching { NotificationManagerCompat.from(app).cancelAll() }
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
@@ -709,6 +717,49 @@ object Moteur {
             } else erreur = "certains messages ne peuvent pas être transférés"
         }
         faits to erreur
+    }
+
+    // MARK: État des passerelles (lecture seule)
+
+    /** État d'une passerelle : ok (true / false / null si inconnu), dernier message du robot et sa date. */
+    data class EtatPasserelle(val ok: Boolean?, val message: String?, val date: Long?)
+
+    /**
+     * Lit le dernier message du robot de la passerelle (salon de gestion, trouvé par m.direct).
+     * Rien n'est envoyé au robot. null si la messagerie ne passe pas par une passerelle Matrix.
+     */
+    suspend fun etatPasserelle(s: Source): EtatPasserelle? = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || s == Source.ELEMENT || s == Source.TEAMS) return@withContext null
+        val nom = Pont.pour(s).prefixe.trim('@', '_')
+        runCatching {
+            val m = Matrix(cfg); m.connecter()
+            val direct = m.get("/_matrix/client/v3/user/${Http.enc(cfg.matrixUtilisateur)}/account_data/m.direct")
+            val robot = direct.keys().asSequence().firstOrNull { k ->
+                val local = k.substringAfter('@').substringBefore(':').lowercase()
+                local.startsWith(nom) && local.endsWith("bot")
+            } ?: return@runCatching EtatPasserelle(null, null, null)
+            val salons = direct.optJSONArray(robot)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+            var dernier: Pair<String, Long>? = null
+            for (salon in salons.take(3)) {
+                val r = runCatching { m.get("/_matrix/client/v3/rooms/${Http.enc(salon)}/messages?dir=b&limit=30") }.getOrNull() ?: continue
+                r.optJSONArray("chunk")?.objets()?.firstOrNull { it.optString("sender") == robot && it.optString("type") == "m.room.message" }?.let { ev ->
+                    val ts = ev.ts("origin_server_ts") ?: 0
+                    val corps = ev.optJSONObject("content")?.optString("body").orEmpty()
+                    if (dernier == null || ts > dernier!!.second) dernier = corps to ts
+                }
+            }
+            val (texte, date) = dernier ?: return@runCatching EtatPasserelle(null, null, null)
+            val t = texte.lowercase()
+            val probleme = listOf("logged out", "not logged in", "disconnect", "déconnect", "error", "erreur", "failed", "échec",
+                "expired", "expiré", "re-login", "relogin", "log in again", "bad credential", "banned", "unauthorized", "not connected")
+            val bien = listOf("connected", "connecté", "logged in", "successfully", "reconnected", "pong")
+            val ok = when {
+                probleme.any { t.contains(it) } && !t.contains("reconnected") -> false
+                bien.any { t.contains(it) } -> true
+                else -> null
+            }
+            EtatPasserelle(ok, texte.lines().firstOrNull { it.isNotBlank() }?.take(200), date)
+        }.getOrNull()
     }
 
     private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()

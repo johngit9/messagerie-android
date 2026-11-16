@@ -310,6 +310,22 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             appels.forEach { (libelle, lien) ->
                                 DropdownMenuItem(text = { Text(libelle) }, onClick = { menuAppel = false; lancerAppel(ctxAppel, lien) })
                             }
+                            if (c.source != Source.TEAMS) {
+                                HorizontalDivider()
+                                // Jitsi Meet : appel vidéo gratuit sans compte ; le lien est mis dans le champ, envoyé seulement si vous appuyez sur Envoyer
+                                DropdownMenuItem(
+                                    text = { Column {
+                                        Text("Appel vidéo Jitsi")
+                                        Text("S'ouvre dans l'appli ; le lien est mis dans votre message (à envoyer)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } },
+                                    onClick = {
+                                        menuAppel = false
+                                        val lien = fr.messagerie.unifiee.AppelJitsi.nouveauLien(Moteur.cfg)
+                                        brouillon = (if (brouillon.isBlank()) "" else brouillon.trimEnd() + " ") + "Appel vidéo : $lien"
+                                        fr.messagerie.unifiee.AppelJitsi.ouvrir(ctxAppel, lien)
+                                    },
+                                )
+                            }
                         }
                     }
                     Box {
@@ -876,9 +892,15 @@ private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.Annot
         for (r in LIEN.findAll(t)) {
             append(t.substring(i, r.range.first))
             val url = r.value.let { if (it.startsWith("www.", true)) "https://$it" else it }
-            withLink(androidx.compose.ui.text.LinkAnnotation.Url(url,
-                androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = couleur,
-                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))) { append(r.value) }
+            val style = androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = couleur,
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
+            val hote = runCatching { android.net.Uri.parse(url).host }.getOrNull()
+            val jitsi = hote != null && (hote == "meet.jit.si" || hote == runCatching { android.net.Uri.parse(Moteur.cfg.jitsi).host }.getOrNull())
+            // Lien d'appel Jitsi : l'appel s'ouvre dans l'appli ; les autres liens dans le navigateur
+            if (jitsi) withLink(androidx.compose.ui.text.LinkAnnotation.Clickable("jitsi", style) {
+                fr.messagerie.unifiee.AppelJitsi.ouvrir(Moteur.app, url)
+            }) { append(r.value) }
+            else withLink(androidx.compose.ui.text.LinkAnnotation.Url(url, style)) { append(r.value) }
             i = r.range.last + 1
         }
         append(t.substring(i))

@@ -130,4 +130,15 @@ class Relais(private val cfg: Config) {
         val r = Http.requete("$base/envoyer", "POST", jeton, d.toString(), 20_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
     }
+
+    /**
+     * Marque lu dans Element, en PRIVÉ seulement (m.read.private / m.fully_read) :
+     * vos contacts ne voient pas que vous avez lu. Appelé quand vous lisez dans Messagerie.
+     */
+    fun luPrive(salon: String, eventId: String) {
+        connecter()
+        val d = JSONObject().put("salon", salon).put("event_id", eventId)
+        val r = Http.requete("$base/lu-prive", "POST", jeton, d.toString(), 10_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "lu privé")
+    }
 }
