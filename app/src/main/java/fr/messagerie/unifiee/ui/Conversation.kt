@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -135,6 +136,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var saisieAgrandie by rememberSaveable(c.cle) { mutableStateOf(false) }
     // Champ de saisie avec position du curseur (pour les mentions @)
     var champ by remember(c.cle) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+    // Correcteur d'orthographe du téléphone (sur l'appareil, rien n'est envoyé)
+    val correcteur = remember { fr.messagerie.unifiee.Correcteur(Moteur.app) }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { correcteur.fermer() } }
+    var fautes by remember(c.cle) { mutableStateOf<Pair<String, List<fr.messagerie.unifiee.Faute>>>("" to emptyList()) }
+    LaunchedEffect(brouillon) {
+        if (brouillon.isBlank()) { fautes = "" to emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(500)
+        val t = brouillon
+        fautes = t to correcteur.verifier(t)
+    }
     // Mentions insérées : nom affiché → identifiant du membre
     var mentions by remember(c.cle) { mutableStateOf(mapOf<String, String>()) }
     val membresMention by androidx.compose.runtime.produceState<List<Moteur.Membre>>(emptyList(), c.cle) {
@@ -513,6 +524,26 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             q.isEmpty() || sansAccents(mb.libelle).split(' ', '-').any { it.startsWith(q) } || (mb.numero?.contains(q) == true)
                         }.take(6)
                     }
+                    val aCorriger = if (fautes.first == brouillon) fautes.second.filter { it.suggestions.isNotEmpty() }.take(4) else emptyList()
+                    if (aCorriger.isNotEmpty() && proposes.isEmpty()) Row(
+                        Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Orthographe :", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        aCorriger.forEach { f ->
+                            f.suggestions.take(2).forEach { sug ->
+                                Text(buildString { append(f.mot); append(" → "); append(sug) }, fontSize = 13.sp,
+                                    modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            if (f.fin <= brouillon.length && brouillon.substring(f.debut, f.fin) == f.mot) {
+                                                val nouveau = brouillon.substring(0, f.debut) + sug + brouillon.substring(f.fin)
+                                                val curseur = (champ.selection.start + sug.length - f.mot.length).coerceIn(0, nouveau.length)
+                                                brouillon = nouveau
+                                                champ = androidx.compose.ui.text.input.TextFieldValue(nouveau, androidx.compose.ui.text.TextRange(if (champ.selection.start >= f.fin) curseur else champ.selection.start))
+                                            }
+                                        }.padding(horizontal = 10.dp, vertical = 6.dp))
+                            }
+                        }
+                    }
                     if (proposes.isNotEmpty()) Column(
                         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)).padding(vertical = 4.dp),
@@ -537,8 +568,23 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         val valeurChamp = if (champ.text == brouillon) champ
                             else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
+                        val fautesActuelles = if (fautes.first == brouillon) fautes.second else emptyList()
                         OutlinedTextField(
                             value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
+                                autoCorrectEnabled = true, keyboardType = androidx.compose.ui.text.input.KeyboardType.Text),
+                            // Fautes soulignées en rouge
+                            visualTransformation = if (fautesActuelles.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None
+                                else androidx.compose.ui.text.input.VisualTransformation { texte ->
+                                    val souligne = androidx.compose.ui.text.SpanStyle(color = MaterialTheme.colorScheme.error,
+                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                                    val a = androidx.compose.ui.text.buildAnnotatedString {
+                                        append(texte)
+                                        fautesActuelles.forEach { f -> if (f.fin <= texte.length) addStyle(souligne, f.debut, f.fin) }
+                                    }
+                                    androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
+                                },
                             placeholder = { Text(if (c.source == Source.SMS) "Écrire un SMS…" else "Écrire une réponse…") },
                             minLines = if (saisieAgrandie) 8 else 2, maxLines = if (saisieAgrandie) 16 else 8,
                             trailingIcon = {
