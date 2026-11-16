@@ -238,7 +238,8 @@ data class Pont(val prefixe: String, val source: Source, val curseur: String) {
         val TELEGRAM = Pont("@telegram_", Source.TELEGRAM, "telegram.sync")
         val LINKEDIN = Pont("@linkedin_", Source.LINKEDIN, "linkedin.sync")
         val WHATSAPP = Pont("@whatsapp_", Source.WHATSAPP, "whatsapp.sync")
-        fun pour(s: Source) = when (s) { Source.TELEGRAM -> TELEGRAM; Source.LINKEDIN -> LINKEDIN; Source.WHATSAPP -> WHATSAPP; else -> SMS }
+        val SIGNAL = Pont("@signal_", Source.SIGNAL, "signal.sync")
+        fun pour(s: Source) = when (s) { Source.TELEGRAM -> TELEGRAM; Source.LINKEDIN -> LINKEDIN; Source.WHATSAPP -> WHATSAPP; Source.SIGNAL -> SIGNAL; else -> SMS }
     }
 }
 

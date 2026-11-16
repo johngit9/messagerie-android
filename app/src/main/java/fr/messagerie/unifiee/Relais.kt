@@ -189,7 +189,7 @@ class Relais(private val cfg: Config) {
         val res = HashMap<Source, EtatServeur>()
         for (k in o.keys()) {
             val s = when (k.lowercase()) {
-                "whatsapp" -> Source.WHATSAPP; "telegram" -> Source.TELEGRAM; "linkedin" -> Source.LINKEDIN
+                "whatsapp" -> Source.WHATSAPP; "telegram" -> Source.TELEGRAM; "linkedin" -> Source.LINKEDIN; "signal" -> Source.SIGNAL
                 "gmessages", "sms" -> Source.SMS; "element" -> Source.ELEMENT; else -> null
             } ?: continue
             val e = o.optJSONObject(k) ?: continue

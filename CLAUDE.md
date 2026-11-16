@@ -1,6 +1,6 @@
 # Messagerie unifiée — app Android
 
-App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsApp, Telegram, LinkedIn (via les passerelles Matrix d'un serveur Synapse) et Element (via un relais), avec résumés IA par Ollama.
+App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsApp, Telegram, LinkedIn, Signal (via les passerelles Matrix d'un serveur Synapse) et Element (via un relais), avec résumés IA par Ollama.
 
 ## Règles absolues
 

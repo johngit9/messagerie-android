@@ -231,7 +231,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 is EtatSource.Erreur -> "Erreur : ${st.message}"
                 else -> null
             }
-            val sourcesMatrix = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN)
+            val sourcesMatrix = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN, Source.SIGNAL)
             val okMatrix = sourcesMatrix.count { e.sources[it] is EtatSource.Ok }
 
             Groupe("Connexions") {

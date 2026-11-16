@@ -249,14 +249,16 @@ object Moteur {
                     val sms = async { synchroniserPont(Pont.SMS, null, sources[Source.SMS], avecRcs = true) }
                     val telegram = async { synchroniserPont(Pont.TELEGRAM, null, sources[Source.TELEGRAM]) }
                     val linkedin = async { synchroniserPont(Pont.LINKEDIN, null, sources[Source.LINKEDIN]) }
+                    val signal = async { synchroniserPont(Pont.SIGNAL, null, sources[Source.SIGNAL]) }
                     sources[Source.SMS] = sms.await()
                     sources[Source.TELEGRAM] = telegram.await()
                     sources[Source.LINKEDIN] = linkedin.await()
+                    sources[Source.SIGNAL] = signal.await()
                     sources[Source.WHATSAPP] = whatsapp.await()
                     _etat.update { it.copy(sources = sources.toMap()) }
                     recharger()
                 } else {
-                    for (s in listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN)) sources[s] = EtatSource.NonConfigure
+                    for (s in listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN, Source.SIGNAL)) sources[s] = EtatSource.NonConfigure
                 }
                 sources[Source.ELEMENT] = element.await()
                 sources[Source.TEAMS] = teams.await()

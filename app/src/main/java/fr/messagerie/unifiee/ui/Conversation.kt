@@ -987,6 +987,7 @@ private fun moyensAppel(c: Conversation): List<Pair<String, String>> {
         Source.TELEGRAM -> l += "Appel Telegram (ouvrir l'appli)" to "appli:org.telegram.messenger"
         Source.TEAMS -> l += "Appel Teams (ouvrir la discussion)" to "teams:${c.jid}"
         Source.LINKEDIN -> l += "Ouvrir LinkedIn" to "appli:com.linkedin.android"
+        Source.SIGNAL -> l += "Appel Signal (ouvrir l'appli)" to "appli:org.thoughtcrime.securesms"
         Source.ELEMENT -> l += "Appel Element (ouvrir l'appli)" to "appli:im.vector.app"
         else -> {}
     }
