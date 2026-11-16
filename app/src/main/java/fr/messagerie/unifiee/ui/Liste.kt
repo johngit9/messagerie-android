@@ -481,6 +481,16 @@ private fun BarreSelection(e: Etat, liste: List<Conversation>, toutChoisir: () -
     var menu by remember { mutableStateOf(false) }
     val n = liste.size
     fun pourTous(action: (Conversation) -> Unit) { liste.forEach(action); fin() }
+    var confirmerSuppr by remember { mutableStateOf(false) }
+    if (confirmerSuppr) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmerSuppr = false },
+        title = { Text("Supprimer $n conversation" + (if (n > 1) "s" else "") + " ?") },
+        text = { Text("Elles sont supprimées de Messagerie seulement : les messages restent chez vos contacts et sur les messageries. " +
+            "Une conversation revient si un nouveau message arrive.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmerSuppr = false; pourTous { Moteur.supprimerConversation(it) } }) {
+            Text("Supprimer", color = cs.error) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmerSuppr = false }) { Text("Annuler") } },
+    )
     androidx.compose.material3.TopAppBar(
         navigationIcon = { IconButton(onClick = fin) { Icon(Icons.Outlined.Close, "Annuler la sélection") } },
         title = { Text("$n sélectionnée" + if (n > 1) "s" else "") },
@@ -508,6 +518,7 @@ private fun BarreSelection(e: Etat, liste: List<Conversation>, toutChoisir: () -
                         if (liste.any { e.etat(it).sourdine }) add("Réactiver les notifications" to { pourTous { if (e.etat(it).sourdine) Moteur.basculerSourdine(it) } })
                         if (liste.any { !e.estPro(it) }) add("Ranger en Pro" to { pourTous { if (!e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) null else "pro") } })
                         if (liste.any { e.estPro(it) }) add("Ranger en Perso" to { pourTous { if (e.estPro(it)) Moteur.classer(it, if (it.source in e.pro) "perso" else null) } })
+                        add("Supprimer…" to { confirmerSuppr = true })
                         if (n == 1) add("Autres actions…" to { val c = liste.first(); fin(); plus(c) })
                     }
                     choix.forEach { (t, a) ->
@@ -525,6 +536,8 @@ private fun BarreSelection(e: Etat, liste: List<Conversation>, toutChoisir: () -
 @Composable
 fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    var aConfirmer by remember { mutableStateOf<Action?>(null) }
+    ConfirmerAction(aConfirmer, fermer = { aConfirmer = null }, apres = fermer)
     ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = cs.surfaceContainerLow) {
         Column(Modifier.padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 12.dp)) {
@@ -550,7 +563,7 @@ fun FeuilleActions(e: Etat, c: Conversation, fermer: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             val rapides = setOf("Marquer comme lu", "Marquer comme non lu", "Marquer comme traitée", "Ajouter à « À traiter »", "Refaire le résumé IA")
             actionsConversation(e, c).filter { it.libelle !in rapides }.forEach { a ->
-                Row(Modifier.fillMaxWidth().height(52.dp).clickable { a.faire(); fermer() }.padding(horizontal = 8.dp),
+                Row(Modifier.fillMaxWidth().height(52.dp).clickable { if (a.confirmer != null) aConfirmer = a else { a.faire(); fermer() } }.padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Icon(a.icone, null, tint = cs.onSurface)
                     Spacer(Modifier.width(14.dp))

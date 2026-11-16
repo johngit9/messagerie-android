@@ -738,6 +738,17 @@ object Moteur {
         ok to ko
     }
 
+    /** Supprime des messages DANS MESSAGERIE seulement (rien n'est supprimé chez les contacts ni sur les messageries). */
+    fun supprimerMessages(cles: List<String>) {
+        portee.launch(Dispatchers.IO) { runCatching { archive.effacerMessages(cles); recharger() } }
+    }
+
+    /** Supprime une conversation DANS MESSAGERIE seulement ; elle revient si un nouveau message arrive. */
+    fun supprimerConversation(c: Conversation) {
+        val jusqua = maxOf(c.derniere, System.currentTimeMillis())
+        portee.launch(Dispatchers.IO) { runCatching { archive.effacerConversation(c.cle, jusqua); recharger() } }
+    }
+
     fun peutQuitter(c: Conversation) = c.estGroupe && cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
 
     /** Quitte le groupe — UNIQUEMENT après la confirmation de l'utilisateur. Renvoie null si c'est fait. */

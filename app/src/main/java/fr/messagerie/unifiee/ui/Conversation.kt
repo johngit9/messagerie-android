@@ -171,6 +171,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var transfert by remember { mutableStateOf(false) }
     var destination by remember { mutableStateOf<Conversation?>(null) }
     var transfertEnCours by remember { mutableStateOf(false) }
+    var aSupprimer by remember { mutableStateOf<Set<String>?>(null) }
     fun quitterSelection() { modeSelection = false; selection = emptySet() }
     fun basculerSelection(m: Message) {
         modeSelection = true
@@ -262,6 +263,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                         }
                         copier(ctxSel, texte); afficher(if (choisis.size > 1) "${choisis.size} messages copiés" else "Texte copié"); quitterSelection()
                     }, enabled = choisis.isNotEmpty()) { Icon(Icons.Outlined.ContentCopy, "Copier") }
+                    IconButton(onClick = { aSupprimer = selection }, enabled = choisis.isNotEmpty()) { Icon(Icons.Outlined.DeleteOutline, "Supprimer") }
                     IconButton(onClick = { transfert = true }, enabled = choisis.isNotEmpty() && !transfertEnCours) {
                         if (transfertEnCours) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         else Icon(Icons.AutoMirrored.Outlined.Forward, "Transférer")
@@ -396,7 +398,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             afficherMessage = { afficher(it) },
                             luParContact = e.lusParContacts[c.cle] ?: 0L,
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
-                            basculer = { basculerSelection(l.m) }) } }
+                            basculer = { basculerSelection(l.m) },
+                            supprimer = { aSupprimer = setOf(l.m.cle) }) } }
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -664,7 +667,22 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     if (menu) FeuilleActions(e, c) { menu = false }
     if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
         appeler = { menuAppel = true }, rechercher = { rechercheOuverte = true }, selectionner = { modeSelection = true },
-        message = { afficher(it) })
+        message = { afficher(it) }, apresSuppression = retour)
+    // Suppression de messages : dans Messagerie seulement, après confirmation
+    aSupprimer?.let { cles ->
+        AlertDialog(
+            onDismissRequest = { aSupprimer = null },
+            title = { Text(if (cles.size > 1) "Supprimer ${cles.size} messages ?" else "Supprimer ce message ?") },
+            text = { Text("Supprimé de Messagerie seulement : le message reste chez vos contacts et dans ${c.source.libelle}.") },
+            confirmButton = { TextButton(onClick = {
+                aSupprimer = null; quitterSelection()
+                Moteur.supprimerMessages(cles.toList())
+                portee.launch { kotlinx.coroutines.delay(400); vm.actualiser(c.messages) }
+                afficher(if (cles.size > 1) "${cles.size} messages supprimés" else "Message supprimé")
+            }) { Text("Supprimer", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { aSupprimer = null }) { Text("Annuler") } },
+        )
+    }
     if (transfert) FeuilleTransfert(e, selection.size, fermer = { transfert = false }) { d -> transfert = false; destination = d }
     destination?.let { d ->
         val n = selection.size
@@ -713,6 +731,7 @@ private fun Bulle(
     afficherMessage: (String) -> Unit = {},
     luParContact: Long = 0,
     modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
+    supprimer: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -777,13 +796,13 @@ private fun Bulle(
     }
     if (menu) FeuilleMessage(m, c, monEmoji, fermer = { menu = false },
         reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) },
-        selectionner = { menu = false; basculer() })
+        selectionner = { menu = false; basculer() }, supprimer = { menu = false; supprimer() })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
-                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit) {
+                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit) {
     ModalBottomSheet(onDismissRequest = fermer) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Text("Réagir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -809,6 +828,7 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
             if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
             ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
+            ElementAction(Icons.Outlined.DeleteOutline, "Supprimer de Messagerie") { supprimer() }
         }
     }
 }

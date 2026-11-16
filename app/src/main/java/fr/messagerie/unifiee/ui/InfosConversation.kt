@@ -75,7 +75,10 @@ private val LIEN_WEB = Regex("""(?i)\b(?:https?://|www\.)\S+""")
 fun FeuilleInfos(
     e: Etat, c: Conversation, historique: List<Message>, fermer: () -> Unit,
     appeler: () -> Unit, rechercher: () -> Unit, selectionner: () -> Unit, message: (String) -> Unit,
+    apresSuppression: () -> Unit = {},
 ) {
+    var aConfirmer by remember { mutableStateOf<Action?>(null) }
+    ConfirmerAction(aConfirmer, fermer = { aConfirmer = null }, apres = { fermer(); apresSuppression() })
     val cs = MaterialTheme.colorScheme
     val portee = rememberCoroutineScope()
     var confirmerDepart by remember { mutableStateOf(false) }
@@ -140,7 +143,7 @@ fun FeuilleInfos(
             Carte {
                 actionsConversation(e, c).forEachIndexed { i, a ->
                     if (i > 0) HorizontalDivider(Modifier.padding(start = 52.dp), color = cs.outlineVariant)
-                    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { a.faire() }.padding(horizontal = 14.dp),
+                    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { if (a.confirmer != null) aConfirmer = a else a.faire() }.padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Icon(a.icone, null, tint = cs.onSurfaceVariant)
                         Spacer(Modifier.width(14.dp))

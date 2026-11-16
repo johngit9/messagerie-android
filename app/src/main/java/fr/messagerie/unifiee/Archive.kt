@@ -86,7 +86,11 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         val db = writableDatabase
         db.beginTransaction()
         try {
+            val effaces = effaces()
             for (m in messages) {
+                // Supprimé par vous dans Messagerie : ne revient pas à la synchro suivante
+                if (m.cle in effaces.first) continue
+                effaces.second[m.conv]?.let { jusqua -> if (m.date <= jusqua) continue }
                 val v = ContentValues().apply {
                     put("cle", m.cle); put("conv", m.conv); put("date", m.date); put("de_moi", if (m.deMoi) 1 else 0)
                     put("auteur", m.auteur); put("type", m.type); put("texte", m.texte); put("media", m.media)
@@ -107,6 +111,48 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
     fun purgerEchosElement() {
         val cles = readableDatabase.rawQuery("SELECT cle FROM messages WHERE cle LIKE 'Element:~%'", null).lignes { it.getString(0) }
         supprimerMessages(cles)
+    }
+
+    // MARK: Suppression par l'utilisateur (dans Messagerie seulement, rien n'est supprimé sur les messageries)
+
+    private var cacheEffaces: Pair<Set<String>, Map<String, Long>>? = null
+
+    /** (messages supprimés, conversations vidées → jusqu'à quelle date). */
+    private fun effaces(): Pair<Set<String>, Map<String, Long>> = cacheEffaces ?: run {
+        val db = writableDatabase
+        db.execSQL("CREATE TABLE IF NOT EXISTS supprimes (cle TEXT PRIMARY KEY, jusqua INTEGER NOT NULL DEFAULT 0)")
+        val msgs = HashSet<String>(); val convs = HashMap<String, Long>()
+        db.rawQuery("SELECT cle, jusqua FROM supprimes", null).lignes { it.getString(0) to it.getLong(1) }.forEach { (c, j) ->
+            if (c.startsWith("conv:")) convs[c.removePrefix("conv:")] = j else msgs.add(c)
+        }
+        (msgs to convs).also { cacheEffaces = it }
+    }
+
+    /** Supprime des messages de Messagerie (et s'en souvient pour ne pas les reprendre). */
+    @Synchronized
+    fun effacerMessages(cles: List<String>) {
+        if (cles.isEmpty()) return
+        effaces()
+        val convs = cles.mapNotNull { c -> readableDatabase.rawQuery("SELECT conv FROM messages WHERE cle = ?", arrayOf(c)).lignes { it.getString(0) }.firstOrNull() }.toSet()
+        val db = writableDatabase
+        cles.forEach { db.insertWithOnConflict("supprimes", null, ContentValues().apply { put("cle", it); put("jusqua", 0) }, SQLiteDatabase.CONFLICT_REPLACE) }
+        cacheEffaces = null
+        supprimerMessages(cles)
+        convs.forEach { conv ->
+            db.execSQL("UPDATE conversations SET derniere = COALESCE((SELECT MAX(date) FROM messages WHERE conv = ?), 0) WHERE cle = ?", arrayOf(conv, conv))
+        }
+    }
+
+    /** Supprime toute une conversation de Messagerie ; elle réapparaît seulement si un nouveau message arrive. */
+    @Synchronized
+    fun effacerConversation(conv: String, jusqua: Long) {
+        effaces()
+        val db = writableDatabase
+        db.insertWithOnConflict("supprimes", null, ContentValues().apply { put("cle", "conv:$conv"); put("jusqua", jusqua) }, SQLiteDatabase.CONFLICT_REPLACE)
+        cacheEffaces = null
+        val cles = db.rawQuery("SELECT cle FROM messages WHERE conv = ? AND date <= ?", arrayOf(conv, jusqua.toString())).lignes { it.getString(0) }
+        supprimerMessages(cles)
+        db.execSQL("UPDATE conversations SET derniere = COALESCE((SELECT MAX(date) FROM messages WHERE conv = ?), 0) WHERE cle = ?", arrayOf(conv, conv))
     }
 
     @Synchronized

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.MarkEmailRead
 import androidx.compose.material.icons.outlined.MarkEmailUnread
@@ -127,7 +128,8 @@ fun Etiquette(texte: String, couleur: Color, plein: Boolean = false) {
 }
 
 /** Une action sur une conversation. */
-class Action(val libelle: String, val icone: ImageVector, val faire: () -> Unit)
+/** Action sur une conversation ; confirmer = texte de la question à poser avant (actions définitives). */
+class Action(val libelle: String, val icone: ImageVector, val confirmer: String? = null, val faire: () -> Unit)
 
 /** Actions communes (liste et conversation). Toutes LOCALES sauf « Refaire le résumé » (Ollama). */
 fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
@@ -145,6 +147,9 @@ fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
     if (e.estPro(c)) add(Action("Ranger en Perso", Icons.Outlined.Person) { Moteur.classer(c, if (c.source in e.pro) "perso" else null) })
     else add(Action("Ranger en Pro", Icons.Outlined.Work) { Moteur.classer(c, if (c.source in e.pro) null else "pro") })
     if (manuel != null) add(Action("Classer selon la messagerie", Icons.Outlined.Restore) { Moteur.classer(c, null) })
+    add(Action("Supprimer la conversation", Icons.Outlined.DeleteOutline,
+        confirmer = "Supprimer « ${c.nom} » de Messagerie ? Les messages restent chez vos contacts et dans ${c.source.libelle}. " +
+            "La conversation reviendra si un nouveau message arrive.") { Moteur.supprimerConversation(c) })
 }
 
 @Composable
@@ -188,4 +193,19 @@ fun ChoixStatut(e: Etat, c: Conversation, apres: () -> Unit = {}) {
         if (actuel == Moteur.Statut.AUCUNE) Text("Jusqu'au prochain message reçu.", fontSize = 12.sp, color = cs.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 6.dp))
     }
+}
+
+
+/** Demande de confirmation avant une action définitive. */
+@Composable
+fun ConfirmerAction(a: Action?, fermer: () -> Unit, apres: () -> Unit = {}) {
+    if (a?.confirmer == null) return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = fermer,
+        title = { Text(a.libelle + " ?") },
+        text = { Text(a.confirmer) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { fermer(); a.faire(); apres() }) {
+            Text(a.libelle.substringBefore(' '), color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = fermer) { Text("Annuler") } },
+    )
 }
