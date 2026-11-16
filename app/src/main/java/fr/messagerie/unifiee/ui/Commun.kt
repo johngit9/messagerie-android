@@ -1,6 +1,9 @@
 package fr.messagerie.unifiee.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
@@ -109,6 +112,15 @@ fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bor
             }
         }
         LogoSource(source, taille * 0.42f, Modifier.align(Alignment.BottomEnd).border(2.dp, bordure, CircleShape))
+        // Statut du contact : point vert « en ligne », orange « absent » (si la messagerie le transmet)
+        if (cle != null && !groupe) {
+            val presences by fr.messagerie.unifiee.Presences.etat.collectAsState()
+            presences[cle]?.let { p ->
+                Box(Modifier.align(Alignment.TopEnd).size(taille * 0.28f).border(2.dp, bordure, CircleShape)
+                    .background(if (p == "online") Color(0xFF2F9E44) else Color(0xFFF59F00), CircleShape)
+                    .semantics { contentDescription = if (p == "online") "En ligne" else "Absent" })
+            }
+        }
     }
 }
 

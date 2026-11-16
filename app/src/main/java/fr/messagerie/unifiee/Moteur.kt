@@ -265,6 +265,8 @@ object Moteur {
             _etat.update { it.copy(sources = sources.toMap()) }
             recharger()
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
+            // Présence des contacts (lecture seule), au plus toutes les 2 min
+            portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
             runCatching { nouveauxMessages() }.onFailure { Plantages.noter(it, fatal = false) }
             runCatching { lancerResumes() }.onFailure { Plantages.noter(it, fatal = false) }
         } catch (e: CancellationException) {

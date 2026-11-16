@@ -167,4 +167,11 @@ class Relais(private val cfg: Config) {
         val r = Http.requete("$base/supprimer", "POST", jeton, JSONObject().put("salon", salon).put("event_id", eventId).toString(), 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "suppression")
     }
+
+    /** Présence de l'autre membre de chaque salon Element à deux (lecture seule) : salon → online / unavailable / offline. */
+    fun presences(): Map<String, String> {
+        connecter()
+        val o = get("/presences", 10_000).optJSONObject("presences") ?: return emptyMap()
+        return o.keys().asSequence().associateWith { k -> o.optJSONObject(k)?.optString("presence").orEmpty() }
+    }
 }

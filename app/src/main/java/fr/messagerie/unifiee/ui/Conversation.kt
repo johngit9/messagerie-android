@@ -300,7 +300,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             },
                             style = MaterialTheme.typography.labelMedium, color = c.source.teinte(), fontStyle = FontStyle.Italic,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        else Text(e.libelleSource(c) + if (c.estGroupe) " · groupe" else "",
+                        else Text(e.libelleSource(c) + (if (c.estGroupe) " · groupe" else "") +
+                            when (fr.messagerie.unifiee.Presences.etat.collectAsState().value[c.cle]) { "online" -> " · en ligne"; "unavailable" -> " · absent"; else -> "" },
                             style = MaterialTheme.typography.labelMedium, color = c.source.teinte())
                     }
                     }
