@@ -267,6 +267,8 @@ object Moteur {
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
             // Présence des contacts (lecture seule), au plus toutes les 2 min
             portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
+            // Fiabilité : messageries déconnectées (alerte + notification), au plus toutes les 5 min
+            portee.launch { runCatching { Surveillance.verifier() } }
             runCatching { nouveauxMessages() }.onFailure { Plantages.noter(it, fatal = false) }
             runCatching { lancerResumes() }.onFailure { Plantages.noter(it, fatal = false) }
         } catch (e: CancellationException) {
@@ -423,6 +425,11 @@ object Moteur {
 
     suspend fun ameliorer(brouillon: String, facon: Ollama.Facon, c: Conversation): String? = withContext(Dispatchers.IO) {
         if (!cfg.ollamaConfigure) null else Ollama(cfg).ameliorer(brouillon, facon, c, archive.messages(c.cle, null, 30))
+    }
+
+    /** Quelques réponses possibles proposées par l'IA (insérées dans le champ, jamais envoyées seules). */
+    suspend fun brouillonsIA(c: Conversation): List<String>? = withContext(Dispatchers.IO) {
+        if (!cfg.ollamaConfigure) null else Ollama(cfg).brouillons(c, archive.messages(c.cle, null, 30))
     }
 
     // MARK: Envoi — uniquement sur le bouton « Envoyer »
@@ -670,6 +677,50 @@ object Moteur {
             Membre(nom, numero, moi, id)
         }.distinctBy { it.numero ?: it.nom }
             .sortedWith(compareBy<Membre> { !it.moi }.thenBy { it.nom == null }.thenBy { (it.nom ?: it.numero ?: "").lowercase() })
+    }
+
+    // MARK: Fiche contact unifiée (même personne sur plusieurs messageries ; tout reste sur le téléphone)
+
+    private fun sansAccents(t: String) = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
+
+    /** Repères d'une personne : nom simplifié (mots triés) et 9 derniers chiffres du numéro ; ou le lien choisi à la main. */
+    private fun reperes(c: Conversation, liens: Map<String, String>): Set<String> {
+        liens[c.cle]?.let { return setOf(it) }
+        val r = HashSet<String>()
+        val nom = c.nom.trim()
+        if (estUnNumero(nom)) r += "tel:" + nom.filter { it.isDigit() }.takeLast(9)
+        else {
+            val mots = sansAccents(nom).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 }.sorted()
+            val cle = mots.joinToString(" ")
+            if (cle.length >= 4 && (mots.size >= 2 || cle.length >= 5)) r += "nom:$cle"
+        }
+        val chiffres = c.jid.substringBefore('@')
+        if (c.source == Source.WHATSAPP && chiffres.length >= 8 && chiffres.all { it.isDigit() }) r += "tel:" + chiffres.takeLast(9)
+        return r
+    }
+
+    /** Autres conversations à deux avec la même personne, sur d'autres messageries ou comptes (les plus récentes d'abord). */
+    fun autresComptes(c: Conversation, e: Etat = _etat.value): List<Conversation> {
+        if (c.estGroupe) return emptyList()
+        val liens = cfg.liensContacts
+        val miens = reperes(c, liens)
+        if (miens.isEmpty()) return emptyList()
+        return e.conversations.filter { it.cle != c.cle && !it.estGroupe && reperes(it, liens).any { r -> r in miens } }
+            .sortedByDescending { it.derniere }
+    }
+
+    /** Relie deux conversations à la même personne (choix manuel). */
+    fun lierContacts(a: Conversation, b: Conversation) {
+        val liens = cfg.liensContacts.toMutableMap()
+        val personne = liens[b.cle] ?: liens[a.cle] ?: ("lien:" + b.cle)
+        // Les comptes déjà rapprochés automatiquement suivent
+        (listOf(a, b) + autresComptes(a) + autresComptes(b)).forEach { liens[it.cle] = personne }
+        cfg.liensContacts = liens
+    }
+
+    /** Sépare une conversation de la fiche (ce n'est pas la même personne). */
+    fun separerContact(c: Conversation) {
+        cfg.liensContacts = cfg.liensContacts + (c.cle to "seul:" + c.cle)
     }
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }

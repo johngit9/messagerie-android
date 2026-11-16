@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.automirrored.outlined.ManageSearch
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.CircularProgressIndicator
@@ -94,7 +95,7 @@ import fr.messagerie.unifiee.Source
 import kotlinx.coroutines.launch
 
 @Composable
-fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: () -> Unit, nouveau: () -> Unit) {
+fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: () -> Unit, nouveau: () -> Unit, rechercher: (String) -> Unit = {}) {
     val vue by vm.vue.collectAsState()
     val genre by vm.genre.collectAsState()
     val espace by vm.espace.collectAsState()
@@ -135,7 +136,10 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
                     choisirEspace = { vm.espace.value = it },
                     ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
-                    chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it })
+                    chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it },
+                    rechercheAvancee = { rechercher(vm.recherche.value) })
+                val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
+                if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
 
                 if (visibles.isEmpty()) {
                     val q = recherche.trim()
@@ -173,6 +177,7 @@ private fun Entete(
     e: Etat, vue: Vue, genre: Genre, espace: Espace, source: Source?, nombre: Int, recherche: String,
     choisirGenre: (Genre) -> Unit, choisirEspace: (Espace) -> Unit,
     ouvrirTiroir: () -> Unit, ouvrirReglages: () -> Unit, chercher: (String) -> Unit, choisirVue: (Vue) -> Unit,
+    rechercheAvancee: () -> Unit = {},
 ) {
     Column(Modifier.statusBarsPadding().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -231,6 +236,10 @@ private fun Entete(
                 )
             }
             if (recherche.isNotEmpty()) IconButton(onClick = { chercher("") }) { Icon(Icons.Outlined.Close, "Effacer") }
+            // Recherche dans les messages eux-mêmes, avec filtres (personne, période, pièces jointes)
+            IconButton(onClick = rechercheAvancee) {
+                Icon(Icons.AutoMirrored.Outlined.ManageSearch, "Rechercher dans les messages (filtres)", tint = MaterialTheme.colorScheme.primary)
+            }
         }
         // Pastilles de vue
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -587,5 +596,32 @@ private fun TuileAction(libelle: String, icone: ImageVector, teinte: Color, modi
         Icon(icone, null, tint = teinte)
         Spacer(Modifier.height(6.dp))
         Text(libelle, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Alerte : une ou plusieurs messageries sont déconnectées (on ne reçoit plus leurs messages). */
+@Composable
+private fun BandeauPannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, ouvrir: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp)).background(cs.errorContainer).clickable(onClick = ouvrir)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.ErrorOutline, null, tint = cs.onErrorContainer, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (pannes.size == 1) "${pannes[0].source.libelle} est déconnecté"
+                else pannes.joinToString(", ") { it.source.libelle } + " sont déconnectés",
+                fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = cs.onErrorContainer,
+            )
+            val p = pannes.first()
+            Text(
+                (p.depuis?.let { "Depuis " + dateCourte(it) + " à " + heure(it) + " · " } ?: "") + p.detail,
+                fontSize = 12.sp, color = cs.onErrorContainer, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

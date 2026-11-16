@@ -23,6 +23,7 @@ class SynchroArrierePlan(ctx: Context, params: WorkerParameters) : CoroutineWork
             withTimeoutOrNull(8 * 60_000L) {
                 Moteur.actualiser()
                 Moteur.attendreResumes()
+                Surveillance.verifier()
             }
             Result.success()
         } catch (e: Exception) { Result.retry() }

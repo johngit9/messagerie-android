@@ -30,6 +30,7 @@ import fr.messagerie.unifiee.ui.EcranReglages
 import fr.messagerie.unifiee.ui.ConversationVM
 import fr.messagerie.unifiee.ui.ListeVM
 import fr.messagerie.unifiee.ui.EcranNouveau
+import fr.messagerie.unifiee.ui.EcranRecherche
 import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -182,14 +183,21 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
             EcranListe(etat, vm,
                 ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } },
                 ouvrirReglages = { nav.navigate("reglages") { launchSingleTop = true } },
-                nouveau = { nav.navigate("nouveau") { launchSingleTop = true } })
+                nouveau = { nav.navigate("nouveau") { launchSingleTop = true } },
+                rechercher = { q -> nav.navigate("recherche?q=" + Uri.encode(q)) { launchSingleTop = true } })
+        }
+        composable("recherche?q={q}", arguments = listOf(androidx.navigation.navArgument("q") { nullable = true; defaultValue = null })) { entree ->
+            EcranRecherche(etat, entree.arguments?.getString("q").orEmpty(), retour = { nav.popBackStack() },
+                ouvrir = { conv, q, m -> nav.navigate("conversation/" + Uri.encode(conv) + "?q=" + Uri.encode(q) + "&m=" + Uri.encode(m)) })
         }
         composable("nouveau") {
             EcranNouveau(etat, retour = { nav.popBackStack() }, ouvrir = { cle ->
                 nav.navigate("conversation/" + Uri.encode(cle)) { popUpTo("nouveau") { inclusive = true } }
             })
         }
-        composable("conversation/{cle}") { entree ->
+        composable("conversation/{cle}?q={q}&m={m}", arguments = listOf(
+            androidx.navigation.navArgument("q") { nullable = true; defaultValue = null },
+            androidx.navigation.navArgument("m") { nullable = true; defaultValue = null })) { entree ->
             val cle = entree.arguments?.getString("cle") ?: ""
             val conv = etat.conversations.firstOrNull { it.cle == cle }
             if (conv == null) {
@@ -198,7 +206,10 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
                 }
             } else {
                 val vm: ConversationVM = viewModel(key = cle) { ConversationVM(cle) }
-                EcranConversation(etat, conv, vm, retour = { nav.popBackStack() })
+                EcranConversation(etat, conv, vm, retour = { nav.popBackStack() },
+                    rechercheInitiale = entree.arguments?.getString("q")?.takeIf { it.isNotBlank() },
+                    messageCible = entree.arguments?.getString("m"),
+                    ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } })
             }
         }
         composable("reglages") {

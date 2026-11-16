@@ -86,6 +86,20 @@ class Ollama(private val cfg: Config) {
         return chat(systeme, prompt, schema("texte" to "string"))?.optString("texte")?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    /** Trois réponses courtes et différentes que « Vous » pourrait envoyer (oui / non / plus tard…). */
+    fun brouillons(c: Conversation, messages: List<Message>): List<String>? {
+        val prompt = "Conversation ${c.source.id} (${decrire(c)}) :\n\n" + transcription(messages, 4000) +
+            "\n\nPropose 3 réponses que « Vous » pourrait envoyer maintenant, courtes (une ou deux phrases), à la première personne, " +
+            "au ton de la conversation (tutoiement ou vouvoiement comme dans les messages), et différentes entre elles " +
+            "(par exemple : accepter, refuser ou décaler, demander une précision). Réponds en JSON : reponses (liste de textes)."
+        val schema = JSONObject().put("type", "object")
+            .put("properties", JSONObject().put("reponses", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))))
+            .put("required", JSONArray().put("reponses"))
+        val j = chat(INSTRUCTIONS, prompt, schema) ?: return null
+        val a = j.optJSONArray("reponses") ?: return null
+        return (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() }.distinct().take(4)
+    }
+
     /** Vérifie qu'Ollama répond et que le modèle est installé. */
     fun tester(): String {
         val adresses = Config.liste(cfg.ollamaUrls)

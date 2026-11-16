@@ -328,6 +328,28 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         } catch (e: Exception) { emptyList() }
     }
 
+    /**
+     * Recherche globale : messages de toutes les conversations (du plus récent au plus ancien),
+     * avec filtres facultatifs par messagerie, conversation, période et pièces jointes seulement.
+     */
+    fun chercherPartout(texte: String, source: Source?, convs: Set<String>?, depuis: Long?, piecesJointes: Boolean, limite: Int = 300): List<Message> {
+        val mots = texte.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { "$it*" }
+        if (mots.isEmpty() && !piecesJointes && convs == null) return emptyList()
+        if (convs != null && convs.isEmpty()) return emptyList()
+        val conds = ArrayList<String>(); val args = ArrayList<String>()
+        if (mots.isNotEmpty()) { conds += "r.contenu MATCH ?"; args += mots.joinToString(" ") }
+        if (source != null) { conds += "m.conv LIKE ?"; args += "${source.id}:%" }
+        if (convs != null) { conds += "m.conv IN (" + convs.joinToString(",") { "?" } + ")"; args += convs }
+        if (depuis != null) { conds += "m.date >= ?"; args += depuis.toString() }
+        if (piecesJointes) conds += "m.type IN ('image','video','fichier','audio')"
+        val depuisTable = if (mots.isNotEmpty()) "recherche r JOIN messages m ON m.cle = r.cle" else "messages m"
+        args += limite.toString()
+        return try {
+            readableDatabase.rawQuery("SELECT m.* FROM $depuisTable WHERE ${conds.joinToString(" AND ")} ORDER BY m.date DESC LIMIT ?",
+                args.toTypedArray()).lignes { message(it) }
+        } catch (e: Exception) { emptyList() }
+    }
+
     /** Nombre de messages d'une conversation depuis une date (pour charger l'historique jusqu'à un résultat). */
     fun nombreDepuis(conv: String, date: Long): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM messages WHERE conv = ? AND date >= ?", arrayOf(conv, date.toString()))

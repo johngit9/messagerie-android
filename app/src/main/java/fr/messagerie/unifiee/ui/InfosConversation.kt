@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Checklist
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -75,7 +78,7 @@ private val LIEN_WEB = Regex("""(?i)\b(?:https?://|www\.)\S+""")
 fun FeuilleInfos(
     e: Etat, c: Conversation, historique: List<Message>, fermer: () -> Unit,
     appeler: () -> Unit, rechercher: () -> Unit, selectionner: () -> Unit, message: (String) -> Unit,
-    apresSuppression: () -> Unit = {},
+    apresSuppression: () -> Unit = {}, ouvrir: (String) -> Unit = {},
 ) {
     var aConfirmer by remember { mutableStateOf<Action?>(null) }
     ConfirmerAction(aConfirmer, fermer = { aConfirmer = null }, apres = { fermer(); apresSuppression() })
@@ -139,6 +142,8 @@ fun FeuilleInfos(
                 }
             }
             Carte { Box(Modifier.padding(10.dp)) { ChoixStatut(e, c) } }
+            // Fiche contact : la même personne sur d'autres messageries
+            if (!c.estGroupe) FicheContact(e, c, ouvrir = { fermer(); ouvrir(it) })
             // Réglages de la conversation (notifications, Pro/Perso, épingler, archiver…)
             Carte {
                 actionsConversation(e, c).forEachIndexed { i, a ->
@@ -247,17 +252,18 @@ private fun BoutonInfo(libelle: String, icone: ImageVector, teinte: Color, modif
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FeuilleTransfert(e: Etat, nombre: Int, fermer: () -> Unit, choisir: (Conversation) -> Unit) {
+fun FeuilleTransfert(e: Etat, nombre: Int, fermer: () -> Unit, titre: String? = null,
+    possible: (Conversation) -> Boolean = { Moteur.destinationPossible(it) && !e.estArchivee(it) }, choisir: (Conversation) -> Unit) {
     val cs = MaterialTheme.colorScheme
     var filtre by remember { mutableStateOf("") }
     val candidates = remember(e.conversations, filtre) {
-        e.conversations.filter { Moteur.destinationPossible(it) && !e.estArchivee(it) }
+        e.conversations.filter(possible)
             .filter { filtre.isBlank() || it.nom.contains(filtre.trim(), ignoreCase = true) }
             .sortedByDescending { it.derniere }
     }
     ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp)) {
-            Text("Transférer $nombre message" + if (nombre > 1) "s" else "", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(titre ?: ("Transférer $nombre message" + if (nombre > 1) "s" else ""), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = filtre, onValueChange = { filtre = it }, singleLine = true,
                 placeholder = { Text("Rechercher une conversation") }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
@@ -290,4 +296,68 @@ fun PastilleSelection(choisi: Boolean, teinte: Color) {
             .border(2.dp, if (choisi) teinte else cs.outline, CircleShape),
         contentAlignment = Alignment.Center,
     ) { if (choisi) Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+}
+
+/**
+ * Fiche contact unifiée : la même personne sur plusieurs messageries (rapprochée par nom ou numéro,
+ * ou reliée à la main). Tout reste sur ce téléphone.
+ */
+@Composable
+private fun FicheContact(e: Etat, c: Conversation, ouvrir: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var version by remember { mutableStateOf(0) }
+    var relier by remember { mutableStateOf(false) }
+    val autres = remember(e.conversations, version) { Moteur.autresComptes(c, e) }
+    Carte {
+        Text(if (autres.isEmpty()) "Fiche contact" else "Fiche contact · ${autres.size + 1} messageries",
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp))
+        (listOf(c) + autres).forEach { a ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = a.cle != c.cle) { ouvrir(a.cle) }.padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Avatar(a.nom, a.source, false, taille = 36.dp, bordure = cs.surface, cle = a.cle)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(a.nom, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(e.libelleSource(a) + (if (a.cle == c.cle) " · ici" else "") + " · " + dateCourte(a.derniere),
+                        fontSize = 12.sp, color = a.source.teinte())
+                }
+                if (a.cle != c.cle) IconButton(onClick = { Moteur.separerContact(a); version++ }) {
+                    Icon(Icons.Outlined.LinkOff, "Pas la même personne", tint = cs.onSurfaceVariant)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { relier = true }.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Link, null, tint = cs.primary)
+            Spacer(Modifier.width(14.dp))
+            Text("Relier une autre conversation…", fontSize = 14.sp, color = cs.primary)
+        }
+    }
+    if (relier) FeuilleTransfert(e, 0, fermer = { relier = false }, titre = "Même personne que ${c.nom}",
+        possible = { it.cle != c.cle && !it.estGroupe && autres.none { a -> a.cle == it.cle } }) { b ->
+        Moteur.lierContacts(c, b); relier = false; version++
+    }
+}
+
+/** « Aussi sur » : raccourcis vers la même personne sur les autres messageries. */
+@Composable
+fun AussiSur(e: Etat, c: Conversation, ouvrir: (String) -> Unit) {
+    val autres = remember(e.conversations, c.cle) { Moteur.autresComptes(c, e) }
+    if (autres.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Aussi sur", fontSize = 12.sp, color = cs.onSurfaceVariant)
+        autres.forEach { a ->
+            Row(Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(16.dp)).background(a.source.teinte().copy(alpha = 0.12f))
+                .clickable { ouvrir(a.cle) }.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).background(a.source.teinte(), CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(e.libelleSource(a), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = a.source.teinte())
+                val n = e.nombreNonLus(a)
+                if (n > 0) Text(" · $n", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = a.source.teinte())
+            }
+        }
+    }
 }

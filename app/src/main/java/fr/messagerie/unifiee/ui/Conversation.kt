@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.DropdownMenuItem
@@ -122,7 +123,8 @@ private sealed class Ligne(val cle: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -> Unit) {
+fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -> Unit,
+    rechercheInitiale: String? = null, messageCible: String? = null, ouvrir: (String) -> Unit = {}) {
     val portee = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
     val historique by vm.historique.collectAsState()
@@ -159,6 +161,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var iaEnCours by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var menuIA by remember { mutableStateOf(false) }
+    var reponsesRapides by remember { mutableStateOf(false) }
     var menuAppel by remember { mutableStateOf(false) }
     var menuPlus by remember { mutableStateOf(false) }
     // « En train d'écrire » : reçu seulement, l'appli n'envoie jamais le sien
@@ -180,8 +183,11 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
     androidx.activity.compose.BackHandler(enabled = modeSelection) { quitterSelection() }
     // Recherche dans la discussion
-    var rechercheOuverte by remember(c.cle) { mutableStateOf(false) }
-    var requete by remember(c.cle) { mutableStateOf("") }
+    var rechercheOuverte by remember(c.cle) { mutableStateOf(rechercheInitiale != null) }
+    var requete by remember(c.cle) { mutableStateOf(rechercheInitiale.orEmpty()) }
+    // Ouvert depuis la recherche globale : mots déjà cherchés, puis le message choisi
+    var cibleRecherche by remember(c.cle) { mutableStateOf(messageCible) }
+    LaunchedEffect(c.cle) { if (rechercheInitiale != null) vm.chercher(rechercheInitiale) }
     val trouves by vm.trouves.collectAsState()
     var rang by remember(c.cle) { mutableStateOf(0) }
     var courant by remember(c.cle) { mutableStateOf<String?>(null) }
@@ -319,7 +325,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 if (idx >= 0) liste.animateScrollToItem(idx + 1)
                             } }
                         }
-                        LaunchedEffect(trouves) { if (trouves.isNotEmpty()) aller(0) else courant = null }
+                        LaunchedEffect(trouves) {
+                            if (trouves.isEmpty()) { courant = null; return@LaunchedEffect }
+                            val i = cibleRecherche?.let { m -> trouves.indexOfFirst { it.cle == m } } ?: -1
+                            cibleRecherche = null
+                            aller(if (i >= 0) trouves.size - 1 - i else 0)
+                        }
                         Text(if (requete.isBlank()) "" else if (trouves.isEmpty()) "0" else "${rang + 1}/${trouves.size}",
                             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         IconButton(onClick = { aller(rang + 1) }, enabled = rang < trouves.size - 1) { Icon(Icons.Outlined.KeyboardArrowUp, "Plus ancien") }
@@ -374,6 +385,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
+            if (!rechercheOuverte && !modeSelection) AussiSur(e, c, ouvrir)
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = liste, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
                 item(key = "resume") { CarteResume(e, c) { brouillon = it } }
                 items(lignes.asReversed(), key = { it.cle }) { l ->
@@ -612,7 +624,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             },
                             shape = RoundedCornerShape(20.dp), modifier = Modifier.weight(1f),
                         )
-                        if (Moteur.cfg.ollamaConfigure) Box {
+                        // Champ vide : réponses rapides (modèles et brouillons IA) ; sinon, améliorer avec l'IA
+                        if (brouillon.isBlank() && !iaEnCours) OutlinedButton(onClick = { reponsesRapides = true },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
+                            Icon(Icons.Outlined.Bolt, "Réponses rapides")
+                        }
+                        else if (Moteur.cfg.ollamaConfigure) Box {
                             OutlinedButton(onClick = { menuIA = true }, enabled = brouillon.isNotBlank() && !iaEnCours,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
                                 if (iaEnCours) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.AutoAwesome, "Améliorer avec l'IA")
@@ -666,9 +683,10 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         }
     }
     if (menu) FeuilleActions(e, c) { menu = false }
+    if (reponsesRapides) FeuilleReponsesRapides(c, fermer = { reponsesRapides = false }) { t -> brouillon = t }
     if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
         appeler = { menuAppel = true }, rechercher = { rechercheOuverte = true }, selectionner = { modeSelection = true },
-        message = { afficher(it) }, apresSuppression = retour)
+        message = { afficher(it) }, apresSuppression = retour, ouvrir = ouvrir)
     // Suppression de messages : dans Messagerie seulement, après confirmation
     aSupprimer?.let { cles ->
         AlertDialog(

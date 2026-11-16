@@ -763,7 +763,20 @@ private fun BlocConnexion(e: Etat, s: Source) {
         val serveur = if (s == Source.ELEMENT) "Relais Element (MacBook Pro)" else if (s == Source.TEAMS) "Service Teams (MacBook Pro)" else "Serveur Matrix (MacBook Pro)"
         if (st is EtatSource.Erreur) LigneConnexion(cs.error, "$serveur injoignable", st.message)
         else LigneConnexion(vert, "$serveur joint", e.derniereActualisation?.let { "Dernière synchro " + dateCourte(it) + " à " + heure(it) })
-        if (s != Source.ELEMENT && s != Source.TEAMS) {
+        val surServeur = fr.messagerie.unifiee.Surveillance.serveur.collectAsState().value?.get(s)
+        val sauvegarde = fr.messagerie.unifiee.Surveillance.derniereSauvegarde.collectAsState().value
+        LaunchedEffect(s) { fr.messagerie.unifiee.Surveillance.verifier(force = true) }
+        if (surServeur != null) {
+            // État surveillé par le serveur chaque minute
+            val depuis = surServeur.depuis?.let { " depuis " + dateCourte(it) + " à " + heure(it) } ?: ""
+            val verifie = surServeur.verifie?.let { "Vérifié à " + heure(it) } ?: ""
+            when (surServeur.ok) {
+                true -> LigneConnexion(vert, "Passerelle ${s.libelle} connectée$depuis", listOf(surServeur.detail, verifie).filter { it.isNotBlank() }.joinToString(" · "))
+                false -> LigneConnexion(cs.error, "Passerelle ${s.libelle} déconnectée$depuis",
+                    surServeur.detail.ifBlank { "Reconnectez ${s.libelle} sur le serveur." })
+                null -> LigneConnexion(orange, "Passerelle ${s.libelle} : état inconnu", listOf(surServeur.detail, verifie).filter { it.isNotBlank() }.joinToString(" · "))
+            }
+        } else if (s != Source.ELEMENT && s != Source.TEAMS) {
             val p = passerelle
             when {
                 p == null -> LigneConnexion(cs.outline, "Passerelle ${s.libelle} : vérification…", null)
@@ -778,6 +791,8 @@ private fun BlocConnexion(e: Etat, s: Source) {
         LigneConnexion(if (heures == null || heures >= 24) orange else vert,
             "Dernier message reçu : " + (recu?.let { dateCourte(it) + " à " + heure(it) } ?: "aucun"),
             if (heures != null && heures >= 24) "Rien reçu depuis plus d'un jour : vérifiez la connexion de ${s.libelle}." else null)
+        if (sauvegarde != null) LigneConnexion(if (System.currentTimeMillis() - sauvegarde < 2 * 86_400_000L) vert else orange,
+            "Configuration du serveur sauvegardée le " + dateCourte(sauvegarde) + " à " + heure(sauvegarde), "Sauvegarde automatique chaque nuit, 14 jours gardés.")
     }
 }
 

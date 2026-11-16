@@ -174,4 +174,28 @@ class Relais(private val cfg: Config) {
         val o = get("/presences", 10_000).optJSONObject("presences") ?: return emptyMap()
         return o.keys().asSequence().associateWith { k -> o.optJSONObject(k)?.optString("presence").orEmpty() }
     }
+
+    /** État d'une passerelle vu par le serveur : ok (true / false / null si inconnu), détail, depuis quand, vérifié quand. */
+    data class EtatServeur(val ok: Boolean?, val detail: String, val depuis: Long?, val verifie: Long?)
+
+    /**
+     * Surveillance des passerelles par le serveur (lecture seule : rien n'est envoyé aux robots).
+     * Renvoie l'état par messagerie et la date de la dernière sauvegarde de la configuration.
+     */
+    fun passerelles(): Pair<Map<Source, EtatServeur>, Long?> {
+        connecter()
+        val j = get("/passerelles", 10_000)
+        val o = j.optJSONObject("passerelles") ?: JSONObject()
+        val res = HashMap<Source, EtatServeur>()
+        for (k in o.keys()) {
+            val s = when (k.lowercase()) {
+                "whatsapp" -> Source.WHATSAPP; "telegram" -> Source.TELEGRAM; "linkedin" -> Source.LINKEDIN
+                "gmessages", "sms" -> Source.SMS; "element" -> Source.ELEMENT; else -> null
+            } ?: continue
+            val e = o.optJSONObject(k) ?: continue
+            val ok = if (e.isNull("ok") || !e.has("ok")) null else e.optBoolean("ok")
+            res[s] = EtatServeur(ok, e.optString("detail"), e.optLong("depuis").takeIf { it > 0 }, e.optLong("verifie").takeIf { it > 0 })
+        }
+        return res to j.optLong("derniere_sauvegarde").takeIf { it > 0 }
+    }
 }

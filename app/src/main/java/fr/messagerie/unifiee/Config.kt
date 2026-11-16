@@ -69,7 +69,18 @@ class Config(context: Context) {
     var categories: Map<String, String> get() = carte("categories"); set(v) = ecrireCarte("categories", v)
     /** Conversations archivées → date d'archivage. */
     var archivees: Map<String, Long> get() = carte("archivees").mapValues { it.value.toLongOrNull() ?: 0 }; set(v) = ecrireCarte("archivees", v.mapValues { it.value.toString() })
+    /** Réponses rapides (modèles modifiables), insérées dans le champ : jamais envoyées sans votre appui. */
+    var reponsesRapides: List<String>
+        get() = try {
+            p.getString("reponsesRapides", null)?.let { t -> org.json.JSONArray(t).let { a -> (0 until a.length()).map { a.getString(it) } } }
+                ?: listOf("Merci, je regarde et je reviens vers toi.", "D'accord, ça marche !", "Je te rappelle dès que possible.",
+                    "Je suis en réunion, je te réponds plus tard.", "Bien reçu, merci.")
+        } catch (_: Exception) { emptyList() }
+        set(v) = p.edit().putString("reponsesRapides", org.json.JSONArray(v).toString()).apply()
+    /** Fiche contact : conversation → personne, choisi à la main (sinon, rapprochement par nom ou numéro). */
+    var liensContacts: Map<String, String> get() = carte("liensContacts"); set(v) = ecrireCarte("liensContacts", v)
     /** Conversations épinglées, dans l'ordre. */
+
     var epinglees: List<String>
         get() = try { org.json.JSONArray(p.getString("epinglees", "[]")).let { a -> (0 until a.length()).map { a.getString(it) } } } catch (_: Exception) { emptyList() }
         set(v) = p.edit().putString("epinglees", org.json.JSONArray(v).toString()).apply()
