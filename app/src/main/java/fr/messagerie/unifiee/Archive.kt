@@ -244,6 +244,14 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
     fun nombreMessages(conv: String): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM messages WHERE conv = ?", arrayOf(conv)).lignes { it.getInt(0) }.firstOrNull() ?: 0
 
+    fun messageParCle(cle: String): Message? =
+        readableDatabase.rawQuery("SELECT * FROM messages WHERE cle = ?", arrayOf(cle)).lignes { message(it) }.firstOrNull()
+
+    /** Messages d'une source restés sur « Waiting for attachment … » (pièce jointe pas encore reçue). */
+    fun messagesEnAttenteDePieceJointe(source: String, depuis: Long): List<Message> =
+        readableDatabase.rawQuery("SELECT * FROM messages WHERE cle LIKE ? AND date > ? AND texte LIKE 'Waiting for attachment%' ORDER BY date DESC LIMIT 50",
+            arrayOf("$source:%", depuis.toString())).lignes { message(it) }
+
     fun conversationDuMessage(cle: String): String? =
         readableDatabase.rawQuery("SELECT conv FROM messages WHERE cle = ?", arrayOf(cle)).lignes { it.getString(0) }.firstOrNull()
 

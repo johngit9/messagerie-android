@@ -285,6 +285,7 @@ object Moteur {
                 if (ts > avant) archive.definirCurseur("luPar.$conv", ts.toString())
             }
             runCatching { s.completerHistorique() }
+            runCatching { s.reparerPiecesJointes() }
             if (avecRcs) s.rcs?.let { r ->
                 archive.definirCurseur("sms.rcs", r.sorted().joinToString("\n"))
                 _etat.update { it.copy(rcs = r) }

@@ -206,6 +206,8 @@ class SyncPont(
         private val cache = ConcurrentHashMap<String, Cache>()
         private val autres = ConcurrentHashMap<String, Set<String>>()
         fun viderCache() { cache.clear() }
+        /** Messages déjà archivés et encore « Waiting for attachment » : clé → dernière tentative. */
+        private val essais = ConcurrentHashMap<String, Long>()
 
         private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
@@ -407,6 +409,7 @@ class SyncPont(
         val lot = ArrayList<Message>()
         val supprimes = ArrayList<String>()
         val reactions = ArrayList<Reaction>()
+        val modifs = HashMap<String, JSONObject>()
         for (e in evenements) {
             val eid = e.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
             if (e.optString("type") == "m.reaction") {
@@ -424,14 +427,66 @@ class SyncPont(
                 if (r.isNotEmpty()) supprimes.add("${pont.source.id}:$r")
                 continue
             }
+            val rel = e.optJSONObject("content")?.optJSONObject("m.relates_to")
+            if (rel?.optString("rel_type") == "m.replace") {
+                // Modification : la passerelle SMS remplace « Waiting for attachment … » par la photo une fois téléchargée.
+                val cible = rel.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
+                val prec = modifs[cible]
+                if (prec == null || (e.ts("origin_server_ts") ?: 0L) >= (prec.ts("origin_server_ts") ?: 0L)) modifs[cible] = e
+                continue
+            }
             messageMatrix(e, info.membres, moi, "${pont.source.id}:$eid", conv)?.let { lot.add(it) }
         }
+        // Modifications : appliquées au message du même lot, sinon au message déjà archivé.
+        val maj = ArrayList<Message>()
+        for ((cible, modif) in modifs) {
+            val cleCible = "${pont.source.id}:$cible"
+            val i = lot.indexOfFirst { it.cle == cleCible }
+            val origine = if (i >= 0) lot[i] else archive.messageParCle(cleCible) ?: continue
+            val remplace = messageModifie(modif, origine, info.membres, moi) ?: continue
+            if (i >= 0) lot[i] = remplace else maj.add(remplace)
+        }
+        archive.enregistrerMessages(maj)
         val deja = archive.existantes(lot.map { it.cle })
         val nouveaux = lot.filter { it.cle !in deja }
         archive.enregistrerMessages(nouveaux)
         archive.supprimerMessages(supprimes)
         archive.enregistrerReactions(reactions)
         return lot.size to nouveaux.size
+    }
+
+    /** Message d'origine avec le contenu de sa modification (même clé, même date). */
+    private fun messageModifie(modif: JSONObject, origine: Message, membres: Map<String, String>, moi: String?): Message? {
+        val contenu = modif.optJSONObject("content")?.optJSONObject("m.new_content") ?: return null
+        val ev = JSONObject().put("event_id", origine.cle.substringAfter(':')).put("sender", modif.optString("sender"))
+            .put("origin_server_ts", origine.date).put("content", contenu)
+        return messageMatrix(ev, membres, moi, origine.cle, origine.conv)
+            ?.copy(date = origine.date, deMoi = origine.deMoi, auteur = origine.auteur)
+    }
+
+    /**
+     * Rattrape les pièces jointes SMS archivées avant leur téléchargement par la passerelle :
+     * demande à Synapse la dernière modification du message (lecture seule, GET).
+     */
+    fun reparerPiecesJointes(limite: Int = 10) {
+        if (pont.source != Source.SMS) return
+        val c = cache[pont.curseur] ?: return
+        val salons = c.infos.keys.associateBy { cle(it) }
+        val maintenant = System.currentTimeMillis()
+        val enAttente = archive.messagesEnAttenteDePieceJointe(pont.source.id, maintenant - 30L * 86_400_000L)
+            .filter { maintenant - (essais[it.cle] ?: 0L) > 600_000 }.take(limite)
+        for (msg in enAttente) {
+            essais[msg.cle] = maintenant
+            val salon = salons[msg.conv] ?: continue
+            val eid = msg.cle.substringAfter(':')
+            val rep = runCatching {
+                m.get("/_matrix/client/v1/rooms/${Http.enc(salon)}/relations/${Http.enc(eid)}/m.replace?limit=1&dir=b", 15_000)
+            }.getOrNull() ?: continue
+            val modif = rep.optJSONArray("chunk")?.objets()?.firstOrNull() ?: continue
+            val remplace = messageModifie(modif, msg, c.infos[salon]?.membres ?: emptyMap(), c.moi) ?: continue
+            archive.enregistrerMessages(listOf(remplace))
+            essais.remove(msg.cle)
+        }
     }
 
     /** Convertit un événement Matrix en message (texte, vocal, photo…). */
@@ -442,9 +497,13 @@ class SyncPont(
             val surServeur = System.currentTimeMillis() - age
             if (surServeur - ts in 0..3_600_000L) ArriveesServeur.noter(cle, surServeur)
         }
-        val c = e.optJSONObject("content") ?: return null
+        val brut = e.optJSONObject("content") ?: return null
         val exp = e.optString("sender").takeIf { it.isNotEmpty() } ?: return null
-        if (c.optJSONObject("m.relates_to")?.optString("rel_type") == "m.replace") return null
+        if (brut.optJSONObject("m.relates_to")?.optString("rel_type") == "m.replace") return null
+        // Synapse joint la dernière modification du message : on affiche son contenu (ex. la photo
+        // qui remplace « Waiting for attachment … » côté SMS).
+        val c = e.optJSONObject("unsigned")?.optJSONObject("m.relations")?.optJSONObject("m.replace")
+            ?.optJSONObject("content")?.optJSONObject("m.new_content") ?: brut
         val corps = c.optString("body")
         var type = "texte"; var texte = corps; var media: String? = null; var duree: Double? = null
         val info = c.optJSONObject("info")
