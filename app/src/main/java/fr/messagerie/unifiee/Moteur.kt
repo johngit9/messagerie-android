@@ -745,7 +745,7 @@ object Moteur {
 
     /** Peut-on supprimer ce message pour tout le monde ? (le vôtre, déjà sur le serveur, hors Teams) */
     fun supprimablePourTous(m: Message, c: Conversation) =
-        m.deMoi && c.source != Source.TEAMS && m.cle.substringAfter(':').startsWith("$") &&
+        m.deMoi && c.source != Source.TEAMS && c.source != Source.SMS && m.cle.substringAfter(':').startsWith("$") &&
             (if (c.source == Source.ELEMENT) cfg.relaisConfigure else cfg.matrixConfigure)
 
     /**
