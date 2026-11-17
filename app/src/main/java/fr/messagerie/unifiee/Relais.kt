@@ -47,11 +47,23 @@ class Relais(private val cfg: Config) {
             val convs = HashMap<String, Conversation>()
             val lot = ArrayList<Message>()
             val supprimes = ArrayList<String>()
+            val reactions = ArrayList<Reaction>()
+            val reactionsRetirees = ArrayList<String>()
             for (l in lignes) {
                 // « ~… » = écho provisoire d'un message envoyé : le vrai message arrive ensuite
                 val eid = l.optString("event_id").takeIf { it.isNotEmpty() && !it.startsWith("~") } ?: continue
                 val salon = l.optString("salon").takeIf { it.isNotEmpty() } ?: continue
                 val cle = "Element:$eid"
+                // Réaction reçue (contact, ou vous depuis Element) : { cible, cle = emoji, auteur, de_moi, supprime }
+                if (l.optString("type") == "reaction") {
+                    if (l.optInt("supprime") == 1) { reactionsRetirees.add(cle); continue }
+                    val cible = l.optString("cible").takeIf { it.isNotEmpty() } ?: continue
+                    val emoji = l.optString("cle").takeIf { it.isNotEmpty() } ?: continue
+                    val moi = l.optInt("de_moi") == 1
+                    reactions.add(Reaction(cle, "Element:$cible", cleConv(Source.ELEMENT, salon), emoji,
+                        if (moi) "Vous" else l.optString("auteur").ifEmpty { "Quelqu'un" }, moi))
+                    continue
+                }
                 if (l.optInt("supprime") == 1) { supprimes.add(cle); continue }
                 val conv = Conversation(cleConv(Source.ELEMENT, salon), Source.ELEMENT, salon,
                     l.optString("nom_salon").takeIf { it.isNotEmpty() && it != "null" } ?: "Element",
@@ -74,6 +86,8 @@ class Relais(private val cfg: Config) {
             archive.enregistrerConversations(convs.values.toList())
             archive.enregistrerMessages(lot)
             archive.supprimerMessages(supprimes)
+            archive.enregistrerReactions(reactions)
+            reactionsRetirees.forEach { archive.oublierReactionCle(it) }
             total += lot.size
             apres = j.optLong("dernier", apres)
             archive.definirCurseur("element.seq", apres.toString())
