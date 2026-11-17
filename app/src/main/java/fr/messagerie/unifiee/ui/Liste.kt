@@ -128,7 +128,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             },
-            bottomBar = { if (sources.size > 1) BarreSources(e, sources, source, espace) { vm.source.value = it } },
+            bottomBar = { if (sources.size > 1 && fr.messagerie.unifiee.Affichage.barreBas) BarreSources(e, sources, source, espace) { vm.source.value = it } },
         ) { pad ->
             Column(Modifier.padding(bottom = pad.calculateBottomPadding()).fillMaxSize()) {
                 if (choisies.isNotEmpty()) BarreSelection(e, e.conversations.filter { it.cle in choisies },

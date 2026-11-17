@@ -106,6 +106,8 @@ class Config(context: Context) {
     var presence: String get() = s("presence").ifEmpty { "offline" }; set(v) = set("presence", v)
     var design: Int get() = p.getInt("design", 0); set(v) = p.edit().putInt("design", v).apply()
     /** Haut de la liste : 0 classique, 1 Bandeau, 2 Épuré. */
+    /** Barre des messageries en bas de la liste. */
+    var barreBas: Boolean get() = p.getBoolean("barreBas", true); set(v) = p.edit().putBoolean("barreBas", v).apply()
     var haut: Int get() = p.getInt("haut", 1); set(v) = p.edit().putInt("haut", v).apply()
     fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
         val d = silenceDebut; val f = silenceFin

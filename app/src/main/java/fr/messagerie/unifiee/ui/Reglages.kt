@@ -465,6 +465,8 @@ private fun PageAffichage() {
         }
     }
     Explication("Bandeau : en-tête bleu nuit. Épuré : fond blanc, liste en lignes. Classique : l'ancien haut avec le grand titre.")
+    Interrupteur("Barre des messageries en bas", Affichage.barreBas,
+        "Désactivée, la liste prend tout l'écran. Pour filtrer une messagerie : le menu ☰ en haut à gauche.") { Affichage.barreBas = it; cfg.barreBas = it }
     Text("Design de la liste", fontWeight = FontWeight.Medium)
     androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         listOf(0 to "Cartes", 1 to "Compacte", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->
