@@ -278,6 +278,8 @@ class SyncPont(
         fun viderCache() { cache.clear() }
         /** Votre fantôme repéré sur cette passerelle (vos réactions posées depuis l'appli officielle). */
         fun moiDetecte(p: Pont): String? = cache[p.curseur]?.moi
+        /** Passerelles déjà réparées pendant cette session. */
+        private val reparesMoi: MutableSet<String> = ConcurrentHashMap.newKeySet()
         /** Messages déjà archivés et encore « Waiting for attachment » : clé → dernière tentative. */
         private val essais = ConcurrentHashMap<String, Long>()
 
@@ -374,7 +376,17 @@ class SyncPont(
             evs.mapNotNull { it.optString("sender").takeIf { s -> s.isNotEmpty() } }.toSet()
                 .filter { it.startsWith(pont.prefixe) && i.membres[it] == null }.forEach { freqExp[it] = (freqExp[it] ?: 0) + 1 }
         }
-        val moi = cfg_moi() ?: elire(freq) ?: elire(freqExp)
+        // Si l'élection échoue à ce passage, on garde le fantôme trouvé la dernière fois (sinon vos messages passeraient pour reçus)
+        val moi = cfg_moi() ?: elire(freq) ?: elire(freqExp) ?: archive.curseur("moi.${pont.curseur}")
+        if (moi != null) {
+            archive.definirCurseur("moi.${pont.curseur}", moi)
+            // Réparation : vos messages archivés comme « reçus » (passage où le fantôme n'était pas reconnu)
+            if (reparesMoi.add(pont.curseur)) for ((id, i) in infos) {
+                val nomMoi = i.membres[moi]?.replace(" (WA)", "")?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                val autres = i.membres.filterKeys { it != moi }.values.map { it.replace(" (WA)", "").trim() }
+                if (nomMoi !in autres) runCatching { archive.corrigerMesMessages(cle(id), nomMoi) }
+            }
+        }
 
         val convs = infos.map { (id, i) ->
             val contacts = i.membres.filter { it.key.startsWith(pont.prefixe) && it.key != moi }

@@ -326,6 +326,13 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
     fun conversationDuMessage(cle: String): String? =
         readableDatabase.rawQuery("SELECT conv FROM messages WHERE cle = ?", arrayOf(cle)).lignes { it.getString(0) }.firstOrNull()
 
+    /** Vos messages archivés par erreur comme reçus (même auteur que votre fantôme) : remis « de moi ». */
+    @Synchronized
+    fun corrigerMesMessages(conv: String, nomMoi: String): Int {
+        val v = ContentValues().apply { put("de_moi", 1); put("auteur", "Vous") }
+        return writableDatabase.update("messages", v, "conv = ? AND de_moi = 0 AND auteur = ?", arrayOf(conv, nomMoi))
+    }
+
     /** Conversations contenant tous les mots cherchés (début de mot). */
     fun rechercher(texte: String): Set<String> {
         val mots = texte.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { "$it*" }
