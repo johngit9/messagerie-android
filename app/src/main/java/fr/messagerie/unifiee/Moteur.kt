@@ -269,6 +269,8 @@ object Moteur {
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
             // Présence des contacts (lecture seule), au plus toutes les 2 min
             portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
+            // Lu / traité venant de vos autres applis Messagerie (puis envoi des nôtres)
+            runCatching { echangerEtatsPartages(envoyer = true) }
             // Fiabilité : messageries déconnectées (alerte + notification), au plus toutes les 5 min
             portee.launch { runCatching { Surveillance.verifier() } }
             runCatching { nouveauxMessages() }.onFailure { Plantages.noter(it, fatal = false) }
@@ -325,7 +327,7 @@ object Moteur {
         for ((cle, d) in lectures) {
             val e = etats[cle] ?: EtatConv()
             // Seulement plus loin que ce qui est déjà lu, et en gardant le reste de l'état (sourdine, À traiter…)
-            if (d > e.lue) majEtat(cle) { it.copy(lue = maxOf(it.lue, d)) }
+            if (d > e.lue) majEtat(cle, { it.copy(lue = maxOf(it.lue, d)) }, partager = false)
         }
     }
 
@@ -354,8 +356,10 @@ object Moteur {
     /** États modifiés pas encore écrits en base : une actualisation ne doit pas les effacer (sinon « lu » redevient « non lu »). */
     private val etatsEnAttente = java.util.concurrent.ConcurrentHashMap<String, EtatConv>()
 
-    private fun majEtat(cle: String, f: (EtatConv) -> EtatConv) {
-        val n = f(_etat.value.etats[cle] ?: EtatConv())
+    private fun majEtat(cle: String, f: (EtatConv) -> EtatConv, partager: Boolean = true) {
+        val avant = _etat.value.etats[cle] ?: EtatConv()
+        val n = f(avant)
+        if (partager && (n.lue > avant.lue || n.traitee > avant.traitee)) partagerPlusTard()
         etatsEnAttente[cle] = n
         _etat.update { it.copy(etats = it.etats + (cle to n)) }
         // Écriture hors du fil d'affichage : la base peut être occupée par une synchro.
@@ -363,6 +367,63 @@ object Moteur {
             archive.enregistrerEtat(cle, n)
             etatsEnAttente.remove(cle, n)
         }
+    }
+
+    // MARK: Lu et traité partagés entre vos applis Messagerie (Mac, Android)
+    // Données privées de VOTRE compte Matrix : ni les contacts ni les passerelles ne les voient (aucun accusé de lecture).
+
+    private const val TYPE_PARTAGE = "fr.messagerie.etats"
+    private var envoiPartage: Job? = null
+
+    /** Salon Matrix servant de clé commune aux deux applis. */
+    private fun clePartagee(c: Conversation): String? = if (c.source == Source.TEAMS) null else salonDe(c)
+
+    private fun partagerPlusTard() {
+        if (!cfg.matrixConfigure) return
+        envoiPartage?.cancel()
+        envoiPartage = portee.launch { delay(8_000); runCatching { echangerEtatsPartages(envoyer = true) } }
+    }
+
+    /**
+     * Lit les états partagés (lu / traité, par salon) et les applique s'ils sont plus récents ;
+     * avec envoyer, y ajoute aussi les vôtres (on garde toujours la date la plus récente).
+     */
+    private suspend fun echangerEtatsPartages(envoyer: Boolean) = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure) return@withContext
+        val m = Matrix(cfg)
+        val distant = runCatching { m.lireDonneesCompte(TYPE_PARTAGE) }.getOrNull()
+        val salons = distant?.optJSONObject("salons") ?: org.json.JSONObject()
+        val e = _etat.value
+        // 1. Appliquer ce qui vient des autres applis
+        for (c in e.conversations) {
+            val k = clePartagee(c) ?: continue
+            val d = salons.optJSONObject(k) ?: continue
+            val lu = d.optLong("lu"); val traite = d.optLong("traite")
+            val local = e.etat(c)
+            if (lu > local.lue || traite > local.traitee)
+                majEtat(c.cle, { it.copy(lue = maxOf(it.lue, lu), traitee = maxOf(it.traitee, traite), manuel = if (traite >= c.derniere && traite > it.traitee) false else it.manuel) }, partager = false)
+        }
+        if (!envoyer) return@withContext
+        // 2. Ajouter les nôtres (60 derniers jours, pour rester petit)
+        val limite = System.currentTimeMillis() - 60 * 86_400_000L
+        var change = false
+        val e2 = _etat.value
+        for (c in e2.conversations) {
+            if (c.derniere < limite) continue
+            val k = clePartagee(c) ?: continue
+            val local = e2.etat(c)
+            val d = salons.optJSONObject(k) ?: org.json.JSONObject()
+            val lu = maxOf(d.optLong("lu"), local.lue); val traite = maxOf(d.optLong("traite"), local.traitee)
+            if (lu != d.optLong("lu") || traite != d.optLong("traite")) {
+                salons.put(k, org.json.JSONObject().put("lu", lu).put("traite", traite)); change = true
+            }
+        }
+        // Ménage : entrées anciennes retirées
+        salons.keys().asSequence().toList().forEach { k ->
+            val d = salons.optJSONObject(k)
+            if (d == null || maxOf(d.optLong("lu"), d.optLong("traite")) < limite) { salons.remove(k); change = true }
+        }
+        if (change) m.ecrireDonneesCompte(TYPE_PARTAGE, org.json.JSONObject().put("v", 1).put("salons", salons))
     }
 
     /** États de la base, complétés par ceux en cours d'écriture. */

@@ -126,6 +126,21 @@ class Matrix(private val cfg: Config) {
     }
 
     /** Définit votre statut de présence — UNIQUEMENT quand vous le choisissez dans les Réglages. */
+    /** Données privées du compte (jamais transmises aux contacts ni aux passerelles). null si absentes. */
+    fun lireDonneesCompte(type: String): JSONObject? {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/user/${Http.enc(utilisateur)}/account_data/${Http.enc(type)}", jeton = jeton, delaiMs = 10_000)
+        if (r.code == 404) return null
+        if (r.code != 200) throw ErreurHttp(r.code, "données du compte")
+        return JSONObject(r.texte)
+    }
+
+    fun ecrireDonneesCompte(type: String, contenu: JSONObject) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/user/${Http.enc(utilisateur)}/account_data/${Http.enc(type)}", "PUT", jeton, contenu.toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "données du compte")
+    }
+
     fun definirPresence(etat: String) {
         connecter()
         val r = Http.requete("$base/_matrix/client/v3/presence/${Http.enc(utilisateur)}/status", "PUT", jeton,
