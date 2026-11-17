@@ -340,6 +340,17 @@ object Moteur {
             mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 
+    // MARK: Transcriptions des vocaux (gardées sur le téléphone)
+
+    private val transcriptions by lazy { java.util.concurrent.ConcurrentHashMap(runCatching { archive.transcriptions() }.getOrDefault(emptyMap())) }
+    val versionTranscriptions = MutableStateFlow(0)
+    fun transcriptionConnue(m: Message): String? = transcriptions[m.cle]
+    fun noterTranscription(m: Message, texte: String) {
+        transcriptions[m.cle] = texte
+        portee.launch { runCatching { archive.enregistrerTranscription(m.cle, texte) } }
+        versionTranscriptions.value++
+    }
+
     /** États modifiés pas encore écrits en base : une actualisation ne doit pas les effacer (sinon « lu » redevient « non lu »). */
     private val etatsEnAttente = java.util.concurrent.ConcurrentHashMap<String, EtatConv>()
 

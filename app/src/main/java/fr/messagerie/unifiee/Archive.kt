@@ -216,6 +216,21 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
     fun avatar(conv: String): String? =
         readableDatabase.rawQuery("SELECT mxc FROM avatars WHERE conv = ?", arrayOf(conv)).lignes { it.getString(0) }.firstOrNull()
 
+    // MARK: Transcriptions des vocaux (sur le téléphone seulement)
+
+    private fun creerTranscriptions() = writableDatabase.execSQL("CREATE TABLE IF NOT EXISTS transcriptions (cle TEXT PRIMARY KEY, texte TEXT NOT NULL)")
+
+    fun transcriptions(): Map<String, String> {
+        creerTranscriptions()
+        return readableDatabase.rawQuery("SELECT cle, texte FROM transcriptions", null).lignes { it.getString(0) to it.getString(1) }.toMap()
+    }
+
+    @Synchronized
+    fun enregistrerTranscription(cle: String, texte: String) {
+        creerTranscriptions()
+        writableDatabase.insertWithOnConflict("transcriptions", null, ContentValues().apply { put("cle", cle); put("texte", texte) }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
     // MARK: Réactions
 
     @Synchronized
