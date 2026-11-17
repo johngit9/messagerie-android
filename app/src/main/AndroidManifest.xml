@@ -13,11 +13,14 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
+        <!-- Reconnaissance vocale du téléphone (transcription des vocaux) -->
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
         <package android:name="com.microsoft.teams" />
         <package android:name="com.whatsapp" />
         <package android:name="org.telegram.messenger" />
         <package android:name="com.linkedin.android" />
         <package android:name="im.vector.app" />
+        <package android:name="org.thoughtcrime.securesms" />
         <intent>
             <action android:name="android.intent.action.DIAL" />
         </intent>

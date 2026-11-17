@@ -940,6 +940,38 @@ private fun LecteurVocal(m: Message, couleur: Color) {
             }
         }
         if (actif && etat.erreur != null) Text(etat.erreur!!, fontSize = 11.sp, color = couleur, fontStyle = FontStyle.Italic)
+        // Transcription (sur le téléphone ; rien n'est envoyé au contact)
+        Moteur.versionTranscriptions.collectAsState().value
+        val transcrit = Moteur.transcriptionConnue(m)
+        val portee = rememberCoroutineScope()
+        var enCours by remember(m.cle) { mutableStateOf(false) }
+        var erreur by remember(m.cle) { mutableStateOf<String?>(null) }
+        fun lancer() {
+            enCours = true; erreur = null
+            portee.launch {
+                runCatching { fr.messagerie.unifiee.Transcripteur.transcrire(m) }
+                    .onSuccess { t -> if (t.isBlank()) erreur = "Aucune parole reconnue" else Moteur.noterTranscription(m, t) }
+                    .onFailure { erreur = "Transcription impossible : " + (it.message ?: it.toString()) }
+                enCours = false
+            }
+        }
+        val micro = androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> if (ok) lancer() else erreur = "Autorisez le micro pour transcrire" }
+        val ctx = LocalContext.current
+        when {
+            transcrit != null -> Text("« $transcrit »", fontSize = 13.sp, color = couleur, fontStyle = FontStyle.Italic, modifier = Modifier.padding(top = 6.dp))
+            enCours -> Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = couleur)
+                Spacer(Modifier.width(6.dp)); Text("Transcription…", fontSize = 12.sp, color = couleur)
+            }
+            fr.messagerie.unifiee.Transcripteur.possible -> Text("Transcrire", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = couleur,
+                modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable {
+                    val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (ok) lancer() else micro.launch(android.Manifest.permission.RECORD_AUDIO)
+                }.padding(horizontal = 4.dp, vertical = 6.dp))
+        }
+        erreur?.let { Text(it, fontSize = 11.sp, color = couleur, fontStyle = FontStyle.Italic) }
     }
 }
 
