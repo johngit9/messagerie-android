@@ -387,6 +387,9 @@ class SyncPont(
                 if (nomMoi !in autres) runCatching { archive.corrigerMesMessages(cle(id), nomMoi) }
             }
         }
+        // SMS : les messages de votre fantôme non membre étaient archivés « reçus » de « Quelqu'un »
+        if (pont == Pont.SMS && reparesMoi.add("${pont.curseur}.nonmembre"))
+            for (id in infos.keys) runCatching { archive.corrigerMesMessages(cle(id), "Quelqu'un") }
 
         val convs = infos.map { (id, i) ->
             val contacts = i.membres.filter { it.key.startsWith(pont.prefixe) && it.key != moi }
@@ -442,6 +445,13 @@ class SyncPont(
     private var moiConfig: String? = null
     fun avecMoi(moi: String?) = apply { moiConfig = moi?.takeIf { it.isNotEmpty() } }
     private fun cfg_moi() = moiConfig
+
+    /**
+     * Expéditeur = vous ? Votre compte, le fantôme « moi », et pour la passerelle SMS tout fantôme
+     * @gmessages_ qui n'est pas membre du salon : le vôtre n'en est jamais membre et change d'identifiant.
+     */
+    private fun estMoi(exp: String, membres: Map<String, String>, moi: String?) =
+        exp == m.utilisateur || exp == moi || (pont == Pont.SMS && exp.startsWith(pont.prefixe) && membres[exp] == null)
 
     /** Accusés de lecture posés par VOUS depuis un autre appareil. */
     private fun noterLectures(salon: JSONObject, conv: String, moi: String?) {
@@ -503,7 +513,7 @@ class SyncPont(
                 val cible = rel.optString("event_id"); val cle = rel.optString("key")
                 val exp = e.optString("sender")
                 if (rel.optString("rel_type") != "m.annotation" || cible.isEmpty() || cle.isEmpty()) continue
-                val deMoi = exp == m.utilisateur || exp == moi
+                val deMoi = estMoi(exp, info.membres, moi)
                 reactions.add(Reaction("${pont.source.id}:$eid", "${pont.source.id}:$cible", conv, cle,
                     if (deMoi) "Vous" else info.membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un", deMoi))
                 continue
@@ -613,7 +623,7 @@ class SyncPont(
             "m.location" -> { type = "autre"; texte = "[position]" }
             else -> if (corps.isEmpty()) return null
         }
-        val deMoi = exp == m.utilisateur || exp == moi
+        val deMoi = estMoi(exp, membres, moi)
         // Vous êtes mentionné (@) : m.mentions ou lien vers votre identifiant dans le texte mis en forme
         if (!deMoi) {
             val ids = listOfNotNull(m.utilisateur.takeIf { it.isNotEmpty() }, moi)
