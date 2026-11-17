@@ -453,6 +453,18 @@ private fun Pastilles(choisie: Long, origine: Long, choisir: (Long) -> Unit) {
 private fun PageAffichage() {
     val cfg = Moteur.cfg
     Explication("Tout s'applique tout de suite. « A » remet la couleur d'origine.")
+    Text("Haut de la liste", fontWeight = FontWeight.Medium)
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val choix = listOf(1 to "Bandeau", 2 to "Épuré", 0 to "Classique")
+        choix.forEachIndexed { i, (v, nom) ->
+            SegmentedButton(selected = Affichage.haut == v, onClick = {
+                Affichage.haut = v; cfg.haut = v
+                // Épuré va avec la liste en lignes ; Bandeau avec les cartes
+                if (v == 2) { Affichage.design = 1; cfg.design = 1 } else if (v == 1 && Affichage.design == 1) { Affichage.design = 0; cfg.design = 0 }
+            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, choix.size), icon = {}) { Text(nom) }
+        }
+    }
+    Explication("Bandeau : en-tête bleu nuit. Épuré : fond blanc, liste en lignes. Classique : l'ancien haut avec le grand titre.")
     Text("Design de la liste", fontWeight = FontWeight.Medium)
     androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         listOf(0 to "Cartes", 1 to "Compacte", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->

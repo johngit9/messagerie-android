@@ -105,6 +105,8 @@ class Config(context: Context) {
     /** Votre statut de présence choisi : offline (par défaut, discret), unavailable (absent) ou online. */
     var presence: String get() = s("presence").ifEmpty { "offline" }; set(v) = set("presence", v)
     var design: Int get() = p.getInt("design", 0); set(v) = p.edit().putInt("design", v).apply()
+    /** Haut de la liste : 0 classique, 1 Bandeau, 2 Épuré. */
+    var haut: Int get() = p.getInt("haut", 1); set(v) = p.edit().putInt("haut", v).apply()
     fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
         val d = silenceDebut; val f = silenceFin
         if (d < 0 || d == f) return false

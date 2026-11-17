@@ -78,6 +78,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -119,7 +121,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
         },
     ) {
         Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = if (fr.messagerie.unifiee.Affichage.haut == 2) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.background,
             floatingActionButton = {
                 androidx.compose.material3.ExtendedFloatingActionButton(
                     onClick = nouveau, icon = { Icon(Icons.Outlined.Edit, null) }, text = { Text("Nouveau") },
@@ -132,6 +134,12 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                 if (choisies.isNotEmpty()) BarreSelection(e, e.conversations.filter { it.cle in choisies },
                     toutChoisir = { choisies = visibles.map { it.cle }.toSet() },
                     plus = { cs -> actionsPour = cs }, fin = { choisies = emptySet() })
+                else if (fr.messagerie.unifiee.Affichage.haut != 0) EnteteCompact(e, fr.messagerie.unifiee.Affichage.haut == 1, vue, genre, espace, source, visibles.size, recherche,
+                    choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
+                    choisirEspace = { vm.espace.value = it }, choisirSource = { vm.source.value = it },
+                    ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
+                    chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it },
+                    rechercheAvancee = { rechercher(vm.recherche.value) })
                 else Entete(e, vue, genre, espace, source, visibles.size, recherche,
                     choisirGenre = { vm.genre.value = if (vm.genre.value == it) Genre.Tous else it },
                     choisirEspace = { vm.espace.value = it },
@@ -154,11 +162,14 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                         },
                     )
                 } else LazyColumn(
-                    Modifier.fillMaxSize(),
+                    // Bandeau : les cartes remontent un peu sur le bandeau coloré
+                    Modifier.fillMaxSize().then(if (fr.messagerie.unifiee.Affichage.haut == 1 && choisies.isEmpty() && pannes.isEmpty()) Modifier.offset(y = (-14).dp) else Modifier),
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(when (fr.messagerie.unifiee.Affichage.design) { 1 -> 0.dp; 3 -> 12.dp; else -> 8.dp }),
                 ) {
                     items(visibles, key = { it.cle }) { c ->
+                        if (fr.messagerie.unifiee.Affichage.design == 1 && fr.messagerie.unifiee.Affichage.haut == 2 && c.cle != visibles.firstOrNull()?.cle)
+                            HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                         CarteConversation(e, c, Modifier.animateItem(),
                             ouvrir = { if (choisies.isNotEmpty()) basculer(c) else { vm.derniereOuverte = c.cle; ouvrir(c.cle) } },
                             actions = { basculer(c) }, choisie = c.cle in choisies)
@@ -627,4 +638,136 @@ fun apercuMessage(m: fr.messagerie.unifiee.Message): String = when (m.type) {
     "video" -> "🎬 " + m.texte.takeIf { it.isNotBlank() && !Regex("""(?i)\.(mp4|mov|3gp|webm)$""").containsMatchIn(it) }.orEmpty().ifEmpty { "Vidéo" }
     "fichier" -> "📎 " + m.texte.ifBlank { "Fichier" }
     else -> m.texte.replace(Regex("\\s+"), " ").trim()
+}
+
+/** Couleur du bandeau (style « Bandeau »). */
+@Composable
+private fun couleurBandeau(): Color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF1A2350) else Color(0xFF22306E)
+
+/**
+ * Haut de liste compact : une ligne menu + recherche + réglages, puis les puces de filtre.
+ * bandeau = true : fond bleu nuit, recherche blanche ; false : style épuré (fond clair, onglets soulignés).
+ */
+@Composable
+private fun EnteteCompact(
+    e: Etat, bandeau: Boolean, vue: Vue, genre: Genre, espace: Espace, source: Source?, nombre: Int, recherche: String,
+    choisirGenre: (Genre) -> Unit, choisirEspace: (Espace) -> Unit, choisirSource: (Source?) -> Unit,
+    ouvrirTiroir: () -> Unit, ouvrirReglages: () -> Unit, chercher: (String) -> Unit, choisirVue: (Vue) -> Unit,
+    rechercheAvancee: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val fondHaut = if (bandeau) couleurBandeau() else cs.surface
+    val texteHaut = if (bandeau) Color.White else cs.onSurface
+    // Icônes de la barre d'état en clair sur le bandeau
+    val vueAndroid = androidx.compose.ui.platform.LocalView.current
+    if (bandeau) androidx.compose.runtime.DisposableEffect(Unit) {
+        val fenetre = (vueAndroid.context as? android.app.Activity)?.window
+        val ctrl = fenetre?.let { androidx.core.view.WindowCompat.getInsetsController(it, vueAndroid) }
+        val avant = ctrl?.isAppearanceLightStatusBars
+        ctrl?.isAppearanceLightStatusBars = false
+        onDispose { if (avant != null) ctrl.isAppearanceLightStatusBars = avant }
+    }
+    var menuEspace by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().background(fondHaut).statusBarsPadding()
+            .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = if (bandeau) 24.dp else 0.dp),
+        verticalArrangement = Arrangement.spacedBy(if (bandeau) 10.dp else 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = ouvrirTiroir) { Icon(Icons.Outlined.Menu, "Menu", tint = if (bandeau) Color.White else cs.onSurfaceVariant) }
+            Row(
+                Modifier.weight(1f).height(if (bandeau) 46.dp else 44.dp)
+                    .background(if (bandeau) Color.White else cs.surfaceContainerHigh, RoundedCornerShape(if (bandeau) 23.dp else 12.dp))
+                    .padding(start = 14.dp, end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val gris = if (bandeau) Color(0xFF5A606D) else cs.onSurfaceVariant
+                Icon(Icons.Outlined.Search, null, tint = gris, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) {
+                    if (recherche.isEmpty()) Text("Rechercher", color = gris, fontSize = 15.sp)
+                    BasicTextField(
+                        value = recherche, onValueChange = chercher, singleLine = true,
+                        textStyle = TextStyle(fontSize = 15.sp, color = if (bandeau) Color(0xFF15171C) else cs.onSurface),
+                        cursorBrush = SolidColor(cs.primary), modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (recherche.isNotEmpty()) IconButton(onClick = { chercher("") }) { Icon(Icons.Outlined.Close, "Effacer", tint = gris) }
+                IconButton(onClick = rechercheAvancee) {
+                    Icon(Icons.AutoMirrored.Outlined.ManageSearch, "Rechercher dans les messages (filtres)", tint = Color(0xFF3B5BDB))
+                }
+            }
+            if (e.enCours) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = texteHaut)
+            } else IconButton(onClick = ouvrirReglages) { Icon(Icons.Outlined.Settings, "Réglages", tint = if (bandeau) Color.White else cs.onSurfaceVariant) }
+        }
+        // Puces : vues, puis Perso / Pro, puis discussions / groupes
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (bandeau) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (source != null) PuceCompacte(bandeau, source.libelle + " ✕", 0, false, true) { choisirSource(null) }
+            Vue.entries.forEach { v ->
+                val n = when (v) { Vue.ATraiter -> e.nombreATraiter(source, espace.pro); Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro); else -> 0 }
+                PuceCompacte(bandeau, v.libelle, n, v == Vue.ATraiter, v == vue) { choisirVue(v) }
+            }
+            Box {
+                PuceCompacte(bandeau, (if (espace == Espace.Tout) "Perso · Pro" else espace.libelle) + " ▾", 0, false, espace != Espace.Tout) { menuEspace = true }
+                androidx.compose.material3.DropdownMenu(expanded = menuEspace, onDismissRequest = { menuEspace = false }) {
+                    Espace.entries.forEach { es ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(if (es == Espace.Tout) "Perso et Pro" else es.libelle) },
+                            onClick = { menuEspace = false; choisirEspace(es) },
+                            trailingIcon = { if (es == espace) Icon(Icons.Outlined.TaskAlt, null) })
+                    }
+                }
+            }
+            PuceCompacte(bandeau, Genre.Discussions.libelle, 0, false, genre == Genre.Discussions) { choisirGenre(Genre.Discussions) }
+            PuceCompacte(bandeau, Genre.Groupes.libelle, 0, false, genre == Genre.Groupes) { choisirGenre(Genre.Groupes) }
+        }
+        if (bandeau) Text(
+            when {
+                e.importEnCours != null -> e.importEnCours
+                e.enCours -> "Actualisation…"
+                else -> (e.derniereActualisation?.let { "Actualisé à " + heure(it) + " · " } ?: "") + "$nombre conversation" + if (nombre > 1) "s" else ""
+            },
+            fontSize = 12.sp, color = Color.White.copy(alpha = 0.75f),
+            modifier = Modifier.padding(start = 8.dp).clickable { Moteur.actualiserMaintenant() },
+        )
+        if (!bandeau) HorizontalDivider(color = cs.outlineVariant)
+    }
+}
+
+@Composable
+private fun PuceCompacte(bandeau: Boolean, libelle: String, n: Int, attente: Boolean, choisie: Boolean, clic: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    if (bandeau) {
+        val nuit = couleurBandeau()
+        Row(
+            Modifier.height(36.dp)
+                .background(if (choisie) Color.White else Color.White.copy(alpha = 0.10f), RoundedCornerShape(18.dp))
+                .then(if (choisie) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)))
+                .clip(RoundedCornerShape(18.dp)).clickable(onClick = clic).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(libelle, fontSize = 14.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium, color = if (choisie) nuit else Color.White)
+            if (n > 0) {
+                Spacer(Modifier.width(7.dp))
+                Text(compte(n), fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    color = when { attente -> Color(0xFF3B1F06); choisie -> Color.White; else -> Color.White },
+                    modifier = Modifier.background(when { attente -> Color(0xFFF7B267); choisie -> Color(0xFF3B5BDB); else -> Color.White.copy(alpha = 0.18f) }, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 7.dp, vertical = 1.dp))
+            }
+        }
+    } else {
+        // Épuré : onglet souligné
+        Column(Modifier.clickable(onClick = clic).padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.height(42.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(libelle, fontSize = 14.sp, fontWeight = if (choisie) FontWeight.Bold else FontWeight.Medium,
+                    color = if (choisie) cs.onSurface else cs.onSurfaceVariant)
+                if (n > 0) {
+                    Spacer(Modifier.width(5.dp))
+                    Text(compte(n), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (attente) Color(0xFFA04A0B) else cs.primary)
+                }
+            }
+            Box(Modifier.height(2.5.dp).width(28.dp).background(if (choisie) cs.onSurface else Color.Transparent, RoundedCornerShape(2.dp)))
+        }
+    }
 }

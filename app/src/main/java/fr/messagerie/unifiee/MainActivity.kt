@@ -138,10 +138,12 @@ object Affichage {
     var accent by androidx.compose.runtime.mutableLongStateOf(0L)
     /** Présentation de la liste : 0 cartes, 1 compacte, 2 colorée, 3 aérée. */
     var design by androidx.compose.runtime.mutableIntStateOf(0)
+    /** Haut de la liste : 0 classique, 1 Bandeau, 2 Épuré. */
+    var haut by androidx.compose.runtime.mutableIntStateOf(1)
     /** Couleurs choisies par messagerie (absentes = couleur d'origine). */
     val couleurs = androidx.compose.runtime.mutableStateMapOf<Source, Long>()
     fun charger(c: Config) {
-        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design
+        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design; haut = c.haut
         couleurs.clear(); Source.entries.forEach { s -> c.couleur(s).takeIf { it != 0L }?.let { couleurs[s] = it } }
     }
 }
