@@ -35,13 +35,21 @@ class Relais(private val cfg: Config) {
     }
 
     /** Recopie dans l'archive tout ce que le relais a de nouveau. */
+    /** « supprime » vaut 1 ou true selon les lignes. */
+    private fun retire(l: JSONObject) = l.optBoolean("supprime", false) || l.optInt("supprime", 0) == 1
+
     fun synchroniser(archive: Archive): Int {
         connecter()
         runCatching { archive.purgerEchosElement() }
         var apres = archive.curseur("element.seq")?.toLongOrNull() ?: 0
+        // Une seule fois : relire depuis le début des réactions reprises par le relais (le 17/11, à partir du n° ~746 000)
+        if (archive.curseur("element.reactions") == null) {
+            if (apres > 745_000) apres = 745_000
+            archive.definirCurseur("element.reactions", "1")
+        }
         var total = 0
         while (true) {
-            val j = get("/messages?apres=$apres&limite=2000", 30_000)
+            val j = get("/messages?apres=$apres&limite=2000&reactions=1", 30_000)
             val lignes = j.optJSONArray("messages")?.objets() ?: break
             if (lignes.isEmpty()) break
             val convs = HashMap<String, Conversation>()
@@ -56,7 +64,7 @@ class Relais(private val cfg: Config) {
                 val cle = "Element:$eid"
                 // Réaction reçue (contact, ou vous depuis Element) : { cible, cle = emoji, auteur, de_moi, supprime }
                 if (l.optString("type") == "reaction") {
-                    if (l.optInt("supprime") == 1) { reactionsRetirees.add(cle); continue }
+                    if (retire(l)) { reactionsRetirees.add(cle); continue }
                     val cible = l.optString("cible").takeIf { it.isNotEmpty() } ?: continue
                     val emoji = l.optString("cle").takeIf { it.isNotEmpty() } ?: continue
                     val moi = l.optInt("de_moi") == 1
@@ -64,7 +72,7 @@ class Relais(private val cfg: Config) {
                         if (moi) "Vous" else l.optString("auteur").ifEmpty { "Quelqu'un" }, moi))
                     continue
                 }
-                if (l.optInt("supprime") == 1) { supprimes.add(cle); continue }
+                if (retire(l)) { supprimes.add(cle); continue }
                 val conv = Conversation(cleConv(Source.ELEMENT, salon), Source.ELEMENT, salon,
                     l.optString("nom_salon").takeIf { it.isNotEmpty() && it != "null" } ?: "Element",
                     l.optInt("est_groupe") == 1, 0, emptyList())
