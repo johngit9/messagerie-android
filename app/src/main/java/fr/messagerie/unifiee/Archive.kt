@@ -238,6 +238,10 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             Reaction(c.s("cle") ?: "", c.s("cible") ?: "", c.s("conv") ?: "", c.s("emoji") ?: "", c.s("auteur") ?: "", c.l("de_moi") == 1L)
         }.groupBy { it.cible }
 
+    /** Oublie une réaction retirée (clé complète « Source:id »). */
+    @Synchronized
+    fun oublierReactionCle(cle: String) { writableDatabase.delete("reactions", "cle = ?", arrayOf(cle)) }
+
     /** Oublie une réaction envoyée puis retirée (son identifiant d'événement). */
     @Synchronized
     fun oublierReaction(idEvenement: String) {

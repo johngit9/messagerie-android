@@ -168,6 +168,22 @@ class Relais(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "suppression")
     }
 
+    /** Pose votre réaction (emoji) sur un message Element — UNIQUEMENT sur votre appui. Renvoie l'identifiant de la réaction. */
+    fun reagir(salon: String, eventId: String, emoji: String): String {
+        connecter()
+        val d = JSONObject().put("salon", salon).put("event_id", eventId).put("cle", emoji)
+        val r = Http.requete("$base/reagir", "POST", jeton, d.toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "réaction")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Retire votre réaction Element (identifiant de la réaction) — UNIQUEMENT sur votre appui. */
+    fun retirerReaction(salon: String, idReaction: String) {
+        connecter()
+        val r = Http.requete("$base/retirer-reaction", "POST", jeton, JSONObject().put("salon", salon).put("event_id", idReaction).toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "retrait de réaction")
+    }
+
     /** Présence de l'autre membre de chaque salon Element à deux (lecture seule) : salon → online / unavailable / offline. */
     fun presences(): Map<String, String> {
         connecter()

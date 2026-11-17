@@ -528,24 +528,67 @@ object Moteur {
 
     /** Une réaction peut-elle être transmise au contact ? (message Matrix, hors Element, réglage activé) */
     fun reactionTransmissible(m: Message, c: Conversation): Boolean =
-        cfg.envoyerReactions && c.source != Source.ELEMENT && m.cle.substringAfter(':').startsWith("$") && salonDe(c) != null
+        cfg.envoyerReactions && c.source != Source.TEAMS && m.cle.substringAfter(':').startsWith("$") &&
+            (if (c.source == Source.ELEMENT) cfg.relaisConfigure else salonDe(c) != null)
 
     private fun salonDe(c: Conversation): String? =
         if (c.source == Source.WHATSAPP) _etat.value.salonsWhatsApp[c.jid] else c.jid
+
+    /**
+     * Récupère les réactions déjà posées dans une conversation (contacts et vous, depuis les applis officielles).
+     * Lecture seule : quelques pages des événements m.reaction du salon. Renvoie true si quelque chose a changé.
+     */
+    suspend fun recupererReactions(c: Conversation): Boolean = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext false
+        val salon = salonDe(c) ?: return@withContext false
+        runCatching {
+            val m = Matrix(cfg); m.connecter()
+            val noms = runCatching { m.membres(salon) }.getOrNull().orEmpty()
+            val moi = setOfNotNull(cfg.matrixUtilisateur, cfg.moiFantome.ifEmpty { null }, SyncPont.moiDetecte(Pont.pour(c.source)))
+            val filtre = Http.enc("""{"types":["m.reaction"]}""")
+            val lot = ArrayList<Reaction>(); val retirees = ArrayList<String>()
+            var depuis: String? = null
+            for (page in 0 until 4) {
+                var chemin = "/_matrix/client/v3/rooms/${Http.enc(salon)}/messages?dir=b&limit=500&filter=$filtre"
+                if (depuis != null) chemin += "&from=${Http.enc(depuis)}"
+                val rep = m.get(chemin, 20_000)
+                val evs = rep.optJSONArray("chunk")?.objets() ?: break
+                for (e in evs) {
+                    val eid = e.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
+                    val rel = e.optJSONObject("content")?.optJSONObject("m.relates_to")
+                    // Réaction retirée (événement effacé) : on l'oublie
+                    if (rel == null) { retirees += "${c.source.id}:$eid"; continue }
+                    val cible = rel.optString("event_id"); val cle = rel.optString("key")
+                    if (rel.optString("rel_type") != "m.annotation" || cible.isEmpty() || cle.isEmpty()) continue
+                    val exp = e.optString("sender")
+                    val deMoi = exp in moi
+                    lot += Reaction("${c.source.id}:$eid", "${c.source.id}:$cible", c.cle, cle,
+                        if (deMoi) "Vous" else noms[exp]?.replace(" (WA)", "")?.trim() ?: "Quelqu'un", deMoi)
+                }
+                depuis = rep.optString("end").takeIf { it.isNotEmpty() && evs.isNotEmpty() } ?: break
+            }
+            val avant = archive.reactions(c.cle)
+            archive.enregistrerReactions(lot)
+            retirees.forEach { archive.oublierReactionCle(it) }
+            archive.reactions(c.cle) != avant
+        }.getOrDefault(false)
+    }
 
     /** Pose (emoji) ou retire (null) votre réaction. Renvoie null si tout va bien, sinon le message d'erreur. */
     suspend fun reagir(m: Message, c: Conversation, emoji: String?): String? = withContext(Dispatchers.IO) {
         try {
             val avant = archive.maReaction(m.cle)
             if (avant?.idEnvoi != null && avant.salon != null) {
-                Matrix(cfg).retirerReaction(avant.salon, avant.idEnvoi)
+                if (c.source == Source.ELEMENT) Relais(cfg).retirerReaction(avant.salon, avant.idEnvoi)
+                else Matrix(cfg).retirerReaction(avant.salon, avant.idEnvoi)
                 archive.oublierReaction(avant.idEnvoi)
             }
             if (emoji == null) { archive.definirMaReaction(m.cle, null); return@withContext null }
             var salon: String? = null; var id: String? = null
             if (reactionTransmissible(m, c)) {
                 salon = salonDe(c)
-                id = Matrix(cfg).reagir(salon!!, m.cle.substringAfter(':'), emoji).takeIf { it.isNotEmpty() }
+                id = (if (c.source == Source.ELEMENT) Relais(cfg).reagir(salon!!, m.cle.substringAfter(':'), emoji)
+                    else Matrix(cfg).reagir(salon!!, m.cle.substringAfter(':'), emoji)).takeIf { it.isNotEmpty() }
             }
             archive.definirMaReaction(m.cle, MaReaction(m.cle, c.cle, emoji, salon, id))
             null

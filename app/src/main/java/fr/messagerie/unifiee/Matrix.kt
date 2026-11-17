@@ -261,6 +261,8 @@ class SyncPont(
         private val cache = ConcurrentHashMap<String, Cache>()
         private val autres = ConcurrentHashMap<String, Set<String>>()
         fun viderCache() { cache.clear() }
+        /** Votre fantôme repéré sur cette passerelle (vos réactions posées depuis l'appli officielle). */
+        fun moiDetecte(p: Pont): String? = cache[p.curseur]?.moi
         /** Messages déjà archivés et encore « Waiting for attachment » : clé → dernière tentative. */
         private val essais = ConcurrentHashMap<String, Long>()
 

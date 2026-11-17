@@ -821,11 +821,33 @@ private fun Bulle(
             }
         }
         // Réactions sous la bulle
-        val autres = reactions.filter { !it.deMoi }
+        // Réactions de tous (contacts et vous, y compris depuis les applis officielles) : emoji → auteurs
+        val autres = reactions.filter { !it.deMoi }.distinctBy { it.auteur + it.emoji }
         if (autres.isNotEmpty() || monEmoji != null) {
-            val groupes = LinkedHashMap<String, Int>()
-            autres.forEach { groupes[it.emoji] = (groupes[it.emoji] ?: 0) + 1 }
-            if (monEmoji != null) groupes[monEmoji] = (groupes[monEmoji] ?: 0) + 1
+            val auteurs = LinkedHashMap<String, MutableList<String>>()
+            if (monEmoji != null) auteurs.getOrPut(monEmoji) { ArrayList() }.add("Vous")
+            autres.forEach { auteurs.getOrPut(it.emoji) { ArrayList() }.add(it.auteur) }
+            val groupes = auteurs.mapValues { it.value.size }
+            var detailReactions by remember { mutableStateOf(false) }
+            if (detailReactions) AlertDialog(
+                onDismissRequest = { detailReactions = false },
+                title = { Text("Réactions") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        auteurs.forEach { (emoji, qui) ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text(emoji, fontSize = 22.sp, modifier = Modifier.width(40.dp))
+                                Text(qui.joinToString(", "), fontSize = 15.sp,
+                                    fontWeight = if ("Vous" in qui) FontWeight.SemiBold else FontWeight.Normal)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { detailReactions = false; menu = true }) { Text(if (monEmoji != null) "Changer ma réaction" else "Réagir") }
+                },
+                dismissButton = { TextButton(onClick = { detailReactions = false }) { Text("Fermer") } },
+            )
             FlowRow(Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 groupes.forEach { (emoji, n) ->
                     val aMoi = emoji == monEmoji
@@ -834,7 +856,7 @@ private fun Bulle(
                         modifier = Modifier
                             .background(if (aMoi) c.source.teinte().copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
                             .border(1.dp, if (aMoi) c.source.teinte() else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                            .clickable { menu = true }
+                            .clickable { detailReactions = true }
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                 }

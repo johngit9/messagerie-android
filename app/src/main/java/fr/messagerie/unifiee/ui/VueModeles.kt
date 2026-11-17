@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -81,6 +83,18 @@ class ConversationVM(private val cle: String) : ViewModel() {
     val reactions = _reactions.asStateFlow()
     private val _mesReactions = MutableStateFlow<Map<String, MaReaction>>(emptyMap())
     val mesReactions = _mesReactions.asStateFlow()
+
+    init {
+        // Réactions arrivées sans nouveau message (posées depuis l'appli officielle) : relues à chaque actualisation
+        viewModelScope.launch {
+            Moteur.etat.map { it.derniereActualisation }.distinctUntilChanged().collect { withContext(Dispatchers.IO) { chargerReactions() } }
+        }
+        // À l'ouverture : récupère aussi les anciennes réactions du salon (lecture seule)
+        viewModelScope.launch {
+            val c = Moteur.etat.value.conversations.firstOrNull { it.cle == cle } ?: return@launch
+            if (Moteur.recupererReactions(c)) withContext(Dispatchers.IO) { chargerReactions() }
+        }
+    }
 
     /** Relit l'archive (à l'ouverture et à chaque nouveau message). */
     fun actualiser(initial: List<Message>) {
