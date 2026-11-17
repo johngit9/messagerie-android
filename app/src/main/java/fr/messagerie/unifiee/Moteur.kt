@@ -327,7 +327,7 @@ object Moteur {
         for ((cle, d) in lectures) {
             val e = etats[cle] ?: EtatConv()
             // Seulement plus loin que ce qui est déjà lu, et en gardant le reste de l'état (sourdine, À traiter…)
-            if (d > e.lue) majEtat(cle, { it.copy(lue = maxOf(it.lue, d)) }, partager = false)
+            if (d > e.lue) majEtat(cle, partager = false) { it.copy(lue = maxOf(it.lue, d)) }
         }
     }
 
@@ -356,7 +356,7 @@ object Moteur {
     /** États modifiés pas encore écrits en base : une actualisation ne doit pas les effacer (sinon « lu » redevient « non lu »). */
     private val etatsEnAttente = java.util.concurrent.ConcurrentHashMap<String, EtatConv>()
 
-    private fun majEtat(cle: String, f: (EtatConv) -> EtatConv, partager: Boolean = true) {
+    private fun majEtat(cle: String, partager: Boolean = true, f: (EtatConv) -> EtatConv) {
         val avant = _etat.value.etats[cle] ?: EtatConv()
         val n = f(avant)
         if (partager && (n.lue > avant.lue || n.traitee > avant.traitee)) partagerPlusTard()
@@ -401,7 +401,7 @@ object Moteur {
             val lu = d.optLong("lu"); val traite = d.optLong("traite")
             val local = e.etat(c)
             if (lu > local.lue || traite > local.traitee)
-                majEtat(c.cle, { it.copy(lue = maxOf(it.lue, lu), traitee = maxOf(it.traitee, traite), manuel = if (traite >= c.derniere && traite > it.traitee) false else it.manuel) }, partager = false)
+                majEtat(c.cle, partager = false) { it.copy(lue = maxOf(it.lue, lu), traitee = maxOf(it.traitee, traite)) }
         }
         if (!envoyer) return@withContext
         // 2. Ajouter les nôtres (60 derniers jours, pour rester petit)
