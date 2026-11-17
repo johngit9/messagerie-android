@@ -965,7 +965,7 @@ private fun LecteurVocal(m: Message, couleur: Color) {
                 Spacer(Modifier.width(6.dp)); Text("Transcription…", fontSize = 12.sp, color = couleur)
             }
             fr.messagerie.unifiee.Transcripteur.possible -> Text("Transcrire", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = couleur,
-                modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable {
+                modifier = Modifier.padding(top = 4.dp).clickable {
                     val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
                         android.content.pm.PackageManager.PERMISSION_GRANTED
                     if (ok) lancer() else micro.launch(android.Manifest.permission.RECORD_AUDIO)
