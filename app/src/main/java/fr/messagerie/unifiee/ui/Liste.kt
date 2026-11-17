@@ -442,15 +442,9 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
                 Text(dateCourte(c.derniere), fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     color = if (nb > 0) cs.primary else cs.onSurfaceVariant)
             }
-            val s = e.synthese(c)
-            val enCours = c.cle in e.resumesEnCours
-            val apercu = when {
-                s != null -> s.resume
-                enCours -> "Résumé en cours…"
-                else -> c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + m.texteUtile } ?: ""
-            }
+            // Aperçu : le texte du dernier message (le résumé IA reste dans la conversation)
+            val apercu = c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + apercuMessage(m) } ?: ""
             Row {
-                if (s != null || enCours) Icon(Icons.Outlined.AutoAwesome, "Résumé IA", Modifier.padding(top = 2.dp, end = 4.dp).size(14.dp), tint = Color(0xFF6A4BD6))
                 Text(apercu, fontSize = 14.sp, lineHeight = 19.sp, maxLines = when (design) { 1 -> 1; 3 -> 3; else -> 2 }, overflow = TextOverflow.Ellipsis,
                     color = if (nonLue) cs.onSurface else cs.onSurfaceVariant)
             }
@@ -624,4 +618,13 @@ private fun BandeauPannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>
             )
         }
     }
+}
+
+/** Texte court d'un message pour l'aperçu de la liste (pièces jointes nommées, vocaux transcrits si possible). */
+fun apercuMessage(m: fr.messagerie.unifiee.Message): String = when (m.type) {
+    "audio" -> Moteur.transcriptionConnue(m)?.let { "🎤 « $it »" } ?: ("🎤 Message vocal" + (m.duree?.let { d -> " (" + (d.toInt() / 60) + ":" + "%02d".format(d.toInt() % 60) + ")" } ?: ""))
+    "image" -> "📷 " + m.texte.takeIf { it.isNotBlank() && !Regex("""(?i)\.(jpe?g|png|webp|heic|gif)$""").containsMatchIn(it) }.orEmpty().ifEmpty { "Photo" }
+    "video" -> "🎬 " + m.texte.takeIf { it.isNotBlank() && !Regex("""(?i)\.(mp4|mov|3gp|webm)$""").containsMatchIn(it) }.orEmpty().ifEmpty { "Vidéo" }
+    "fichier" -> "📎 " + m.texte.ifBlank { "Fichier" }
+    else -> m.texte.replace(Regex("\\s+"), " ").trim()
 }

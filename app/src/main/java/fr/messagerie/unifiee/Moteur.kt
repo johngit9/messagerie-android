@@ -321,10 +321,11 @@ object Moteur {
     /** Lectures faites sur un autre appareil : la conversation passe en lue (rien n'est envoyé). */
     private fun appliquerLectures(lectures: Map<String, Long>) {
         if (lectures.isEmpty()) return
-        val etats = archive.etats()
+        val etats = etatsActuels()
         for ((cle, d) in lectures) {
             val e = etats[cle] ?: EtatConv()
-            if (d > e.lue) archive.enregistrerEtat(cle, e.copy(lue = d))
+            // Seulement plus loin que ce qui est déjà lu, et en gardant le reste de l'état (sourdine, À traiter…)
+            if (d > e.lue) majEtat(cle) { it.copy(lue = maxOf(it.lue, d)) }
         }
     }
 
@@ -334,26 +335,39 @@ object Moteur {
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources,
-            etats = archive.etats(), syntheses = archive.syntheses(),
+            etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
             mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 
+    /** États modifiés pas encore écrits en base : une actualisation ne doit pas les effacer (sinon « lu » redevient « non lu »). */
+    private val etatsEnAttente = java.util.concurrent.ConcurrentHashMap<String, EtatConv>()
+
     private fun majEtat(cle: String, f: (EtatConv) -> EtatConv) {
         val n = f(_etat.value.etats[cle] ?: EtatConv())
+        etatsEnAttente[cle] = n
         _etat.update { it.copy(etats = it.etats + (cle to n)) }
         // Écriture hors du fil d'affichage : la base peut être occupée par une synchro.
-        portee.launch { archive.enregistrerEtat(cle, n) }
+        portee.launch {
+            archive.enregistrerEtat(cle, n)
+            etatsEnAttente.remove(cle, n)
+        }
     }
+
+    /** États de la base, complétés par ceux en cours d'écriture. */
+    private fun etatsActuels(): Map<String, EtatConv> = archive.etats() + etatsEnAttente
 
     // MARK: Lu / non lu — LOCAL uniquement
 
     fun marquerLue(c: Conversation) {
         runCatching { NotificationManagerCompat.from(app).cancel(c.cle.hashCode()) }   // le chiffre de l'icône baisse
         if (!_etat.value.estNonLue(c)) return
-        majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) }
+        majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }
         luDansElement(c)
     }
+
+    /** Date du dernier message (parfois plus récente que la date enregistrée de la conversation). */
+    private fun finDe(c: Conversation) = maxOf(c.derniere, c.messages.maxOfOrNull { it.date } ?: 0)
 
     /** Element : le message lu dans Messagerie apparaît lu dans Element (accusé PRIVÉ, invisible des contacts). */
     private fun luDansElement(c: Conversation) {
@@ -363,7 +377,7 @@ object Moteur {
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
-        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = c.derniere, forcee = 0) }; luDansElement(c) }
+        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }; luDansElement(c) }
         runCatching { NotificationManagerCompat.from(app).cancelAll() }
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
