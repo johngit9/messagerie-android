@@ -642,7 +642,7 @@ fun apercuMessage(m: fr.messagerie.unifiee.Message): String = when (m.type) {
 
 /** Couleur du bandeau (style « Bandeau »). */
 @Composable
-private fun couleurBandeau(): Color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF1A2350) else Color(0xFF22306E)
+internal fun couleurBandeau(): Color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF1A2350) else Color(0xFF22306E)
 
 /**
  * Haut de liste compact : une ligne menu + recherche + réglages, puis les puces de filtre.

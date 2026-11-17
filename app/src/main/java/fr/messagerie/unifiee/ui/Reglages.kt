@@ -366,7 +366,7 @@ private fun PageReglage(titre: String, retour: () -> Unit, contenu: @Composable 
 }
 
 @Composable
-private fun Explication(t: String) = Text(t, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun Explication(t: String) = Text(t, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable
 private fun PageMatrix(version: Int, modifie: () -> Unit) {
@@ -426,129 +426,6 @@ private fun PageIA(version: Int) {
     HorizontalDivider()
     Text("Résumer les conversations des :")
     Choix(listOf(1 to "24 h", 3 to "3 jours", 7 to "7 jours", 14 to "14 jours"), jours) { jours = it; cfg.jours = it; Moteur.redemarrer() }
-}
-
-private val PALETTE = listOf(0xFF3B5BDB, 0xFF5B5FC7, 0xFF7048E8, 0xFFAE3EC9, 0xFFD6336C, 0xFFE03131,
-    0xFFE8590C, 0xFFF59F00, 0xFF2F9E44, 0xFF0C8599, 0xFF1971C2, 0xFF495057)
-
-/** Rangée de pastilles de couleur ; 0 = couleur d'origine. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun Pastilles(choisie: Long, origine: Long, choisir: (Long) -> Unit) {
-    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        (listOf(0L) + PALETTE.filter { it != origine }).forEach { c ->
-            val couleur = Color(if (c == 0L) origine else c)
-            val actif = c == choisie
-            Box(Modifier.size(40.dp).clip(CircleShape).clickable { choisir(c) }
-                .border(if (actif) 3.dp else 0.dp, if (actif) MaterialTheme.colorScheme.onSurface else Color.Transparent, CircleShape)
-                .padding(if (actif) 5.dp else 2.dp).background(couleur, CircleShape),
-                contentAlignment = Alignment.Center) {
-                if (c == 0L) Text("A", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PageAffichage() {
-    val cfg = Moteur.cfg
-    Explication("Tout s'applique tout de suite. « A » remet la couleur d'origine.")
-    Text("Haut de la liste", fontWeight = FontWeight.Medium)
-    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        val choix = listOf(1 to "Bandeau", 2 to "Épuré", 0 to "Classique")
-        choix.forEachIndexed { i, (v, nom) ->
-            SegmentedButton(selected = Affichage.haut == v, onClick = {
-                Affichage.haut = v; cfg.haut = v
-                // Épuré va avec la liste en lignes ; Bandeau avec les cartes
-                if (v == 2) { Affichage.design = 1; cfg.design = 1 } else if (v == 1 && Affichage.design == 1) { Affichage.design = 0; cfg.design = 0 }
-            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, choix.size), icon = {}) { Text(nom) }
-        }
-    }
-    Explication("Bandeau : en-tête bleu nuit. Épuré : fond blanc, liste en lignes. Classique : l'ancien haut avec le grand titre.")
-    Interrupteur("Barre des messageries en bas", Affichage.barreBas,
-        "Désactivée, la liste prend tout l'écran. Pour filtrer une messagerie : le menu ☰ en haut à gauche.") { Affichage.barreBas = it; cfg.barreBas = it }
-    Text("Design de la liste", fontWeight = FontWeight.Medium)
-    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        listOf(0 to "Cartes", 1 to "Compacte", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->
-            val actif = Affichage.design == v
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                .border(if (actif) 2.dp else 1.dp, if (actif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
-                .clickable { Affichage.design = v; cfg.design = v }.padding(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Miniature : trois lignes dans le style choisi
-                repeat(3) { i ->
-                    val coul = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM)[i].teinte()
-                    Row(Modifier.fillMaxWidth().height(if (v == 3) 16.dp else if (v == 1) 10.dp else 13.dp)
-                        .background(when (v) { 1 -> Color.Transparent; 2 -> coul.copy(alpha = 0.15f); else -> MaterialTheme.colorScheme.surfaceContainerHigh }, RoundedCornerShape(4.dp))
-                        .padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(if (v == 3) 11.dp else 8.dp).background(coul, CircleShape))
-                        Spacer(Modifier.width(3.dp))
-                        Box(Modifier.weight(1f).height(3.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)))
-                    }
-                }
-                Text(nom, fontSize = 12.sp, fontWeight = if (actif) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
-            }
-        }
-    }
-    Text("Thème", fontWeight = FontWeight.Medium)
-    Choix(listOf(0 to "Comme le téléphone", 1 to "Clair", 2 to "Sombre"), Affichage.theme) { Affichage.theme = it; cfg.theme = it }
-    if (android.os.Build.VERSION.SDK_INT >= 31)
-        Interrupteur("Couleurs de mon fond d'écran (Material You)", Affichage.dynamique,
-            "Remplace la couleur principale ci-dessous.") { Affichage.dynamique = it; cfg.couleursDynamiques = it }
-    if (!Affichage.dynamique) {
-        Text("Couleur principale", fontWeight = FontWeight.Medium)
-        Pastilles(Affichage.accent, 0xFF3B5BDB) { Affichage.accent = it; cfg.accent = it }
-    }
-    HorizontalDivider()
-    Text("Couleur de chaque messagerie", fontWeight = FontWeight.Medium)
-    Explication("Utilisée pour le logo, les bulles, les boutons et les notifications.")
-    Source.entries.forEach { src ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LogoSource(src, 28.dp)
-            Spacer(Modifier.width(10.dp))
-            Text(src.libelle, fontWeight = FontWeight.Medium)
-        }
-        Pastilles(Affichage.couleurs[src] ?: 0L, src.couleur) { c ->
-            if (c == 0L) Affichage.couleurs.remove(src) else Affichage.couleurs[src] = c
-            cfg.definirCouleur(src, c)
-        }
-    }
-    HorizontalDivider()
-    Text("Taille de l'interface", fontWeight = FontWeight.Medium)
-    Choix(listOf(80 to "80 %", 90 to "90 %", 100 to "100 %", 110 to "110 %", 120 to "120 %"), Affichage.zoom) {
-        Affichage.zoom = it; cfg.zoom = it
-    }
-    Text("Taille du texte", fontWeight = FontWeight.Medium)
-    Choix(listOf(85 to "Petit", 100 to "Normal", 115 to "Grand", 130 to "Très grand"), Affichage.texte) {
-        Affichage.texte = it; cfg.tailleTexte = it
-    }
-    // Aperçu
-    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Aperçu", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LogoSource(Source.WHATSAPP, 22.dp); Spacer(Modifier.width(8.dp))
-                Surface(shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Text("Bonjour ! On se voit demain à 10 h ?", Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Surface(shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp), color = Source.WHATSAPP.teinte()) {
-                    Text("Parfait, à demain !", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {}) { Text("Bouton") }
-                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("Non lues 3", Modifier.padding(horizontal = 10.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            }
-        }
-    }
-    TextButton(onClick = {
-        Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear(); Affichage.design = 0; cfg.design = 0
-        cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; Source.entries.forEach { cfg.definirCouleur(it, 0L) }
-    }) { Text("Tout remettre comme à l'origine") }
 }
 
 /** Médiane et « 9 sur 10 » (90e centile) d'une liste de délais. */
@@ -999,7 +876,7 @@ private fun PageMiseAJour() {
     }
 }
 
-@Composable private fun Interrupteur(libelle: String, valeur: Boolean, aide: String? = null, maj: (Boolean) -> Unit) {
+@Composable internal fun Interrupteur(libelle: String, valeur: Boolean, aide: String? = null, maj: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { maj(!valeur) }.padding(vertical = 4.dp)) {
         Column(Modifier.weight(1f)) {
             Text(libelle)
