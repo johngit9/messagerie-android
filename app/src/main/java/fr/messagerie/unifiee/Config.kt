@@ -113,6 +113,7 @@ class Config(context: Context) {
     var couleurBandeau: Long get() = p.getLong("couleurBandeau", 0L); set(v) = p.edit().putLong("couleurBandeau", v).apply()
     /** SMS lus dans Messagerie aussi lus dans Google Messages (désactivé par défaut, choix de l'utilisateur). */
     var lusSmsGoogle: Boolean get() = p.getBoolean("lusSmsGoogle", false); set(v) = p.edit().putBoolean("lusSmsGoogle", v).apply()
+    var contactsDemandes: Boolean get() = p.getBoolean("contactsDemandes", false); set(v) = p.edit().putBoolean("contactsDemandes", v).apply()
     // Style des notifications (comme les applis officielles)
     var notifBulles: Boolean get() = p.getBoolean("notifBulles", true); set(v) = p.edit().putBoolean("notifBulles", v).apply()
     var notifBoutons: Boolean get() = p.getBoolean("notifBoutons", true); set(v) = p.edit().putBoolean("notifBoutons", v).apply()

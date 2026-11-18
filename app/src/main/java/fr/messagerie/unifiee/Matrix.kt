@@ -145,7 +145,7 @@ class Matrix(private val cfg: Config) {
      * SMS seulement, sur option des Réglages : marque le salon lu jusqu'à cet événement pour que la passerelle
      * le reporte dans Google Messages (accusé m.read ; les confirmations de lecture RCS du téléphone décident si le contact le voit).
      */
-    fun marquerLuSms(salon: String, evenement: String) {
+    fun marquerLuPasserelle(salon: String, evenement: String) {
         connecter()
         val corps = JSONObject().put("m.fully_read", evenement).put("m.read", evenement)
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/read_markers", "POST", jeton, corps.toString(), 15_000)
@@ -235,11 +235,16 @@ class Matrix(private val cfg: Config) {
         return j.getString("next_batch") to ids
     }
 
-    fun attendreNouveautes(depuis: String?): Pair<String, Boolean> {
+    /**
+     * Attend un nouveau message (long-poll). Écran éteint / appli en arrière-plan : attente plus longue
+     * (moins de réveils de la radio) et les seuls accusés de lecture ne déclenchent pas de synchro.
+     */
+    fun attendreNouveautes(depuis: String?, premierPlan: Boolean = true): Pair<String, Boolean> {
         connecter()
+        val attente = if (premierPlan) 30_000 else 55_000
         var chemin = "/_matrix/client/v3/sync?set_presence=${cfg.presence}&filter=${Http.enc(filtreVeille)}"
-        chemin += if (depuis != null) "&timeout=30000&since=${Http.enc(depuis)}" else "&timeout=0"
-        val j = get(chemin, 45_000)
+        chemin += if (depuis != null) "&timeout=$attente&since=${Http.enc(depuis)}" else "&timeout=0"
+        val j = get(chemin, attente + 15_000)
         val suivant = j.getString("next_batch")
         val salons = j.optJSONObject("rooms")?.optJSONObject("join")
         var nouveau = false
@@ -247,7 +252,7 @@ class Matrix(private val cfg: Config) {
             for (k in salons.keys()) {
                 val r = salons.getJSONObject(k)
                 if ((r.optJSONObject("timeline")?.optJSONArray("events")?.length() ?: 0) > 0 ||
-                    (r.optJSONObject("ephemeral")?.optJSONArray("events")?.length() ?: 0) > 0) { nouveau = true; break }
+                    (premierPlan && (r.optJSONObject("ephemeral")?.optJSONArray("events")?.length() ?: 0) > 0)) { nouveau = true; break }
             }
         }
         return suivant to nouveau

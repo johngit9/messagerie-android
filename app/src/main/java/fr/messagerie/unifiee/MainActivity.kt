@@ -59,6 +59,11 @@ open class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        } else if (!Moteur.cfg.contactsDemandes &&
+            checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            // Une seule fois : les numéros prennent le nom de votre carnet d'adresses (lecture locale)
+            Moteur.cfg.contactsDemandes = true
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 2)
         }
         Affichage.charger(Moteur.cfg)
         setContent { Theme { Racine(cleDemandee) } }
@@ -79,6 +84,7 @@ open class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         Moteur.auPremierPlan = false
+        Moteur.auRepos()
     }
 
     override fun onResume() {

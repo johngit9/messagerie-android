@@ -168,14 +168,31 @@ object Moteur {
 
     /** Démarre l'actualisation périodique et la réception en temps réel (idempotent). */
     fun demarrer() {
+        arretDiffere?.cancel()
         if (boucle?.isActive != true) boucle = portee.launch {
             while (isActive) {
                 actualiser()
-                delay(cfg.intervalle * 1000L)
+                // En arrière-plan, la réception en temps réel (long-poll) suffit : passage complet au plus tous les 15 min
+                delay(if (auPremierPlan) cfg.intervalle * 1000L else maxOf(cfg.intervalle, 900) * 1000L)
             }
         }
         if (veilleMatrix?.isActive != true && cfg.matrixConfigure) veilleMatrix = portee.launch { veilleMatrix() }
         if (veilleElement?.isActive != true && cfg.relaisConfigure) veilleElement = portee.launch { veilleElement() }
+    }
+
+    private var arretDiffere: Job? = null
+
+    /**
+     * Appli quittée : sans « réception en arrière-plan », tout s'arrête après 1 min (la synchro des 15 min
+     * de WorkManager prend le relais) ; rien ne tourne en continu et la batterie est épargnée.
+     */
+    fun auRepos() {
+        arretDiffere?.cancel()
+        if (cfg.veilleArrierePlan) return
+        arretDiffere = portee.launch {
+            delay(60_000)
+            if (!auPremierPlan && !Pastille.veilleActive) { boucle?.cancel(); veilleMatrix?.cancel(); veilleElement?.cancel() }
+        }
     }
 
     fun redemarrer() {
@@ -191,7 +208,7 @@ object Moteur {
         var pause = 2L
         while (portee.isActive) {
             try {
-                val (suivant, nouveau) = Matrix(cfg).attendreNouveautes(jeton)
+                val (suivant, nouveau) = Matrix(cfg).attendreNouveautes(jeton, auPremierPlan)
                 jeton = suivant; pause = 2
                 if (nouveau) actualiser()
             } catch (e: Exception) {
@@ -279,7 +296,7 @@ object Moteur {
             recharger()
             _etat.update { it.copy(derniereActualisation = System.currentTimeMillis()) }
             // Présence des contacts (lecture seule), au plus toutes les 2 min
-            portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
+            if (auPremierPlan) portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
             // Lu / traité venant de vos autres applis Messagerie (puis envoi des nôtres)
             runCatching { echangerEtatsPartages(envoyer = true) }
             // Fiabilité : messageries déconnectées (alerte + notification), au plus toutes les 5 min
@@ -345,8 +362,8 @@ object Moteur {
     fun recharger() {
         val e = _etat.value
         val convs = archive.conversations(e.depuis, 60).map { c ->
-            if (c.source == Source.TEAMS || c.estGroupe || !estUnNumero(c.nom)) c
-            else nomsCarnet.getOrPut(c.nom) { nomContactTelephone(c.nom.filter { it.isDigit() }) ?: "" }.takeIf { it.isNotEmpty() }?.let { c.copy(nom = it) } ?: c
+            if (c.source == Source.TEAMS || !estUnNumero(c.nom)) c
+            else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { c.copy(nom = it) } ?: c
         }
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
@@ -457,11 +474,18 @@ object Moteur {
         luDansGoogleMessages(c)
     }
 
-    /** SMS (option des Réglages > Confidentialité) : la conversation lue ici l'est aussi dans Google Messages. Jamais pour les autres messageries. */
+    /**
+     * Lu reporté dans l'appli officielle :
+     * - WhatsApp, toujours : la passerelle du serveur le transmet en « lu par moi » (read-self), jamais visible des contacts ;
+     * - SMS, sur option (Réglages > Confidentialité) : Google Messages.
+     * JAMAIS pour Telegram, Signal ni LinkedIn (l'accusé y serait visible).
+     */
     private fun luDansGoogleMessages(c: Conversation) {
-        if (c.source != Source.SMS || !cfg.lusSmsGoogle || !cfg.matrixConfigure) return
+        val permis = when (c.source) { Source.WHATSAPP -> true; Source.SMS -> cfg.lusSmsGoogle; else -> false }
+        if (!permis || !cfg.matrixConfigure) return
+        val salon = salonDe(c) ?: return
         val eid = c.messages.lastOrNull { it.cle.substringAfter(':').startsWith("$") }?.cle?.substringAfter(':') ?: return
-        portee.launch(Dispatchers.IO) { runCatching { Matrix(cfg).marquerLuSms(c.jid, eid) } }
+        portee.launch(Dispatchers.IO) { runCatching { Matrix(cfg).marquerLuPasserelle(salon, eid) } }
     }
 
     /** Date du dernier message (parfois plus récente que la date enregistrée de la conversation). */

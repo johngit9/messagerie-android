@@ -726,7 +726,7 @@ private fun PageConfidentialite(version: Int) {
     HorizontalDivider()
     var lusSms by remember(version) { mutableStateOf(cfg.lusSmsGoogle) }
     Interrupteur("SMS lus aussi dans Google Messages", lusSms,
-        "Un SMS lu ici (ou sur le Mac) passe en lu dans Google Messages. Gardez « Confirmations de lecture » désactivé dans Google Messages > Paramètres > RCS pour que vos contacts ne le voient pas. Jamais pour WhatsApp, Telegram, Signal ni LinkedIn.") {
+        "Un SMS lu ici (ou sur le Mac) passe en lu dans Google Messages. Gardez « Confirmations de lecture » désactivé dans Google Messages > Paramètres > RCS pour que vos contacts ne le voient pas. WhatsApp : toujours synchronisé, en « lu par moi » invisible des contacts. Jamais pour Telegram, Signal ni LinkedIn.") {
         lusSms = it; cfg.lusSmsGoogle = it
     }
     HorizontalDivider()

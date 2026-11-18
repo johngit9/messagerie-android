@@ -7,7 +7,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 - **Dépôt PUBLIC : aucune donnée personnelle** dans le code, les commits ou les fichiers : ni jeton, clé, adresse IP, nom d'hôte (Tailscale ou autre), numéro, contact ou message. Les adresses et jetons se saisissent dans l'app (Réglages) ou s'importent par fichier JSON (`messagerie-config.exemple.json` = modèle avec des valeurs fictives).
 - Ne jamais committer `messagerie-config.json`, `*.jks`, `*.keystore` (déjà dans `.gitignore`).
 - **Aucun envoi en test** : ne jamais appeler `POST /envoyer` du relais ni envoyer de message ou de réaction pour essayer. Un envoi part seulement sur un appui explicite de l'utilisateur.
-- **Discrétion** : lu / non lu reste local. Ne jamais envoyer d'accusé de lecture public (`m.read`) ni d'indicateur de saisie (`/typing`). Exception : Element lu en privé (`/lu-prive` du relais, m.read.private). Exception sur option (désactivée par défaut, Réglages > Confidentialité) : SMS lus → `read_markers` (m.read) du salon gmessages pour Google Messages ; jamais pour WhatsApp, Telegram, Signal, LinkedIn. Présence : seulement le statut choisi par l'utilisateur dans Réglages > Confidentialité (hors ligne par défaut, `set_presence` des /sync = ce choix).
+- **Discrétion** : lu / non lu reste local. Ne jamais envoyer d'accusé de lecture public (`m.read`) ni d'indicateur de saisie (`/typing`). Exception : Element lu en privé (`/lu-prive` du relais, m.read.private). Lus reportés dans l'appli officielle par `read_markers` (m.read + m.fully_read) : WhatsApp toujours (la passerelle du serveur les transmet en « read-self », invisible des contacts) ; SMS sur option (désactivée par défaut, Réglages > Confidentialité, Google Messages) ; JAMAIS pour Telegram, Signal, LinkedIn. Présence : seulement le statut choisi par l'utilisateur dans Réglages > Confidentialité (hors ligne par défaut, `set_presence` des /sync = ce choix).
 - Ne pas changer le package `fr.messagerie.unifiee` : sinon Android voit une autre appli (réglages perdus, pas de mise à jour par-dessus).
 - Textes de l'interface, commentaires et messages de commit **en français**.
 
@@ -34,7 +34,7 @@ App Android (Kotlin + Jetpack Compose + Material 3) qui regroupe SMS/RCS, WhatsA
 | `MiseAJour.kt` | Vérifie la dernière Release GitHub publique, télécharge et installe l'APK |
 | `Teams.kt` | Teams en lecture seule : service du serveur (port 8789 par défaut, même jeton que le relais), `/teams/messages?apres=<seq>` |
 | `Lecteur.kt` | Lecture des vocaux (MediaPlayer) |
-| `SynchroArrierePlan.kt` | WorkManager : synchro toutes les 15 min appli fermée (réglage « Vérifier régulièrement ») |
+| `SynchroArrierePlan.kt` | WorkManager : synchro toutes les 15 min appli fermée (réglage « Vérifier régulièrement ») ; sans « réception en arrière-plan », les boucles s'arrêtent 1 min après avoir quitté l'appli (`Moteur.auRepos`) |
 | `ui/Medias.kt` | Photos (Coil, plein écran), vidéos et documents ouverts via FileProvider |
 | `ui/Liste.kt`, `ui/Conversation.kt`, `ui/Reglages.kt`, `ui/Commun.kt` | Écrans Compose |
 | `ui/VueModeles.kt` | ViewModel par écran : `ListeVM` (filtres, recherche hors fil d'affichage), `ConversationVM` (historique, réactions) |
