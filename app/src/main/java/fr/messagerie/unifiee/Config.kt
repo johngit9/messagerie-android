@@ -109,6 +109,8 @@ class Config(context: Context) {
     /** Barre des messageries en bas de la liste. */
     var barreBas: Boolean get() = p.getBoolean("barreBas", true); set(v) = p.edit().putBoolean("barreBas", v).apply()
     var haut: Int get() = p.getInt("haut", 1); set(v) = p.edit().putInt("haut", v).apply()
+    /** Couleur du bandeau de l'écran d'accueil (0 = bleu nuit d'origine). */
+    var couleurBandeau: Long get() = p.getLong("couleurBandeau", 0L); set(v) = p.edit().putLong("couleurBandeau", v).apply()
     // Style des notifications (comme les applis officielles)
     var notifBulles: Boolean get() = p.getBoolean("notifBulles", true); set(v) = p.edit().putBoolean("notifBulles", v).apply()
     var notifBoutons: Boolean get() = p.getBoolean("notifBoutons", true); set(v) = p.edit().putBoolean("notifBoutons", v).apply()

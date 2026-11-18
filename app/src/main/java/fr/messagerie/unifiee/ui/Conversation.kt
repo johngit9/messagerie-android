@@ -824,7 +824,7 @@ private fun Bulle(
         Column(
             Modifier.widthIn(max = 300.dp)
                 .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerHigh, forme)
-                .combinedClickable(onClick = { if (modeSelection) basculer() }, onLongClick = { if (modeSelection) basculer() else menu = true })
+                .combinedClickable(onClick = { if (modeSelection) basculer() else ouvrirLien(m.texte, ctx) }, onLongClick = { if (modeSelection) basculer() else menu = true })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurface
@@ -1096,6 +1096,16 @@ private fun lancerAppel(ctx: Context, lien: String) {
 private val LIEN = Regex("""(?i)\b((?:https?://|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]}])""")
 
 /** Texte avec liens web cliquables (soulignés), ouverts dans le navigateur. */
+/** Appui sur une bulle qui contient un lien : ouvre le premier lien (appel Jitsi dans l'appli, sinon navigateur). */
+private fun ouvrirLien(t: String, ctx: Context) {
+    val brut = LIEN.find(t)?.value ?: return
+    val url = if (brut.startsWith("www.", true)) "https://$brut" else brut
+    val hote = runCatching { android.net.Uri.parse(url).host }.getOrNull()
+    if (hote != null && (hote == "meet.jit.si" || hote == runCatching { android.net.Uri.parse(Moteur.cfg.jitsi).host }.getOrNull()))
+        fr.messagerie.unifiee.AppelJitsi.ouvrir(Moteur.app, url)
+    else runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+}
+
 private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.AnnotatedString =
     androidx.compose.ui.text.buildAnnotatedString {
         var i = 0

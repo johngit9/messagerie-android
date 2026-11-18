@@ -142,10 +142,12 @@ object Affichage {
     var haut by androidx.compose.runtime.mutableIntStateOf(1)
     /** Barre des messageries en bas de la liste. */
     var barreBas by mutableStateOf(true)
+    /** Couleur du bandeau (0 = bleu nuit d'origine). */
+    var bandeau by androidx.compose.runtime.mutableLongStateOf(0L)
     /** Couleurs choisies par messagerie (absentes = couleur d'origine). */
     val couleurs = androidx.compose.runtime.mutableStateMapOf<Source, Long>()
     fun charger(c: Config) {
-        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design; haut = c.haut; barreBas = c.barreBas
+        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design; haut = c.haut; barreBas = c.barreBas; bandeau = c.couleurBandeau
         couleurs.clear(); Source.entries.forEach { s -> c.couleur(s).takeIf { it != 0L }?.let { couleurs[s] = it } }
     }
 }

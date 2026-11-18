@@ -162,9 +162,9 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                         },
                     )
                 } else LazyColumn(
-                    // Bandeau : les cartes remontent un peu sur le bandeau coloré
-                    Modifier.fillMaxSize().then(if (fr.messagerie.unifiee.Affichage.haut == 1 && choisies.isEmpty() && pannes.isEmpty()) Modifier.offset(y = (-14).dp) else Modifier),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
+                    // La liste commence sous le bandeau, sans le chevaucher
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = if (fr.messagerie.unifiee.Affichage.haut == 1) 10.dp else 4.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(when (fr.messagerie.unifiee.Affichage.design) { 1 -> 0.dp; 3 -> 12.dp; else -> 8.dp }),
                 ) {
                     items(visibles, key = { it.cle }) { c ->
@@ -642,7 +642,13 @@ fun apercuMessage(m: fr.messagerie.unifiee.Message): String = when (m.type) {
 
 /** Couleur du bandeau (style « Bandeau »). */
 @Composable
-internal fun couleurBandeau(): Color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF1A2350) else Color(0xFF22306E)
+internal fun couleurBandeau(): Color {
+    val sombre = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val choisie = fr.messagerie.unifiee.Affichage.bandeau
+    // Couleur choisie : un peu assombrie en thème sombre pour rester discrète
+    if (choisie != 0L) return Color(choisie).let { if (sombre) androidx.compose.ui.graphics.lerp(it, Color.Black, 0.25f) else it }
+    return if (sombre) Color(0xFF1A2350) else Color(0xFF22306E)
+}
 
 /**
  * Haut de liste compact : une ligne menu + recherche + réglages, puis les puces de filtre.

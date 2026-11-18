@@ -82,6 +82,10 @@ internal fun PageAffichage() {
                 }) { MiniEntete(v) }
             }
         }
+        if (Affichage.haut == 1) {
+            SousTitre("Couleur du bandeau")
+            RangeeCouleurs(Affichage.bandeau, 0xFF22306E) { Affichage.bandeau = it; cfg.couleurBandeau = it }
+        }
         SousTitre("Liste")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             listOf(0 to "Cartes", 1 to "Lignes", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->
@@ -147,8 +151,8 @@ internal fun PageAffichage() {
 
     OutlinedButton(onClick = {
         Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear()
-        Affichage.design = 0; Affichage.haut = 1; Affichage.barreBas = true
-        cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; cfg.design = 0; cfg.haut = 1; cfg.barreBas = true
+        Affichage.design = 0; Affichage.haut = 1; Affichage.barreBas = true; Affichage.bandeau = 0L
+        cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; cfg.design = 0; cfg.haut = 1; cfg.barreBas = true; cfg.couleurBandeau = 0L
         Source.entries.forEach { cfg.definirCouleur(it, 0L) }
     }, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Outlined.RestartAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
