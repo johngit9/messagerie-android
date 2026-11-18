@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icône à thème (Android 13+) : silhouette des deux bulles -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.86" android:scaleY="0.86">
+        <path android:fillColor="#FFFFFF" android:pathData="M30 30h26a10 10 0 0 1 10 10v12a10 10 0 0 1-10 10H44l-9 8v-8h-5a10 10 0 0 1-10-10V40a10 10 0 0 1 10-10z" android:fillAlpha="0.55" />
+        <path android:fillColor="#FFFFFF" android:pathData="M52 42h26a10 10 0 0 1 10 10v12a10 10 0 0 1-10 10h-5v8l-9-8H52a10 10 0 0 1-10-10V52a10 10 0 0 1 10-10z" />
+    </group>
+</vector>
