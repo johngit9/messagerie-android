@@ -150,9 +150,20 @@ object Moteur {
             _etat.debounce(1500).collect { e ->
                 runCatching { Raccourcis.mettreAJour(app, e) }
                 runCatching { Pastille.afficher(app, e.nombreMessagesNonLus(null)) }
+                runCatching { nettoyerNotifications(e) }
                 runCatching { WidgetNonLus.mettreAJour(app, e) }
             }
         }
+    }
+
+    /** Conversations devenues lues (ici, sur le Mac ou dans l'appli officielle) : leurs notifications disparaissent, et le point de l'icône avec. */
+    private fun nettoyerNotifications(e: Etat) {
+        if (Build.VERSION.SDK_INT < 26) return
+        val actives = app.getSystemService(NotificationManager::class.java).activeNotifications
+            .filter { it.notification.channelId?.startsWith("$CANAL_MESSAGES.") == true }.map { it.id }.toSet()
+        if (actives.isEmpty()) return
+        val nm = NotificationManagerCompat.from(app)
+        e.conversations.forEach { c -> val id = c.cle.hashCode(); if (id in actives && !e.estNonLue(c)) nm.cancel(id) }
     }
 
     /** Démarre l'actualisation périodique et la réception en temps réel (idempotent). */

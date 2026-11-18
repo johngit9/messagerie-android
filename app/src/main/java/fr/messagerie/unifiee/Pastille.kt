@@ -18,6 +18,7 @@ import androidx.core.app.NotificationManagerCompat
 object Pastille {
     private var dernier = -1
     private const val CANAL = "compteur"
+    private const val CANAL_SANS_POINT = "veille.discret"
     const val ID_COMPTEUR = 999
     /** Le service « à l'écoute » tourne : sa notification permanente porte alors le chiffre. */
     @Volatile var veilleActive = false
@@ -30,9 +31,11 @@ object Pastille {
     fun notification(ctx: Context, n: Int): android.app.Notification {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CANAL, "Nombre de messages non lus", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(true) })
+        // Tout est lu : la notification permanente passe sur un canal sans point sur l'icône
+        nm.createNotificationChannel(NotificationChannel(CANAL_SANS_POINT, "Réception en arrière-plan", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
         val pi = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val texte = when (n) { 0 -> "Tout est lu"; 1 -> "1 message non lu"; else -> "$n messages non lus" }
-        return NotificationCompat.Builder(ctx, CANAL)
+        return NotificationCompat.Builder(ctx, if (n > 0) CANAL else CANAL_SANS_POINT)
             .setSmallIcon(R.drawable.ic_bulle)
             .setContentTitle(if (veilleActive) "Messagerie à l'écoute" else texte)
             .setContentText(if (veilleActive) texte else "Toucher pour ouvrir Messagerie")
