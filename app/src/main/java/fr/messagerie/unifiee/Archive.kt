@@ -71,9 +71,12 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
                     put("cle", c.cle); put("source", c.source.id); put("ident", c.jid)
                     put("nom", c.nom); put("est_groupe", if (c.estGroupe) 1 else 0)
                 }
-                if (db.insertWithOnConflict("conversations", null, v, SQLiteDatabase.CONFLICT_IGNORE) == -1L && !garderNoms) {
+                if (db.insertWithOnConflict("conversations", null, v, SQLiteDatabase.CONFLICT_IGNORE) == -1L) {
                     v.remove("cle"); v.remove("source"); v.remove("ident")
-                    db.update("conversations", v, "cle = ?", arrayOf(c.cle))
+                    if (!garderNoms) db.update("conversations", v, "cle = ?", arrayOf(c.cle))
+                    // Noms gardés : on remplace quand même un numéro par un vrai nom (nom corrigé côté serveur)
+                    else if (c.nom.any { it.isLetter() })
+                        db.update("conversations", ContentValues().apply { put("nom", c.nom) }, "cle = ? AND nom NOT GLOB '*[A-Za-zÀ-ÿ]*'", arrayOf(c.cle))
                 }
             }
             db.setTransactionSuccessful()

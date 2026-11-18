@@ -111,6 +111,8 @@ class Config(context: Context) {
     var haut: Int get() = p.getInt("haut", 1); set(v) = p.edit().putInt("haut", v).apply()
     /** Couleur du bandeau de l'écran d'accueil (0 = bleu nuit d'origine). */
     var couleurBandeau: Long get() = p.getLong("couleurBandeau", 0L); set(v) = p.edit().putLong("couleurBandeau", v).apply()
+    /** SMS lus dans Messagerie aussi lus dans Google Messages (désactivé par défaut, choix de l'utilisateur). */
+    var lusSmsGoogle: Boolean get() = p.getBoolean("lusSmsGoogle", false); set(v) = p.edit().putBoolean("lusSmsGoogle", v).apply()
     // Style des notifications (comme les applis officielles)
     var notifBulles: Boolean get() = p.getBoolean("notifBulles", true); set(v) = p.edit().putBoolean("notifBulles", v).apply()
     var notifBoutons: Boolean get() = p.getBoolean("notifBoutons", true); set(v) = p.edit().putBoolean("notifBoutons", v).apply()

@@ -724,6 +724,12 @@ private fun PageConfidentialite(version: Int) {
     Interrupteur("Transmettre mes réactions aux contacts", reactions,
         "Désactivé, vos émoticônes restent sur ce téléphone. Rien ne part sans votre appui.") { reactions = it; cfg.envoyerReactions = it }
     HorizontalDivider()
+    var lusSms by remember(version) { mutableStateOf(cfg.lusSmsGoogle) }
+    Interrupteur("SMS lus aussi dans Google Messages", lusSms,
+        "Un SMS lu ici (ou sur le Mac) passe en lu dans Google Messages. Gardez « Confirmations de lecture » désactivé dans Google Messages > Paramètres > RCS pour que vos contacts ne le voient pas. Jamais pour WhatsApp, Telegram, Signal ni LinkedIn.") {
+        lusSms = it; cfg.lusSmsGoogle = it
+    }
+    HorizontalDivider()
     // Statut de présence choisi par vous
     val portee = rememberCoroutineScope()
     var presence by remember(version) { mutableStateOf(cfg.presence) }

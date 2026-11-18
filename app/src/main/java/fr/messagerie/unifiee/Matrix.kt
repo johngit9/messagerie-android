@@ -141,6 +141,17 @@ class Matrix(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "données du compte")
     }
 
+    /**
+     * SMS seulement, sur option des Réglages : marque le salon lu jusqu'à cet événement pour que la passerelle
+     * le reporte dans Google Messages (accusé m.read ; les confirmations de lecture RCS du téléphone décident si le contact le voit).
+     */
+    fun marquerLuSms(salon: String, evenement: String) {
+        connecter()
+        val corps = JSONObject().put("m.fully_read", evenement).put("m.read", evenement)
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/read_markers", "POST", jeton, corps.toString(), 15_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "lu SMS")
+    }
+
     fun definirPresence(etat: String) {
         connecter()
         val r = Http.requete("$base/_matrix/client/v3/presence/${Http.enc(utilisateur)}/status", "PUT", jeton,

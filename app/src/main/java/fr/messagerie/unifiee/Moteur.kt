@@ -344,7 +344,10 @@ object Moteur {
 
     fun recharger() {
         val e = _etat.value
-        val convs = archive.conversations(e.depuis, 60)
+        val convs = archive.conversations(e.depuis, 60).map { c ->
+            if (c.source == Source.TEAMS || c.estGroupe || !estUnNumero(c.nom)) c
+            else nomsCarnet.getOrPut(c.nom) { nomContactTelephone(c.nom.filter { it.isDigit() }) ?: "" }.takeIf { it.isNotEmpty() }?.let { c.copy(nom = it) } ?: c
+        }
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources,
@@ -411,8 +414,12 @@ object Moteur {
             val d = salons.optJSONObject(k) ?: continue
             val lu = d.optLong("lu"); val traite = d.optLong("traite")
             val local = e.etat(c)
-            if (lu > local.lue || traite > local.traitee)
+            if (lu > local.lue || traite > local.traitee) {
+                val etaitNonLue = e.estNonLue(c)
                 majEtat(c.cle, partager = false) { it.copy(lue = maxOf(it.lue, lu), traitee = maxOf(it.traitee, traite)) }
+                // Lu sur le Mac : aussi dans Google Messages (même option)
+                if (etaitNonLue && lu >= finDe(c)) luDansGoogleMessages(c)
+            }
         }
         if (!envoyer) return@withContext
         // 2. Ajouter les nôtres (60 derniers jours, pour rester petit)
@@ -447,6 +454,14 @@ object Moteur {
         if (!_etat.value.estNonLue(c)) return
         majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }
         luDansElement(c)
+        luDansGoogleMessages(c)
+    }
+
+    /** SMS (option des Réglages > Confidentialité) : la conversation lue ici l'est aussi dans Google Messages. Jamais pour les autres messageries. */
+    private fun luDansGoogleMessages(c: Conversation) {
+        if (c.source != Source.SMS || !cfg.lusSmsGoogle || !cfg.matrixConfigure) return
+        val eid = c.messages.lastOrNull { it.cle.substringAfter(':').startsWith("$") }?.cle?.substringAfter(':') ?: return
+        portee.launch(Dispatchers.IO) { runCatching { Matrix(cfg).marquerLuSms(c.jid, eid) } }
     }
 
     /** Date du dernier message (parfois plus récente que la date enregistrée de la conversation). */
@@ -460,7 +475,7 @@ object Moteur {
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
-        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }; luDansElement(c) }
+        e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }; luDansElement(c); luDansGoogleMessages(c) }
         runCatching { NotificationManagerCompat.from(app).cancelAll() }
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
@@ -864,6 +879,9 @@ object Moteur {
     fun separerContact(c: Conversation) {
         cfg.liensContacts = cfg.liensContacts + (c.cle to "seul:" + c.cle)
     }
+
+    /** Numéro → nom du carnet d'adresses du téléphone ("" = inconnu), pour ne pas relire les contacts à chaque fois. */
+    private val nomsCarnet = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
 
