@@ -498,6 +498,7 @@ private fun PageNotifications(version: Int) {
     var photo by remember(version) { mutableStateOf(cfg.notifPhoto) }
     var apercu by remember(version) { mutableIntStateOf(cfg.notifApercu) }
     var verrou by remember(version) { mutableIntStateOf(cfg.notifVerrouille) }
+    ApercuNotification(photo, boutons, bulles, apercu)
     Interrupteur("Photo du contact", photo, "Sinon, son initiale.") { photo = it; cfg.notifPhoto = it }
     Interrupteur("Boutons Répondre, Marquer comme lu, Silence", boutons) { boutons = it; cfg.notifBoutons = it }
     if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -508,6 +509,20 @@ private fun PageNotifications(version: Int) {
             runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
                 .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }) { Text("Autoriser les bulles dans Android") }
+        var etatBulles by remember { mutableStateOf(fr.messagerie.unifiee.Bulles.etat(ctx)) }
+        var essai by remember { mutableStateOf<String?>(null) }
+        // Revérifié au retour des réglages Android
+        val cycleBulles = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(cycleBulles) {
+            val o = androidx.lifecycle.LifecycleEventObserver { _, ev -> if (ev == androidx.lifecycle.Lifecycle.Event.ON_RESUME) etatBulles = fr.messagerie.unifiee.Bulles.etat(ctx) }
+            cycleBulles.lifecycle.addObserver(o); onDispose { cycleBulles.lifecycle.removeObserver(o) }
+        }
+        Explication(etatBulles)
+        OutlinedButton(onClick = {
+            essai = fr.messagerie.unifiee.Bulles.essayer(ctx)
+                ?: "Bulle d'essai affichée (rien n'est envoyé). Si elle n'apparaît pas, autorisez les bulles pour « Toutes les conversations »."
+        }) { Text("Essayer une bulle") }
+        essai?.let { Explication(it) }
     }
     Text("Contenu affiché", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Choix(listOf(0 to "Le message", 1 to "« Nouveau message »"), apercu) { apercu = it; cfg.notifApercu = it }
@@ -560,10 +575,25 @@ private fun PageNotifications(version: Int) {
         Explication("Une messagerie décochée sonne normalement, même pendant les heures de silence.")
     }
     HorizontalDivider()
-    Text("Réception", fontWeight = FontWeight.SemiBold)
-    Interrupteur("Rester à l'écoute en arrière-plan", veille, "Messages reçus en quelques secondes, appli fermée. Affiche une notification permanente.") {
-        veille = it; cfg.veilleArrierePlan = it; ServiceVeille.mettreAJour(ctx)
+    Text("Réception et batterie", fontWeight = FontWeight.SemiBold)
+    var economie by remember(version) { mutableStateOf(cfg.economie) }
+    val mode = if (!veille) 2 else if (economie) 1 else 0
+    val modes = listOf(1 to "Temps réel économe", 0 to "Temps réel", 2 to "Économie max")
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        modes.forEachIndexed { i, (v, l) ->
+            SegmentedButton(selected = mode == v, onClick = {
+                veille = v != 2; cfg.veilleArrierePlan = veille
+                if (v != 2) { economie = v == 1; cfg.economie = economie }
+                ServiceVeille.mettreAJour(ctx)
+            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
+                label = { Text(l, fontSize = 12.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center) })
+        }
     }
+    Explication(when (mode) {
+        1 -> "Recommandé. Messages reçus tout de suite, appli fermée comprise. En arrière-plan, l'appli se réveille moins souvent et ignore les accusés de lecture. Notification permanente discrète."
+        0 -> "Messages reçus tout de suite, et ✓✓ / présences mis à jour en continu. Consomme un peu plus."
+        else -> "Rien ne tourne appli fermée : messages vérifiés environ toutes les 15 min. Le moins de batterie, mais avec du retard."
+    })
     Interrupteur("Vérifier régulièrement appli fermée", fond, "Environ toutes les 15 min (géré par Android), sans notification permanente.") {
         fond = it; cfg.synchroArrierePlan = it; fr.messagerie.unifiee.SynchroArrierePlan.programmer(ctx)
     }

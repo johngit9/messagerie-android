@@ -38,7 +38,13 @@ object Raccourcis {
                 .setRank(rang)
                 .build()
         }
-        runCatching { ShortcutManagerCompat.setDynamicShortcuts(ctx, liste) }
+        // Pas de setDynamicShortcuts : il effacerait les raccourcis de conversation, indispensables aux bulles
+        runCatching {
+            val gardes = liste.map { it.id }.toSet()
+            val anciens = ShortcutManagerCompat.getDynamicShortcuts(ctx).map { it.id }.filter { it.startsWith("source.") && it !in gardes }
+            if (anciens.isNotEmpty()) ShortcutManagerCompat.removeDynamicShortcuts(ctx, anciens)
+            liste.forEach { ShortcutManagerCompat.pushDynamicShortcut(ctx, it) }
+        }
     }
 
     /** Icône ronde à la couleur de la messagerie, avec le nombre de non-lus (ou l'initiale). */

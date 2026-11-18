@@ -173,7 +173,7 @@ object Moteur {
             while (isActive) {
                 actualiser()
                 // En arrière-plan, la réception en temps réel (long-poll) suffit : passage complet au plus tous les 15 min
-                delay(if (auPremierPlan) cfg.intervalle * 1000L else maxOf(cfg.intervalle, 900) * 1000L)
+                delay(if (auPremierPlan || !cfg.economie) cfg.intervalle * 1000L else maxOf(cfg.intervalle, 900) * 1000L)
             }
         }
         if (veilleMatrix?.isActive != true && cfg.matrixConfigure) veilleMatrix = portee.launch { veilleMatrix() }
@@ -208,7 +208,7 @@ object Moteur {
         var pause = 2L
         while (portee.isActive) {
             try {
-                val (suivant, nouveau) = Matrix(cfg).attendreNouveautes(jeton, auPremierPlan)
+                val (suivant, nouveau) = Matrix(cfg).attendreNouveautes(jeton, auPremierPlan || !cfg.economie)
                 jeton = suivant; pause = 2
                 if (nouveau) actualiser()
             } catch (e: Exception) {

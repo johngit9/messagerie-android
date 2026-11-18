@@ -47,7 +47,7 @@ object Bulles {
     }
 
     /** Publie le raccourci de la conversation et branche la bulle sur la notification. */
-    fun preparer(ctx: Context, b: NotificationCompat.Builder, c: Conversation, contact: Person) {
+    fun preparer(ctx: Context, b: NotificationCompat.Builder, c: Conversation, contact: Person, essai: Boolean = false): Boolean {
         val icone = IconCompat.createWithAdaptiveBitmap(image(ctx, c))
         val id = idRaccourci(c)
         val ouvrir = Intent(ctx, MainActivity::class.java).setAction(Intent.ACTION_VIEW).putExtra("cle", c.cle)
@@ -61,12 +61,41 @@ object Bulles {
             .setLocusId(LocusIdCompat(id))
             .setPerson(contact)
             .build()
-        if (runCatching { ShortcutManagerCompat.pushDynamicShortcut(ctx, raccourci) }.isFailure) return
+        if (runCatching { ShortcutManagerCompat.pushDynamicShortcut(ctx, raccourci) }.isFailure) return false
         b.setShortcutId(id).setLocusId(LocusIdCompat(id))
-        if (!Moteur.cfg.notifBulles) return
+        if (!Moteur.cfg.notifBulles && !essai) return true
         val intention = Intent(ctx, BulleActivity::class.java).setAction(Intent.ACTION_VIEW).putExtra("cle", c.cle)
         val pi = PendingIntent.getActivity(ctx, ("bulle" + c.cle).hashCode(), intention,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
-        b.setBubbleMetadata(NotificationCompat.BubbleMetadata.Builder(pi, icone).setDesiredHeight(640).build())
+        b.setBubbleMetadata(NotificationCompat.BubbleMetadata.Builder(pi, icone).setDesiredHeight(640)
+            .setAutoExpandBubble(essai).setSuppressNotification(essai).build())
+        return true
+    }
+
+    /** Ce qu'Android autorise pour les bulles de l'appli (texte pour les Réglages). */
+    fun etat(ctx: Context): String {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 31) return when (nm.bubblePreference) {
+            android.app.NotificationManager.BUBBLE_PREFERENCE_ALL -> "Android : bulles autorisées pour toutes les conversations."
+            android.app.NotificationManager.BUBBLE_PREFERENCE_SELECTED -> "Android : bulles seulement pour les conversations choisies (icône bulle en bas d'une notification)."
+            else -> "Android : bulles désactivées pour Messagerie. Touchez « Autoriser les bulles » et choisissez « Toutes les conversations »."
+        }
+        @Suppress("DEPRECATION")
+        return if (nm.areBubblesAllowed()) "Android : bulles autorisées." else "Android : bulles désactivées pour Messagerie."
+    }
+
+    /** Bulle d'essai locale (rien n'est envoyé) sur la conversation la plus récente ; null si tout va bien, sinon la raison. */
+    fun essayer(ctx: Context): String? {
+        if (android.os.Build.VERSION.SDK_INT < 30) return "Il faut Android 11 ou plus."
+        val c = Moteur.etat.value.conversations.filter { it.source != Source.TEAMS }.maxByOrNull { it.derniere }
+            ?: return "Aucune conversation pour l'essai."
+        val contact = Person.Builder().setName(c.nom.ifEmpty { "Contact" }).setKey(c.cle).setIcon(IconCompat.createWithBitmap(image(ctx, c))).build()
+        val style = NotificationCompat.MessagingStyle(Person.Builder().setName("Vous").build())
+            .addMessage("Essai de bulle : touchez-la pour ouvrir la conversation.", System.currentTimeMillis(), contact)
+        val b = NotificationCompat.Builder(ctx, Moteur.canalMessages(c.source)).setSmallIcon(R.drawable.ic_bulle)
+            .setStyle(style).setCategory(NotificationCompat.CATEGORY_MESSAGE).setSilent(true)
+        if (!preparer(ctx, b, c, contact, essai = true)) return "Android a refusé le raccourci de la conversation."
+        return try { androidx.core.app.NotificationManagerCompat.from(ctx).notify(c.cle.hashCode(), b.build()); null }
+        catch (_: SecurityException) { "Les notifications de Messagerie sont désactivées." }
     }
 }

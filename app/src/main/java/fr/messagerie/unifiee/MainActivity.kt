@@ -66,6 +66,8 @@ open class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 2)
         }
         Affichage.charger(Moteur.cfg)
+        // Demande de l'utilisateur (18/11) : messages en temps réel, appli fermée comprise
+        if (!Moteur.cfg.tempsReelActive) { Moteur.cfg.tempsReelActive = true; Moteur.cfg.veilleArrierePlan = true }
         setContent { Theme { Racine(cleDemandee) } }
     }
 
@@ -98,12 +100,9 @@ open class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun Theme(contenu: @Composable () -> Unit) {
-    val sombre = when (Affichage.theme) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
-    val ctx = LocalContext.current
-    // Palette de la marque (indigo), identique sur tous les téléphones.
-    val couleurs = if (sombre) darkColorScheme(
+/** Palette de la marque (indigo), identique sur tous les téléphones ; sert aussi aux aperçus des Réglages. */
+fun paletteMessagerie(sombre: Boolean): androidx.compose.material3.ColorScheme =
+if (sombre) darkColorScheme(
         primary = Color(0xFFB9C3FF), onPrimary = Color(0xFF14267B), primaryContainer = Color(0xFF2E3F92), onPrimaryContainer = Color(0xFFDDE1FF),
         secondary = Color(0xFFC3C5DD), secondaryContainer = Color(0xFF424659), onSecondaryContainer = Color(0xFFDFE1F9),
         background = Color(0xFF111318), surface = Color(0xFF111318),
@@ -116,6 +115,12 @@ fun Theme(contenu: @Composable () -> Unit) {
         surfaceVariant = Color(0xFFECEEF2), outlineVariant = Color(0xFFECEEF2),
         surfaceContainer = Color(0xFFEFF1F4), surfaceContainerHigh = Color(0xFFE9EBEF), surfaceContainerLow = Color.White,
     )
+
+@Composable
+fun Theme(contenu: @Composable () -> Unit) {
+    val sombre = when (Affichage.theme) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
+    val ctx = LocalContext.current
+    val couleurs = paletteMessagerie(sombre)
     val base = if (Affichage.dynamique && Build.VERSION.SDK_INT >= 31)
         (if (sombre) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)) else couleurs
     // Couleur principale choisie dans Réglages > Apparence

@@ -46,6 +46,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.outlined.BubbleChart
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -79,7 +87,7 @@ internal fun PageAffichage() {
                     Affichage.haut = v; cfg.haut = v
                     // Épuré va avec la liste en lignes ; Bandeau avec les cartes
                     if (v == 2) { Affichage.design = 1; cfg.design = 1 } else if (v == 1 && Affichage.design == 1) { Affichage.design = 0; cfg.design = 0 }
-                }) { MiniEntete(v) }
+                }) { Reduit(v, Affichage.design, Affichage.barreBas) }
             }
         }
         if (Affichage.haut == 1) {
@@ -89,7 +97,7 @@ internal fun PageAffichage() {
         SousTitre("Liste")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             listOf(0 to "Cartes", 1 to "Lignes", 2 to "Colorée", 3 to "Aérée").forEach { (v, nom) ->
-                Tuile(nom, Affichage.design == v, Modifier.weight(1f), clic = { Affichage.design = v; cfg.design = v }) { MiniListe(v) }
+                Tuile(nom, Affichage.design == v, Modifier.weight(1f), clic = { Affichage.design = v; cfg.design = v }) { Reduit(Affichage.haut, v, Affichage.barreBas) }
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 2.dp))
@@ -99,8 +107,9 @@ internal fun PageAffichage() {
 
     CarteRubrique(Icons.Outlined.Palette, "Thème et couleur") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(Triple(0, "Auto", Icons.Outlined.BrightnessAuto), Triple(1, "Clair", Icons.Outlined.LightMode), Triple(2, "Sombre", Icons.Outlined.DarkMode))
-                .forEach { (v, nom, icone) -> TuileIcone(nom, icone, Affichage.theme == v, Modifier.weight(1f)) { Affichage.theme = v; cfg.theme = v } }
+            listOf(0 to "Auto", 1 to "Clair", 2 to "Sombre").forEach { (v, nom) ->
+                Tuile(nom, Affichage.theme == v, Modifier.weight(1f), clic = { Affichage.theme = v; cfg.theme = v }) { MiniTheme(v) }
+            }
         }
         Explication("Auto suit le mode clair ou sombre du téléphone.")
         if (android.os.Build.VERSION.SDK_INT >= 31) {
@@ -193,7 +202,7 @@ private fun Tuile(nom: String, actif: Boolean, modifier: Modifier, clic: () -> U
         .background(if (actif) cs.primaryContainer.copy(alpha = 0.35f) else Color.Transparent)
         .clickable(onClick = clic).padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Box(Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(7.dp)).background(cs.background)) { miniature() }
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(cs.background)) { miniature() }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (actif) { Icon(Icons.Outlined.Check, null, Modifier.size(13.dp), tint = cs.primary); Spacer(Modifier.width(2.dp)) }
             Text(nom, fontSize = 12.sp, fontWeight = if (actif) FontWeight.Bold else FontWeight.Normal,
@@ -259,19 +268,27 @@ private val EXEMPLES = listOf(
     Triple(Source.WHATSAPP, "Camille", "On se voit demain à 10 h ?"),
     Triple(Source.SMS, "Club de vélo", "Sortie dimanche matin"),
     Triple(Source.TELEGRAM, "Julien", "Merci pour l'info !"),
+    Triple(Source.SIGNAL, "Sophie", "Photo"),
+    Triple(Source.ELEMENT, "Équipe projet", "Réunion déplacée à 14 h"),
 )
 
 /** Mini écran des messages qui suit en direct les réglages choisis. */
 @Composable
 private fun ApercuAccueil() {
-    val cs = MaterialTheme.colorScheme
-    val design = Affichage.design
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Aperçu", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = cs.onSurfaceVariant)
-        Column(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(20.dp))
+        Text("Aperçu", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        EcranMini(Affichage.haut, Affichage.design, Affichage.barreBas, Modifier.fillMaxWidth().height(250.dp))
+    }
+}
+
+/** L'écran des messages en vrai (vrais textes, logos, couleurs), pour l'aperçu et les vignettes. */
+@Composable
+private fun EcranMini(haut: Int, design: Int, barreBas: Boolean, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+        Column(modifier.clip(RoundedCornerShape(20.dp))
             .border(1.dp, cs.outlineVariant, RoundedCornerShape(20.dp)).background(cs.background)) {
             // En-tête
-            when (Affichage.haut) {
+            when (haut) {
                 1 -> Column(Modifier.fillMaxWidth().background(couleurBandeau()).padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Messages", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -333,9 +350,80 @@ private fun ApercuAccueil() {
                 }
             }
             // Barre du bas
-            if (Affichage.barreBas) Row(Modifier.fillMaxWidth().background(cs.surfaceContainer).padding(vertical = 6.dp),
+            if (barreBas) Row(Modifier.fillMaxWidth().background(cs.surfaceContainer).padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.SIGNAL, Source.ELEMENT).forEach { LogoSource(it, 16.dp) }
+            }
+        }
+}
+
+/** Vignette : le vrai écran, réduit (comme une capture). */
+@Composable
+private fun Reduit(haut: Int, design: Int, barreBas: Boolean) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(300f / 420f).clipToBounds()) {
+        val s = maxWidth / 300.dp
+        Box(Modifier.requiredSize(300.dp, 420.dp).graphicsLayer { scaleX = s; scaleY = s }) {
+            EcranMini(haut, design, barreBas, Modifier.fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun EcranTheme(sombre: Boolean) {
+    val p = fr.messagerie.unifiee.paletteMessagerie(sombre)
+    MaterialTheme(colorScheme = p) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides p.onSurface) {
+            Reduit(Affichage.haut, Affichage.design, Affichage.barreBas)
+        }
+    }
+}
+
+/** Vignette du thème : clair, sombre, ou moitié-moitié pour « Auto ». */
+@Composable
+private fun MiniTheme(v: Int) {
+    when (v) {
+        1 -> EcranTheme(false)
+        2 -> EcranTheme(true)
+        else -> Box {
+            EcranTheme(false)
+            Box(Modifier.matchParentSize().drawWithContent { clipRect(left = size.width / 2) { this@drawWithContent.drawContent() } }) { EcranTheme(true) }
+        }
+    }
+}
+
+/** Notification telle qu'elle apparaîtra, selon les réglages choisis. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun ApercuNotification(photo: Boolean, boutons: Boolean, bulles: Boolean, apercu: Int) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cs.surfaceContainerHigh).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LogoSource(Source.WHATSAPP, 16.dp); Spacer(Modifier.width(6.dp))
+            Text("Messagerie · WhatsApp · maintenant", fontSize = 12.sp, color = cs.onSurfaceVariant)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(
+                if (photo) androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFF4A261), Color(0xFFE76F51)))
+                else androidx.compose.ui.graphics.SolidColor(Source.WHATSAPP.teinte())), contentAlignment = Alignment.Center) {
+                if (photo) Icon(Icons.Filled.Face, null, Modifier.size(34.dp), tint = Color.White.copy(alpha = 0.95f))
+                else Text("C", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Camille", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(if (apercu == 1) "Nouveau message" else "On se voit demain à 10 h ?", fontSize = 14.sp, color = cs.onSurfaceVariant)
+            }
+        }
+        if (boutons || bulles) Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.layout.FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (boutons) listOf("Répondre", "Marquer comme lu", "Silence").forEach {
+                    Text(it, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.background(cs.surfaceContainerHighest, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 7.dp))
+                }
+            }
+            if (bulles) Box(Modifier.size(34.dp).background(cs.surfaceContainerHighest, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.BubbleChart, "Bulle", Modifier.size(18.dp))
             }
         }
     }
