@@ -490,6 +490,15 @@ private fun PageNotifications(version: Int) {
     var fond by remember(version) { mutableStateOf(cfg.synchroArrierePlan) }
 
     EtatNotifications()
+    if (android.os.Build.VERSION.SDK_INT >= 30) {
+        HorizontalDivider()
+        Text("Bulles de conversation", fontWeight = FontWeight.SemiBold)
+        Explication("Une conversation s'ouvre dans une bulle ronde (photo du contact) par-dessus les autres applis. Autorisez-les ici, ou touchez l'icône bulle en bas d'une notification.")
+        OutlinedButton(onClick = {
+            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text("Régler les bulles") }
+    }
     HorizontalDivider()
     Text("Par messagerie", fontWeight = FontWeight.SemiBold)
     Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")

@@ -46,6 +46,13 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".BulleActivity"
+            android:exported="false"
+            android:allowEmbedded="true"
+            android:resizeableActivity="true"
+            android:documentLaunchMode="always"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".AppelJitsi"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"

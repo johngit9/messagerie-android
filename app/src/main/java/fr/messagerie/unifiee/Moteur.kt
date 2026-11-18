@@ -1056,6 +1056,14 @@ object Moteur {
 
     private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()
 
+    /** Photo de contact déjà téléchargée (sans réseau), pour les notifications et les bulles. */
+    fun photoEnCache(conv: String): java.io.File? {
+        photos[conv]?.let { return it }
+        val mxc = archive.avatar(conv) ?: return null
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(mxc.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        return java.io.File(java.io.File(app.cacheDir, "avatars"), "$hash.img").takeIf { it.exists() && it.length() > 0 }
+    }
+
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
     suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
         photos[conv]?.let { return@withContext it }
@@ -1165,15 +1173,20 @@ object Moteur {
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val canal = "$CANAL_MESSAGES.${c.source.id}"
         if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })
+            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH).apply {
+                setShowBadge(false); if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
+            })
         if (Build.VERSION.SDK_INT >= 26) runCatching { app.getSystemService(NotificationManager::class.java).deleteNotificationChannel("messages.${c.source.id}") }
         val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(app, c.cle.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val moi = androidx.core.app.Person.Builder().setName("Vous").build()
         val style = NotificationCompat.MessagingStyle(moi).setConversationTitle(if (c.estGroupe) c.nom else null).setGroupConversation(c.estGroupe)
+        // Le contact (ou le groupe) avec sa photo : notification « conversation » et bulle
+        val contact = androidx.core.app.Person.Builder().setName(c.nom.ifEmpty { "Contact" }).setKey(c.cle)
+            .setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(Bulles.image(app, c))).build()
         msgs.takeLast(6).forEach { m ->
-            style.addMessage(m.texteUtile, m.date, androidx.core.app.Person.Builder().setName(if (c.estGroupe) m.auteur else c.nom).build())
+            style.addMessage(m.texteUtile, m.date, if (c.estGroupe) androidx.core.app.Person.Builder().setName(m.auteur).build() else contact)
         }
         val n = NotificationCompat.Builder(app, canal)
             .setSmallIcon(R.drawable.ic_bulle)
@@ -1188,7 +1201,7 @@ object Moteur {
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setGroup("messages")
-            .also { if (c.cle != "essai") ActionsNotification.ajouter(app, it, c) }
+            .also { if (c.cle != "essai") { ActionsNotification.ajouter(app, it, c); if (Build.VERSION.SDK_INT >= 30) Bulles.preparer(app, it, c, contact) } }
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }

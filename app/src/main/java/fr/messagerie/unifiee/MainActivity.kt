@@ -48,7 +48,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
     private val cleDemandee = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
