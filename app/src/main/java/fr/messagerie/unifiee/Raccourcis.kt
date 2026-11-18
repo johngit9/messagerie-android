@@ -26,7 +26,8 @@ object Raccourcis {
         val signature = comptes.entries.joinToString { "${it.key.id}=${it.value}" }
         if (signature == dernier) return   // rien de changé : on n'appelle pas le système
         dernier = signature
-        val max = ShortcutManagerCompat.getMaxShortcutCountPerActivity(ctx).coerceIn(1, 5)
+        // Place laissée aux raccourcis de conversation : sans eux, Android retire la bulle aussitôt
+        val max = (ShortcutManagerCompat.getMaxShortcutCountPerActivity(ctx) - 3).coerceIn(1, 3)
         val liste = presentes.sortedByDescending { comptes[it] ?: 0 }.take(max).mapIndexed { rang, s ->
             val n = comptes[s] ?: 0
             ShortcutInfoCompat.Builder(ctx, "source.${s.name}")
@@ -44,6 +45,8 @@ object Raccourcis {
             val anciens = ShortcutManagerCompat.getDynamicShortcuts(ctx).map { it.id }.filter { it.startsWith("source.") && it !in gardes }
             if (anciens.isNotEmpty()) ShortcutManagerCompat.removeDynamicShortcuts(ctx, anciens)
             liste.forEach { ShortcutManagerCompat.pushDynamicShortcut(ctx, it) }
+            // Les conversations en bulle repassent en dernier : ce sont les plus récentes, jamais évincées
+            Bulles.recents().forEach { ShortcutManagerCompat.pushDynamicShortcut(ctx, it) }
         }
     }
 

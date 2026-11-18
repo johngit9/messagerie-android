@@ -28,6 +28,10 @@ object Bulles {
 
     fun idRaccourci(c: Conversation) = "conv:" + c.cle
 
+    /** Raccourcis des dernières conversations notifiées (au plus 3), à garder publiés pour leurs bulles. */
+    private val derniers = LinkedHashMap<String, ShortcutInfoCompat>()
+    fun recents(): List<ShortcutInfoCompat> = synchronized(derniers) { derniers.values.toList() }
+
     /** Photo du contact déjà en cache (pas de téléchargement ici), sinon initiale sur la couleur de la messagerie. */
     fun image(ctx: Context, c: Conversation): Bitmap {
         val photo = if (!Moteur.cfg.notifPhoto) null else Moteur.photoEnCache(c.cle)?.let { f -> runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() }
@@ -62,6 +66,7 @@ object Bulles {
             .setPerson(contact)
             .build()
         if (runCatching { ShortcutManagerCompat.pushDynamicShortcut(ctx, raccourci) }.isFailure) return false
+        synchronized(derniers) { derniers.remove(id); derniers[id] = raccourci; while (derniers.size > 3) derniers.remove(derniers.keys.first()) }
         b.setShortcutId(id).setLocusId(LocusIdCompat(id))
         if (!Moteur.cfg.notifBulles && !essai) return true
         val intention = Intent(ctx, BulleActivity::class.java).setAction(Intent.ACTION_VIEW).putExtra("cle", c.cle)
