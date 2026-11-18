@@ -118,7 +118,8 @@ import kotlinx.coroutines.withContext
 private sealed class Ligne(val cle: String) {
     class Jour(val date: Long) : Ligne("jour-$date")
     data object NonLus : Ligne("nonlus")
-    class Msg(val m: Message, val auteur: Boolean) : Ligne(m.cle)
+    /** auteur = premier du bloc (même expéditeur, à moins de 5 min) ; dernier = fin du bloc. */
+    class Msg(val m: Message, val auteur: Boolean, val dernier: Boolean = true) : Ligne(m.cle)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -245,9 +246,17 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         historique.forEachIndexed { i, m ->
             val prec = historique.getOrNull(i - 1)
             if (prec == null || jourComplet(prec.date) != jourComplet(m.date)) l.add(Ligne.Jour(m.date))
-            if (!nonLusPlace && luAvant != null && !m.deMoi && m.date > luAvant) { l.add(Ligne.NonLus); nonLusPlace = true }
-            val suite = prec != null && prec.auteur == m.auteur && m.date - prec.date < 300_000
+            val nouveauJour = prec == null || jourComplet(prec.date) != jourComplet(m.date)
+            var marque = false
+            if (!nonLusPlace && luAvant != null && !m.deMoi && m.date > luAvant) { l.add(Ligne.NonLus); nonLusPlace = true; marque = true }
+            val suite = prec != null && !nouveauJour && !marque && prec.deMoi == m.deMoi && prec.auteur == m.auteur && m.date - prec.date < 300_000
             l.add(Ligne.Msg(m, !suite))
+        }
+        // Fin de bloc : la ligne suivante n'est pas un message, ou commence un autre bloc
+        for (i in l.indices) {
+            val x = l[i] as? Ligne.Msg ?: continue
+            val n = l.getOrNull(i + 1)
+            if (n is Ligne.Msg && !n.auteur) l[i] = Ligne.Msg(x.m, x.auteur, dernier = false)
         }
         l
     }
@@ -400,10 +409,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 l.m.cle == courant -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
                                 else -> Color.Transparent
                             }, RoundedCornerShape(14.dp))
-                            .then(if (modeSelection) Modifier.clickable { basculerSelection(l.m) } else Modifier),
-                            verticalAlignment = Alignment.CenterVertically) {
+                            .then(if (modeSelection) Modifier.clickable { basculerSelection(l.m) } else Modifier)
+                            .padding(top = if (l.auteur) 10.dp else 0.dp),
+                            verticalAlignment = Alignment.Bottom) {
                             if (modeSelection) { Spacer(Modifier.width(4.dp)); PastilleSelection(l.m.cle in selection, c.source.teinte()); Spacer(Modifier.width(6.dp)) }
-                            Box(Modifier.weight(1f)) { Bulle(l.m, c, l.auteur,
+                            // Groupe : pastille de l'expéditeur au bas de son bloc de messages
+                            if (c.estGroupe && !l.m.deMoi) {
+                                Box(Modifier.padding(bottom = 2.dp).size(30.dp)) { if (l.dernier) PastilleAuteur(l.m.auteur) }
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Box(Modifier.weight(1f)) { Bulle(l.m, c, l.auteur, dernier = l.dernier,
                             reactions = reactions[l.m.cle].orEmpty(), maReaction = mesReactions[l.m.cle],
                             repondre = { reponseA = l.m },
                             copier = { copier(it, l.m.texteUtile); afficher("Texte copié") },
@@ -767,12 +782,24 @@ private fun copier(ctx: Context, texte: String) {
     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("message", texte))
 }
 
+/** Couleur propre à chaque expéditeur d'un groupe (nom et pastille), lisible en clair comme en sombre. */
+private val COULEURS_AUTEURS = listOf(0xFF1E88E5, 0xFFD81B60, 0xFF8E24AA, 0xFF43A047, 0xFFF4511E, 0xFF00897B, 0xFF6D4C41, 0xFF3949AB, 0xFFC0CA33, 0xFF5E35B1)
+private fun couleurAuteur(nom: String) = Color(COULEURS_AUTEURS[Math.floorMod(nom.hashCode(), COULEURS_AUTEURS.size)])
+
+@Composable
+private fun PastilleAuteur(nom: String) {
+    val initiale = nom.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "?"
+    Box(Modifier.size(30.dp).background(couleurAuteur(nom), CircleShape), contentAlignment = Alignment.Center) {
+        Text(initiale, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 private val emojisRapides = listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "✅", "👀")
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun Bulle(
-    m: Message, c: Conversation, afficherAuteur: Boolean,
+    m: Message, c: Conversation, afficherAuteur: Boolean, dernier: Boolean = true,
     reactions: List<Reaction>, maReaction: MaReaction?,
     repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
     afficherMessage: (String) -> Unit = {},
@@ -785,16 +812,18 @@ private fun Bulle(
     val moi = m.deMoi
     // Mon émoji : celui posé dans l'appli, sinon une réaction « de moi » venue d'un autre appareil.
     val monEmoji = maReaction?.emoji ?: reactions.firstOrNull { it.deMoi }?.emoji
-    Column(Modifier.fillMaxWidth().padding(top = if (afficherAuteur) 6.dp else 1.dp),
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp),
         horizontalAlignment = if (moi) Alignment.End else Alignment.Start) {
         if (c.estGroupe && !moi && afficherAuteur) {
-            Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(), modifier = Modifier.padding(start = 10.dp, bottom = 2.dp))
+            Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = couleurAuteur(m.auteur), modifier = Modifier.padding(start = 12.dp, bottom = 3.dp))
         }
-        val forme = if (moi) RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
+        // Bloc de messages : coins resserrés du côté de l'expéditeur entre deux bulles du même bloc
+        val haut = if (afficherAuteur) 18.dp else 5.dp
+        val bas = if (dernier) 18.dp else 5.dp
+        val forme = if (moi) RoundedCornerShape(18.dp, haut, bas, 18.dp) else RoundedCornerShape(haut, 18.dp, 18.dp, bas)
         Column(
             Modifier.widthIn(max = 300.dp)
-                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerLow, forme)
-                .then(if (moi) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, forme))
+                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerHigh, forme)
                 .combinedClickable(onClick = { if (modeSelection) basculer() }, onLongClick = { if (modeSelection) basculer() else menu = true })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
