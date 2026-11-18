@@ -1188,6 +1188,7 @@ object Moteur {
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setGroup("messages")
+            .also { if (c.cle != "essai") ActionsNotification.ajouter(app, it, c) }
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }
@@ -1216,6 +1217,23 @@ object Moteur {
             .setNumber(_etat.value.nombreNonLus(c).coerceAtLeast(1))
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
             .setSilent(cfg.enSilence(c.source))
+            .also { ActionsNotification.ajouter(app, it, c) }
+            .build()
+        try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
+    }
+
+    /** Réponse depuis la notification non partie : la notification le dit (le texte n'est pas perdu de vue). */
+    fun echecReponse(c: Conversation, erreur: String) {
+        val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(app, c.cle.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(app, "$CANAL_MESSAGES.${c.source.id}")
+            .setSmallIcon(R.drawable.ic_bulle)
+            .setContentTitle(c.nom)
+            .setContentText("Réponse non envoyée : $erreur")
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .setSilent(true)
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }

@@ -63,6 +63,7 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/fichiers" />
         </provider>
+        <receiver android:name=".ActionsNotification" android:exported="false" />
         <receiver android:name=".WidgetNonLus" android:exported="false" android:label="Messages non lus">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
