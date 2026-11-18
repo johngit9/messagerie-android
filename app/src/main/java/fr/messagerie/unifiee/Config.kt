@@ -109,6 +109,14 @@ class Config(context: Context) {
     /** Barre des messageries en bas de la liste. */
     var barreBas: Boolean get() = p.getBoolean("barreBas", true); set(v) = p.edit().putBoolean("barreBas", v).apply()
     var haut: Int get() = p.getInt("haut", 1); set(v) = p.edit().putInt("haut", v).apply()
+    // Style des notifications (comme les applis officielles)
+    var notifBulles: Boolean get() = p.getBoolean("notifBulles", true); set(v) = p.edit().putBoolean("notifBulles", v).apply()
+    var notifBoutons: Boolean get() = p.getBoolean("notifBoutons", true); set(v) = p.edit().putBoolean("notifBoutons", v).apply()
+    var notifPhoto: Boolean get() = p.getBoolean("notifPhoto", true); set(v) = p.edit().putBoolean("notifPhoto", v).apply()
+    /** Contenu affiché : 0 le message, 1 « Nouveau message » seulement. */
+    var notifApercu: Int get() = p.getInt("notifApercu", 0); set(v) = p.edit().putInt("notifApercu", v).apply()
+    /** Écran verrouillé : 0 tout afficher, 1 masquer le contenu, 2 ne rien afficher. */
+    var notifVerrouille: Int get() = p.getInt("notifVerrouille", 0); set(v) = p.edit().putInt("notifVerrouille", v).apply()
     fun enSilence(heure: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)): Boolean {
         val d = silenceDebut; val f = silenceFin
         if (d < 0 || d == f) return false

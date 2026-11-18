@@ -30,7 +30,7 @@ object Bulles {
 
     /** Photo du contact déjà en cache (pas de téléchargement ici), sinon initiale sur la couleur de la messagerie. */
     fun image(ctx: Context, c: Conversation): Bitmap {
-        val photo = Moteur.photoEnCache(c.cle)?.let { f -> runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() }
+        val photo = if (!Moteur.cfg.notifPhoto) null else Moteur.photoEnCache(c.cle)?.let { f -> runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() }
         val b = Bitmap.createBitmap(T, T, Bitmap.Config.ARGB_8888)
         val cv = Canvas(b)
         if (photo != null) {
@@ -63,6 +63,7 @@ object Bulles {
             .build()
         if (runCatching { ShortcutManagerCompat.pushDynamicShortcut(ctx, raccourci) }.isFailure) return
         b.setShortcutId(id).setLocusId(LocusIdCompat(id))
+        if (!Moteur.cfg.notifBulles) return
         val intention = Intent(ctx, BulleActivity::class.java).setAction(Intent.ACTION_VIEW).putExtra("cle", c.cle)
         val pi = PendingIntent.getActivity(ctx, ("bulle" + c.cle).hashCode(), intention,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)

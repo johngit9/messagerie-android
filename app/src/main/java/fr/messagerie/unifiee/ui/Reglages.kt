@@ -490,15 +490,29 @@ private fun PageNotifications(version: Int) {
     var fond by remember(version) { mutableStateOf(cfg.synchroArrierePlan) }
 
     EtatNotifications()
+    HorizontalDivider()
+    Text("Style des notifications", fontWeight = FontWeight.SemiBold)
+    Explication("Comme WhatsApp ou Messages : photo du contact, boutons, bulle. S'applique aux prochaines notifications.")
+    var bulles by remember(version) { mutableStateOf(cfg.notifBulles) }
+    var boutons by remember(version) { mutableStateOf(cfg.notifBoutons) }
+    var photo by remember(version) { mutableStateOf(cfg.notifPhoto) }
+    var apercu by remember(version) { mutableIntStateOf(cfg.notifApercu) }
+    var verrou by remember(version) { mutableIntStateOf(cfg.notifVerrouille) }
+    Interrupteur("Photo du contact", photo, "Sinon, son initiale.") { photo = it; cfg.notifPhoto = it }
+    Interrupteur("Boutons Répondre, Marquer comme lu, Silence", boutons) { boutons = it; cfg.notifBoutons = it }
     if (android.os.Build.VERSION.SDK_INT >= 30) {
-        HorizontalDivider()
-        Text("Bulles de conversation", fontWeight = FontWeight.SemiBold)
-        Explication("Une conversation s'ouvre dans une bulle ronde (photo du contact) par-dessus les autres applis. Autorisez-les ici, ou touchez l'icône bulle en bas d'une notification.")
-        OutlinedButton(onClick = {
+        Interrupteur("Bulles de conversation", bulles, "La conversation s'ouvre dans une bulle ronde par-dessus les autres applis (icône en bas à droite de la notification).") {
+            bulles = it; cfg.notifBulles = it
+        }
+        if (bulles) TextButton(onClick = {
             runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
                 .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }) { Text("Régler les bulles") }
+        }) { Text("Autoriser les bulles dans Android") }
     }
+    Text("Contenu affiché", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Choix(listOf(0 to "Le message", 1 to "« Nouveau message »"), apercu) { apercu = it; cfg.notifApercu = it }
+    Text("Sur l'écran verrouillé", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Choix(listOf(0 to "Tout afficher", 1 to "Masquer le contenu", 2 to "Ne rien afficher"), verrou) { verrou = it; cfg.notifVerrouille = it }
     HorizontalDivider()
     Text("Par messagerie", fontWeight = FontWeight.SemiBold)
     Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")
@@ -516,6 +530,13 @@ private fun PageNotifications(version: Int) {
                         label = { Text(l, fontSize = 12.sp, maxLines = 1) })
                 }
             }
+            // Son, vibration, pop-up, écran verrouillé : réglages Android du canal de cette messagerie
+            if (android.os.Build.VERSION.SDK_INT >= 26) TextButton(onClick = {
+                val canal = Moteur.canalMessages(s)
+                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, canal).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }) { Text("Son, vibration et pop-up ${s.id}") }
         }
     }
     HorizontalDivider()

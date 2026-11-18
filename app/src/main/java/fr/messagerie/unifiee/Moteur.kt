@@ -1168,14 +1168,20 @@ object Moteur {
             "Messagerie", "Ceci est une notification d'essai ${s.libelle}.")))
     }
 
+    /** Canal Android d'une messagerie (son, vibration, pop-up : réglables dans Android). Créé au besoin. */
+    fun canalMessages(s: Source): String {
+        val canal = "$CANAL_MESSAGES.${s.id}"
+        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(canal, "Messages ${s.libelle}", NotificationManager.IMPORTANCE_HIGH).apply {
+                setShowBadge(false); if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
+            })
+        return canal
+    }
+
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val canal = "$CANAL_MESSAGES.${c.source.id}"
-        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(canal, "Messages ${c.source.libelle}", NotificationManager.IMPORTANCE_HIGH).apply {
-                setShowBadge(false); if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
-            })
+        val canal = canalMessages(c.source)
         if (Build.VERSION.SDK_INT >= 26) runCatching { app.getSystemService(NotificationManager::class.java).deleteNotificationChannel("messages.${c.source.id}") }
         val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -1186,7 +1192,7 @@ object Moteur {
         val contact = androidx.core.app.Person.Builder().setName(c.nom.ifEmpty { "Contact" }).setKey(c.cle)
             .setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(Bulles.image(app, c))).build()
         msgs.takeLast(6).forEach { m ->
-            style.addMessage(m.texteUtile, m.date, if (c.estGroupe) androidx.core.app.Person.Builder().setName(m.auteur).build() else contact)
+            style.addMessage(if (cfg.notifApercu == 1) "Nouveau message" else m.texteUtile, m.date, if (c.estGroupe) androidx.core.app.Person.Builder().setName(m.auteur).build() else contact)
         }
         val n = NotificationCompat.Builder(app, canal)
             .setSmallIcon(R.drawable.ic_bulle)
@@ -1201,7 +1207,11 @@ object Moteur {
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setGroup("messages")
-            .also { if (c.cle != "essai") { ActionsNotification.ajouter(app, it, c); if (Build.VERSION.SDK_INT >= 30) Bulles.preparer(app, it, c, contact) } }
+            .also { if (c.cle != "essai") {
+                if (cfg.notifBoutons) ActionsNotification.ajouter(app, it, c)
+                if (Build.VERSION.SDK_INT >= 30) Bulles.preparer(app, it, c, contact)
+            } }
+            .also { b -> ecranVerrouille(b, canal, msgs.size) }
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
     }
@@ -1230,9 +1240,21 @@ object Moteur {
             .setNumber(_etat.value.nombreNonLus(c).coerceAtLeast(1))
             .setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
             .setSilent(cfg.enSilence(c.source))
-            .also { ActionsNotification.ajouter(app, it, c) }
+            .also { if (cfg.notifBoutons) ActionsNotification.ajouter(app, it, c) }
+            .also { b -> ecranVerrouille(b, CANAL, 1) }
             .build()
         try { NotificationManagerCompat.from(app).notify(c.cle.hashCode(), n) } catch (_: SecurityException) {}
+    }
+
+    /** Écran verrouillé : contenu masqué (« n nouveaux messages ») ou rien du tout, selon les Réglages. */
+    private fun ecranVerrouille(b: NotificationCompat.Builder, canal: String, n: Int) {
+        when (cfg.notifVerrouille) {
+            1 -> b.setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(
+                NotificationCompat.Builder(app, canal).setSmallIcon(R.drawable.ic_bulle).setContentTitle("Messagerie")
+                    .setContentText(if (n > 1) "$n nouveaux messages" else "Nouveau message").build())
+            2 -> b.setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            else -> b.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        }
     }
 
     /** Réponse depuis la notification non partie : la notification le dit (le texte n'est pas perdu de vue). */
