@@ -72,6 +72,19 @@ object Bulles {
         return true
     }
 
+    /**
+     * Retire la notification d'une conversation, sauf si elle est affichée en bulle :
+     * retirer la notification ferait disparaître la bulle aussitôt.
+     */
+    fun retirerNotification(ctx: Context, id: Int) {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val active = runCatching { ctx.getSystemService(android.app.NotificationManager::class.java).activeNotifications }.getOrNull()
+                ?.firstOrNull { it.id == id }
+            if (active != null && active.notification.flags and android.app.Notification.FLAG_BUBBLE != 0) return
+        }
+        runCatching { androidx.core.app.NotificationManagerCompat.from(ctx).cancel(id) }
+    }
+
     /** Ce qu'Android autorise pour les bulles de l'appli (texte pour les Réglages). */
     fun etat(ctx: Context): String {
         val nm = ctx.getSystemService(android.app.NotificationManager::class.java)

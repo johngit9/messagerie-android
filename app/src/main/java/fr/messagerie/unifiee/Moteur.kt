@@ -162,8 +162,7 @@ object Moteur {
         val actives = app.getSystemService(NotificationManager::class.java).activeNotifications
             .filter { it.notification.channelId?.startsWith("$CANAL_MESSAGES.") == true }.map { it.id }.toSet()
         if (actives.isEmpty()) return
-        val nm = NotificationManagerCompat.from(app)
-        e.conversations.forEach { c -> val id = c.cle.hashCode(); if (id in actives && !e.estNonLue(c)) nm.cancel(id) }
+        e.conversations.forEach { c -> val id = c.cle.hashCode(); if (id in actives && !e.estNonLue(c)) Bulles.retirerNotification(app, id) }
     }
 
     /** Démarre l'actualisation périodique et la réception en temps réel (idempotent). */
@@ -467,7 +466,7 @@ object Moteur {
     // MARK: Lu / non lu — LOCAL uniquement
 
     fun marquerLue(c: Conversation) {
-        runCatching { NotificationManagerCompat.from(app).cancel(c.cle.hashCode()) }   // le chiffre de l'icône baisse
+        Bulles.retirerNotification(app, c.cle.hashCode())   // le chiffre de l'icône baisse (une bulle ouverte reste)
         if (!_etat.value.estNonLue(c)) return
         majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }
         luDansElement(c)
