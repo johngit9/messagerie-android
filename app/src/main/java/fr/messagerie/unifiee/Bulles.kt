@@ -17,7 +17,16 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 
 /** Bulle de conversation qui s'ouvre par-dessus les autres applis (Android 11 et plus). */
-class BulleActivity : MainActivity()
+class BulleActivity : MainActivity() {
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        Bulles.journal("fenêtre de la bulle ouverte")
+        super.onCreate(savedInstanceState)
+    }
+    override fun onDestroy() {
+        Bulles.journal("fenêtre de la bulle fermée" + if (isFinishing) " (fin)" else " (par Android)")
+        super.onDestroy()
+    }
+}
 
 /**
  * Notifications « conversation » avec bulle : un raccourci par conversation (photo du contact ou initiale),
@@ -27,6 +36,27 @@ object Bulles {
     private const val T = 216   // taille des icônes adaptatives (le contenu utile tient dans le cercle central)
 
     fun idRaccourci(c: Conversation) = "conv:" + c.cle
+
+    /** Journal de l'essai de bulle (affiché dans Réglages > Notifications), pour comprendre une bulle qui disparaît. */
+    private val evenements = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private var debutEssai = 0L
+    @Volatile var dernierEssai: String? = null
+    fun journal(t: String) { if (debutEssai > 0) evenements.add("%.1f s : %s".format((System.currentTimeMillis() - debutEssai) / 1000.0, t)) }
+
+    /** État de la bulle d'essai maintenant, ajouté au journal ; renvoie tout le journal. */
+    fun diagnostic(ctx: Context): String {
+        val cle = dernierEssai ?: return ""
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        val sbn = runCatching { nm.activeNotifications.firstOrNull { it.id == cle.hashCode() } }.getOrNull()
+        val enBulle = sbn != null && android.os.Build.VERSION.SDK_INT >= 29 && sbn.notification.flags and android.app.Notification.FLAG_BUBBLE != 0
+        val raccourci = runCatching {
+            ShortcutManagerCompat.getShortcuts(ctx, ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or ShortcutManagerCompat.FLAG_MATCH_CACHED).any { it.id == "conv:$cle" }
+        }.getOrDefault(false)
+        val canal = sbn?.notification?.channelId?.let { id -> if (android.os.Build.VERSION.SDK_INT >= 29) nm.getNotificationChannel(id)?.canBubble() else null }
+        journal("notification " + (if (sbn != null) "présente" else "retirée") + ", " + (if (enBulle) "en bulle" else "pas en bulle") +
+            ", raccourci " + (if (raccourci) "présent" else "absent") + (canal?.let { ", canal " + if (it) "autorise les bulles" else "sans bulles" } ?: ""))
+        return evenements.joinToString("\n")
+    }
 
     /** Raccourcis des dernières conversations notifiées (au plus 3), à garder publiés pour leurs bulles. */
     private val derniers = LinkedHashMap<String, ShortcutInfoCompat>()
@@ -73,7 +103,7 @@ object Bulles {
         val pi = PendingIntent.getActivity(ctx, ("bulle" + c.cle).hashCode(), intention,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
         b.setBubbleMetadata(NotificationCompat.BubbleMetadata.Builder(pi, icone).setDesiredHeight(640)
-            .setAutoExpandBubble(essai).setSuppressNotification(essai).build())
+            .setAutoExpandBubble(essai).build())
         return true
     }
 
@@ -111,7 +141,9 @@ object Bulles {
         val style = NotificationCompat.MessagingStyle(Person.Builder().setName("Vous").build())
             .addMessage("Essai de bulle : touchez-la pour ouvrir la conversation.", System.currentTimeMillis(), contact)
         val b = NotificationCompat.Builder(ctx, Moteur.canalMessages(c.source)).setSmallIcon(R.drawable.ic_bulle)
-            .setStyle(style).setCategory(NotificationCompat.CATEGORY_MESSAGE).setSilent(true)
+            .setStyle(style).setCategory(NotificationCompat.CATEGORY_MESSAGE).setOnlyAlertOnce(true)
+        evenements.clear(); debutEssai = System.currentTimeMillis(); dernierEssai = c.cle
+        journal("essai sur « ${c.nom} »")
         if (!preparer(ctx, b, c, contact, essai = true)) return "Android a refusé le raccourci de la conversation."
         return try { androidx.core.app.NotificationManagerCompat.from(ctx).notify(c.cle.hashCode(), b.build()); null }
         catch (_: SecurityException) { "Les notifications de Messagerie sont désactivées." }

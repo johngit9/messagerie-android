@@ -518,11 +518,27 @@ private fun PageNotifications(version: Int) {
             cycleBulles.lifecycle.addObserver(o); onDispose { cycleBulles.lifecycle.removeObserver(o) }
         }
         Explication(etatBulles)
+        var essais by remember { mutableIntStateOf(0) }
+        var journal by remember { mutableStateOf("") }
         OutlinedButton(onClick = {
             essai = fr.messagerie.unifiee.Bulles.essayer(ctx)
                 ?: "Bulle d'essai affichée (rien n'est envoyé). Si elle n'apparaît pas, autorisez les bulles pour « Toutes les conversations »."
+            essais++
         }) { Text("Essayer une bulle") }
         essai?.let { Explication(it) }
+        // Diagnostic : ce que devient la bulle pendant 8 s (à copier pour le transmettre)
+        LaunchedEffect(essais) {
+            if (essais == 0) return@LaunchedEffect
+            for (t in listOf(500L, 1500L, 3000L, 3000L)) { kotlinx.coroutines.delay(t); journal = fr.messagerie.unifiee.Bulles.diagnostic(ctx) }
+        }
+        if (journal.isNotEmpty()) {
+            Text(journal, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(10.dp))
+            TextButton(onClick = {
+                val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic bulle", journal))
+            }) { Text("Copier le diagnostic") }
+        }
     }
     Text("Contenu affiché", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Choix(listOf(0 to "Le message", 1 to "« Nouveau message »"), apercu) { apercu = it; cfg.notifApercu = it }
