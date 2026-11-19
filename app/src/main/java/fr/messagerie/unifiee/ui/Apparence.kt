@@ -2,6 +2,7 @@ package fr.messagerie.unifiee.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -78,6 +79,34 @@ internal fun PageAffichage() {
     var messagerieOuverte by remember { mutableStateOf<Source?>(null) }
     val nav = LocalSousMenu.current
     val sous = nav.actuel
+    val ctxIcone = androidx.compose.ui.platform.LocalContext.current
+    var iconeActuelle by remember { mutableStateOf(fr.messagerie.unifiee.IconeAppli.actuel(ctxIcone)) }
+
+    if (sous == "Icône de l'appli") CarteRubrique(Icons.Outlined.Apps, "Fond de l'icône") {
+        // Deux rangées de trois aperçus de l'icône, chacun sur son fond
+        fr.messagerie.unifiee.IconeAppli.fonds.chunked(3).forEach { rang ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                rang.forEach { f ->
+                    val actif = iconeActuelle == f.id
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp))
+                            .border(if (actif) 2.dp else 1.dp, if (actif) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                            .clickable { fr.messagerie.unifiee.IconeAppli.choisir(ctxIcone, f.id); iconeActuelle = f.id }
+                            .padding(vertical = 12.dp)) {
+                        Box(Modifier.size(64.dp).clip(RoundedCornerShape(20.dp))
+                            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(f.haut), Color(f.bas))))) {
+                            // Même découpe que le lanceur : le dessin de 108 dp est vu à travers 72 dp
+                            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(fr.messagerie.unifiee.R.drawable.ic_logo), null,
+                                modifier = Modifier.requiredSize(96.dp).align(Alignment.Center))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(f.nom, fontSize = 13.sp, fontWeight = if (actif) FontWeight.SemiBold else FontWeight.Normal)
+                    }
+                }
+            }
+        }
+        Explication("L'écran d'accueil peut mettre quelques secondes à changer l'icône. Sur certains téléphones, il faut la replacer sur l'écran d'accueil.")
+    }
 
     if (sous == null || sous == "Écran des messages") ApercuAccueil()
     if (sous == null) ListeSousMenus(null, listOf(
@@ -86,6 +115,8 @@ internal fun PageAffichage() {
         ElementSous("Thème et couleur", listOf("Auto", "Clair", "Sombre").getOrElse(Affichage.theme) { "Auto" } +
             if (Affichage.dynamique) " · Material You" else "", Icons.Outlined.Palette, 0xFF9C36B5),
         ElementSous("Taille", "Texte ${Affichage.texte} % · interface ${Affichage.zoom} %", Icons.Outlined.FormatSize, 0xFF0C8599),
+        ElementSous("Icône de l'appli", "Fond " + (fr.messagerie.unifiee.IconeAppli.fonds.firstOrNull { it.id == iconeActuelle }?.nom ?: "Indigo"),
+            Icons.Outlined.Apps, 0xFF6741D9),
         ElementSous("Couleur de chaque messagerie", Affichage.couleurs.size.let { if (it == 0) "Couleurs d'origine" else "$it personnalisée(s)" },
             Icons.Outlined.ColorLens, 0xFFE8590C),
     ))

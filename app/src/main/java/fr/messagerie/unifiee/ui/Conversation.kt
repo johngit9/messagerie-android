@@ -232,7 +232,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     LaunchedEffect(c.cle) { Moteur.marquerLue(c) }
     androidx.compose.runtime.DisposableEffect(c.cle) {
         Moteur.convOuverte = c.cle
-        androidx.core.app.NotificationManagerCompat.from(Moteur.app).cancel(c.cle.hashCode())
+        // Une notification affichée en bulle reste : la retirer fermerait la bulle
+        fr.messagerie.unifiee.Bulles.retirerNotification(Moteur.app, c.cle.hashCode())
         onDispose { if (Moteur.convOuverte == c.cle) Moteur.convOuverte = null }
     }   // lu dans l'appli seulement : aucun accusé envoyé
     LaunchedEffect(c.derniere) {

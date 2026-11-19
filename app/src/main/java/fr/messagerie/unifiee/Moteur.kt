@@ -499,7 +499,8 @@ object Moteur {
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
         e.conversations.filter { e.estNonLue(it) }.forEach { c -> majEtat(c.cle) { it.copy(lue = maxOf(it.lue, finDe(c)), forcee = 0) }; luDansElement(c); luDansGoogleMessages(c) }
-        runCatching { NotificationManagerCompat.from(app).cancelAll() }
+        // Notifications des conversations retirées une à une : celles en bulle restent
+        e.conversations.forEach { Bulles.retirerNotification(app, it.cle.hashCode()) }
     }
     fun marquerTraitee(c: Conversation) = majEtat(c.cle) { it.copy(traitee = c.derniere, manuel = false) }
     /** Met (ou retire) plusieurs conversations dans « À traiter » d'un coup. */

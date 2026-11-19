@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fond d'icône « Nuit » (Réglages > Apparence > Icône de l'appli) -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="270" android:startColor="#2A3045" android:endColor="#07080D" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="radial" android:centerX="0.5" android:centerY="0.12" android:gradientRadius="70dp"
+                android:startColor="#335C74F2" android:endColor="#00FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

@@ -2,7 +2,7 @@
 <!-- Icône « Fusion en relief » : deux bulles (WhatsApp, SMS) bombées qui se rejoignent, liserées de blanc pour bien se détacher -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.86" android:scaleY="0.86">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.74" android:scaleY="0.74">
         <group android:translateX="1.5" android:translateY="3.5">
         <path android:fillColor="#000000" android:pathData="M30 30h26a10 10 0 0 1 10 10v12a10 10 0 0 1-10 10H44l-9 8v-8h-5a10 10 0 0 1-10-10V40a10 10 0 0 1 10-10z" android:fillAlpha="0.28" />
         </group>
