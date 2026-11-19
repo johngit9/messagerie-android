@@ -123,7 +123,7 @@ private enum class Page(val titre: String, val icone: ImageVector, val couleur: 
     Element("Relais Element", Icons.Outlined.Hub, 0xFF0DBD8C, "element relais jeton connexion teams"),
     IA("Intelligence artificielle", Icons.Outlined.AutoAwesome, 0xFFE67700, "ollama ia résumé suggestion modèle"),
     Messageries("Messageries", Icons.Outlined.Forum, 0xFF3B5BDB, "pro perso source whatsapp sms telegram signal linkedin element teams"),
-    Affichage("Apparence et couleurs", Icons.Outlined.Palette, 0xFF9C36B5, "thème sombre clair couleur taille texte zoom bandeau material you design"),
+    Affichage("Apparence et couleurs", Icons.Outlined.Palette, 0xFF9C36B5, "thème sombre clair couleur taille texte zoom bandeau material you design police typo caractères icône fond"),
     Notifications("Notifications et réception", Icons.Outlined.Notifications, 0xFFE8590C, "bulle son vibration batterie temps réel arrière-plan économie silence verrouillage"),
     Confidentialite("Confidentialité", Icons.Outlined.Shield, 0xFF2F9E44, "lu accusé lecture présence réaction google messages vie privée"),
     Statistiques("Réception et statistiques", Icons.Outlined.Insights, 0xFF1971C2, "latence délai archive messages"),

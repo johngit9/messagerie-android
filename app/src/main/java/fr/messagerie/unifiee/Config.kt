@@ -48,6 +48,7 @@ class Config(context: Context) {
 
     // Affichage : échelle de toute l'interface et de la taille du texte (en %)
     var zoom: Int get() = p.getInt("zoom", 100); set(v) = p.edit().putInt("zoom", v).apply()
+    var police: Int get() = p.getInt("police", 0); set(v) = p.edit().putInt("police", v).apply()
     var tailleTexte: Int get() = p.getInt("tailleTexte", 100); set(v) = p.edit().putInt("tailleTexte", v).apply()
     var synchroArrierePlan: Boolean get() = p.getBoolean("synchroFond", true); set(v) = p.edit().putBoolean("synchroFond", v).apply()
     var notifTousMessages: Boolean get() = p.getBoolean("notifTous", true); set(v) = p.edit().putBoolean("notifTous", v).apply()
@@ -178,7 +179,7 @@ class Config(context: Context) {
         .put("teams", JSONObject().put("adresses", teamsUrls))
         .put("ollama", JSONObject().put("adresses", ollamaUrls).put("modele", ollamaModele))
         .put("jours", jours).put("intervalle", intervalle).put("notifications", notifications).put("veille", veilleArrierePlan).put("envoyerReactions", envoyerReactions)
-        .put("zoom", zoom).put("tailleTexte", tailleTexte)
+        .put("zoom", zoom).put("tailleTexte", tailleTexte).put("police", police)
         .toString(2)
 
     /**
@@ -242,6 +243,7 @@ class Config(context: Context) {
         if (j.has("envoyerReactions")) envoyerReactions = j.optBoolean("envoyerReactions", envoyerReactions)
         if (j.has("zoom")) zoom = j.optInt("zoom", zoom)
         if (j.has("tailleTexte")) tailleTexte = j.optInt("tailleTexte", tailleTexte)
+        if (j.has("police")) police = j.optInt("police", police)
         if (j.has("veille")) veilleArrierePlan = j.optBoolean("veille", veilleArrierePlan)
         return faits.distinct()
     }

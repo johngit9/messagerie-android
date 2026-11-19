@@ -3,6 +3,7 @@ package fr.messagerie.unifiee.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.FontDownload
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -114,6 +115,8 @@ internal fun PageAffichage() {
             listOf("Cartes", "Lignes", "Colorée", "Aérée").getOrElse(Affichage.design) { "Cartes" }, Icons.Outlined.ViewAgenda, 0xFF3B5BDB),
         ElementSous("Thème et couleur", listOf("Auto", "Clair", "Sombre").getOrElse(Affichage.theme) { "Auto" } +
             if (Affichage.dynamique) " · Material You" else "", Icons.Outlined.Palette, 0xFF9C36B5),
+        ElementSous("Police", fr.messagerie.unifiee.Polices.choix.firstOrNull { it.first == Affichage.police }?.second ?: "Téléphone",
+            Icons.Outlined.FontDownload, 0xFF1971C2),
         ElementSous("Taille", "Texte ${Affichage.texte} % · interface ${Affichage.zoom} %", Icons.Outlined.FormatSize, 0xFF0C8599),
         ElementSous("Icône de l'appli", "Fond " + (fr.messagerie.unifiee.IconeAppli.fonds.firstOrNull { it.id == iconeActuelle }?.nom ?: "Indigo"),
             Icons.Outlined.Apps, 0xFF6741D9),
@@ -165,6 +168,25 @@ internal fun PageAffichage() {
         }
     }
 
+    if (sous == "Police") CarteRubrique(Icons.Outlined.FontDownload, "Police de l'appli") {
+        // Chaque choix écrit dans sa propre police
+        fr.messagerie.unifiee.Polices.choix.forEachIndexed { i, (v, nom) ->
+            if (i > 0) HorizontalDivider()
+            val actif = Affichage.police == v
+            val famille = fr.messagerie.unifiee.Polices.famille(v)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable { Affichage.police = v; cfg.police = v }.padding(vertical = 10.dp, horizontal = 4.dp)) {
+                Text("Aa", fontFamily = famille, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(56.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(nom, fontFamily = famille, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text("Bonjour, on se voit à 18 h ? · " + (fr.messagerie.unifiee.Polices.descriptions[v] ?: ""), fontFamily = famille,
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
+                androidx.compose.material3.RadioButton(selected = actif, onClick = { Affichage.police = v; cfg.police = v })
+            }
+        }
+    }
+
     if (sous == "Taille") CarteRubrique(Icons.Outlined.FormatSize, "Taille") {
         Curseur("Texte", listOf(85 to "Petit", 100 to "Normal", 115 to "Grand", 130 to "Très grand"), Affichage.texte) {
             Affichage.texte = it; cfg.tailleTexte = it
@@ -201,7 +223,7 @@ internal fun PageAffichage() {
     }
 
     if (sous == null) OutlinedButton(onClick = {
-        Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear()
+        Affichage.zoom = 100; Affichage.texte = 100; Affichage.police = 0; cfg.police = 0; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear()
         Affichage.design = 0; Affichage.haut = 1; Affichage.barreBas = true; Affichage.bandeau = 0L
         cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; cfg.design = 0; cfg.haut = 1; cfg.barreBas = true; cfg.couleurBandeau = 0L
         Source.entries.forEach { cfg.definirCouleur(it, 0L) }

@@ -136,7 +136,8 @@ fun Theme(contenu: @Composable () -> Unit) {
     val d = androidx.compose.ui.platform.LocalDensity.current
     val echelle = androidx.compose.ui.unit.Density(d.density * Affichage.zoom / 100f, d.fontScale * Affichage.texte / 100f)
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides echelle) {
-        MaterialTheme(colorScheme = schema, content = contenu)
+        val typo = androidx.compose.runtime.remember(Affichage.police) { Polices.typographie(Affichage.police) }
+        MaterialTheme(colorScheme = schema, typography = typo, content = contenu)
     }
 }
 
@@ -144,6 +145,8 @@ fun Theme(contenu: @Composable () -> Unit) {
 object Affichage {
     var zoom by androidx.compose.runtime.mutableIntStateOf(100)
     var texte by androidx.compose.runtime.mutableIntStateOf(100)
+    /** Police de l'appli (voir Polices). */
+    var police by androidx.compose.runtime.mutableIntStateOf(0)
     var dynamique by mutableStateOf(false)
     var theme by androidx.compose.runtime.mutableIntStateOf(0)
     var accent by androidx.compose.runtime.mutableLongStateOf(0L)
@@ -158,7 +161,7 @@ object Affichage {
     /** Couleurs choisies par messagerie (absentes = couleur d'origine). */
     val couleurs = androidx.compose.runtime.mutableStateMapOf<Source, Long>()
     fun charger(c: Config) {
-        zoom = c.zoom; texte = c.tailleTexte; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design; haut = c.haut; barreBas = c.barreBas; bandeau = c.couleurBandeau
+        zoom = c.zoom; texte = c.tailleTexte; police = c.police; dynamique = c.couleursDynamiques; theme = c.theme; accent = c.accent; design = c.design; haut = c.haut; barreBas = c.barreBas; bandeau = c.couleurBandeau
         couleurs.clear(); Source.entries.forEach { s -> c.couleur(s).takeIf { it != 0L }?.let { couleurs[s] = it } }
     }
 }
