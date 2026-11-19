@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fond de l'icône : bleu nuit du bandeau, plus clair en haut -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient android:angle="270" android:startColor="#33449A" android:endColor="#141B42" />
-</shape>
+<!-- Fond de l'icône : indigo lumineux (ressort sur un fond d'écran noir), halo clair en haut -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="270" android:startColor="#5C74F2" android:endColor="#2B3BAE" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="radial" android:centerX="0.5" android:centerY="0.12" android:gradientRadius="70dp"
+                android:startColor="#55FFFFFF" android:endColor="#00FFFFFF" />
+        </shape>
+    </item>
+</layer-list>
