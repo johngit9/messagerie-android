@@ -20,6 +20,9 @@ object Raccourcis {
     val sourceDemandee = MutableStateFlow<Source?>(null)
     private var dernier: String? = null
 
+    /** Republie tout (raccourcis de messagerie et de conversation) : Android les retire quand l'entrée d'icône change. */
+    fun republier(ctx: Context) { dernier = null; runCatching { mettreAJour(ctx, Moteur.etat.value) } }
+
     fun mettreAJour(ctx: Context, e: Etat) {
         val presentes = Source.entries.filter { s -> e.conversations.any { it.source == s } }
         val comptes = presentes.associateWith { e.nombreMessagesNonLus(it) }

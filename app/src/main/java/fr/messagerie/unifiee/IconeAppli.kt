@@ -40,5 +40,7 @@ object IconeAppli {
                 pm.setComponentEnabledSetting(composant(ctx, it.id), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
             }
         }
+        // Les raccourcis (appui long, bulles) suivent l'ancienne entrée et disparaissent avec elle : on les republie
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Raccourcis.republier(ctx.applicationContext) }, 1500)
     }
 }
