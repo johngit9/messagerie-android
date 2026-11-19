@@ -22,6 +22,7 @@ object Polices {
     private val cache = HashMap<Int, FontFamily?>()
 
     /** Police variable : une graisse par cran, réglée par l'axe « wght ». */
+    @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
     private fun variable(id: Int) = FontFamily(listOf(300, 400, 500, 600, 700).map { w ->
         Font(id, FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w)))
     })
