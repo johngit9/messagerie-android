@@ -92,6 +92,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Style
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.BatteryChargingFull
+import androidx.compose.material.icons.outlined.NotificationsPaused
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Insights
@@ -152,31 +157,38 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
         connexionsModifiees = false
         retour()
     }
-    BackHandler(enabled = page != null || Moteur.cfg.configure) { if (page != null) page = null else quitter() }
+    var sous by rememberSaveable { mutableStateOf<String?>(null) }     // sous-menu ouvert dans la page
+    fun aller(p: Page?) { page = p; sous = null }
+    BackHandler(enabled = page != null || Moteur.cfg.configure) {
+        when { sous != null -> sous = null; page != null -> aller(null); else -> quitter() }
+    }
 
     LaunchedEffect(Unit) { if (cfg.verifierMaj && !EtatMaj.verifie) verifierMaj(ctx) }
 
+    fun profondeur(x: Pair<Page?, String?>) = (if (x.first != null) 1 else 0) + (if (x.second != null) 1 else 0)
     AnimatedContent(
-        targetState = page,
+        targetState = page to sous,
         transitionSpec = {
-            if (targetState != null) (slideInHorizontally { it / 3 } + fadeIn()) togetherWith (slideOutHorizontally { -it / 3 } + fadeOut())
+            if (profondeur(targetState) > profondeur(initialState)) (slideInHorizontally { it / 3 } + fadeIn()) togetherWith (slideOutHorizontally { -it / 3 } + fadeOut())
             else (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith (slideOutHorizontally { it / 3 } + fadeOut())
         },
         label = "reglages",
-    ) { p ->
-        if (p == null) Menu(e, accueil, quitter = { quitter() }, ouvrir = { page = it })
-        else PageReglage(p.titre, retour = { page = null }) {
-            when (p) {
-                Page.Matrix -> PageMatrix(version) { connexionsModifiees = true }
-                Page.Element -> PageElement(version) { connexionsModifiees = true }
-                Page.IA -> PageIA(version)
-                Page.Messageries -> PageMessageries(e) { page = it }
-                Page.Affichage -> PageAffichage()
-                Page.Notifications -> PageNotifications(version)
-                Page.Confidentialite -> PageConfidentialite(version)
-                Page.Fichier -> PageFichier { version++; connexionsModifiees = true }
-                Page.MiseAJour -> PageMiseAJour()
-                Page.Statistiques -> PageStatistiques(e) { page = it }
+    ) { (p, sm) ->
+        if (p == null) Menu(e, accueil, quitter = { quitter() }, ouvrir = { aller(it) })
+        else androidx.compose.runtime.CompositionLocalProvider(LocalSousMenu provides NavSous(sm) { sous = it }) {
+            PageReglage(sm ?: p.titre, retour = { if (sm != null) sous = null else aller(null) }) {
+                when (p) {
+                    Page.Matrix -> PageMatrix(version) { connexionsModifiees = true }
+                    Page.Element -> PageElement(version) { connexionsModifiees = true }
+                    Page.IA -> PageIA(version)
+                    Page.Messageries -> PageMessageries(e) { aller(it) }
+                    Page.Affichage -> PageAffichage()
+                    Page.Notifications -> PageNotifications(version)
+                    Page.Confidentialite -> PageConfidentialite(version)
+                    Page.Fichier -> PageFichier { version++; connexionsModifiees = true }
+                    Page.MiseAJour -> PageMiseAJour()
+                    Page.Statistiques -> PageStatistiques(e) { aller(it) }
+                }
             }
         }
     }
@@ -529,10 +541,12 @@ private fun PageMatrix(version: Int, modifie: () -> Unit) {
     var jeton by remember(version) { mutableStateOf(cfg.matrixJeton) }
     var moi by remember(version) { mutableStateOf(cfg.moiFantome) }
     Explication("Passerelles SMS, WhatsApp, Telegram et LinkedIn de votre serveur. Enregistré automatiquement ; la connexion est relancée en quittant les Réglages.")
+    Section {
     Champ("Adresse(s) du serveur", urls, "http://serveur:8008  (plusieurs : séparées par des virgules)") { urls = it; cfg.matrixUrls = it; modifie() }
     Champ("Identifiant Matrix", user, "@utilisateur:domaine") { user = it; cfg.matrixUtilisateur = it; modifie() }
     Champ("Jeton d'accès", jeton, "", secret = true) { jeton = it; cfg.matrixJeton = it; modifie() }
     Champ("Fantôme « moi » (optionnel)", moi, "@gmessages_…:domaine — détecté automatiquement sinon") { moi = it; cfg.moiFantome = it; modifie() }
+    }
 }
 
 @Composable
@@ -541,6 +555,7 @@ private fun PageElement(version: Int, modifie: () -> Unit) {
     var urls by remember(version) { mutableStateOf(cfg.relaisUrls) }
     var jeton by remember(version) { mutableStateOf(cfg.relaisJeton) }
     Explication("Relais de votre serveur pour Element (et la correspondance des salons WhatsApp).")
+    Section {
     Champ("Adresse(s) du relais", urls, "http://serveur:8787") { urls = it; cfg.relaisUrls = it; modifie() }
     Champ("Jeton du relais", jeton, "", secret = true) { jeton = it; cfg.relaisJeton = it; modifie() }
     HorizontalDivider()
@@ -558,6 +573,7 @@ private fun PageElement(version: Int, modifie: () -> Unit) {
         }) { Text("Tester Teams") }
         test?.let { Text(it, fontSize = 13.sp) }
     }
+    }
 }
 
 @Composable
@@ -569,6 +585,7 @@ private fun PageIA(version: Int) {
     var jours by remember(version) { mutableIntStateOf(cfg.jours) }
     var test by remember { mutableStateOf<String?>(null) }
     Explication("Ollama sur votre serveur : résumés, réponses suggérées et amélioration du texte. Laissez l'adresse vide pour désactiver.")
+    Section {
     Champ("Adresse(s) d'Ollama", urls, "http://serveur:11434") { urls = it; cfg.ollamaUrls = it }
     Champ("Modèle", modele, "qwen3:8b") { modele = it; cfg.ollamaModele = it }
     OutlinedButton(onClick = {
@@ -576,9 +593,10 @@ private fun PageIA(version: Int) {
         portee.launch { test = withContext(Dispatchers.IO) { Ollama(cfg).tester() } }
     }) { Text("Tester la connexion") }
     test?.let { Text(it, fontSize = 13.sp) }
-    HorizontalDivider()
-    Text("Résumer les conversations des :")
+    }
+    Section("Résumer les conversations des") {
     Choix(listOf(1 to "24 h", 3 to "3 jours", 7 to "7 jours", 14 to "14 jours"), jours) { jours = it; cfg.jours = it; Moteur.redemarrer() }
+    }
 }
 
 /** Médiane et « 9 sur 10 » (90e centile) d'une liste de délais. */
@@ -642,153 +660,182 @@ private fun PageNotifications(version: Int) {
     var veille by remember(version) { mutableStateOf(cfg.veilleArrierePlan) }
     var fond by remember(version) { mutableStateOf(cfg.synchroArrierePlan) }
 
-    EtatNotifications()
-    HorizontalDivider()
-    Text("Style des notifications", fontWeight = FontWeight.SemiBold)
-    Explication("Comme WhatsApp ou Messages : photo du contact, boutons, bulle. S'applique aux prochaines notifications.")
     var bulles by remember(version) { mutableStateOf(cfg.notifBulles) }
     var boutons by remember(version) { mutableStateOf(cfg.notifBoutons) }
     var photo by remember(version) { mutableStateOf(cfg.notifPhoto) }
     var apercu by remember(version) { mutableIntStateOf(cfg.notifApercu) }
     var verrou by remember(version) { mutableIntStateOf(cfg.notifVerrouille) }
-    ApercuNotification(photo, boutons, bulles, apercu)
-    Interrupteur("Photo du contact", photo, "Sinon, son initiale.") { photo = it; cfg.notifPhoto = it }
-    Interrupteur("Boutons Répondre, Marquer comme lu, Silence", boutons) { boutons = it; cfg.notifBoutons = it }
-    if (android.os.Build.VERSION.SDK_INT >= 30) {
-        Interrupteur("Bulles de conversation", bulles, "La conversation s'ouvre dans une bulle ronde par-dessus les autres applis (icône en bas à droite de la notification).") {
-            bulles = it; cfg.notifBulles = it
+    val nav = LocalSousMenu.current
+    when (nav.actuel) {
+        null -> {
+            EtatNotifications()
+            ApercuNotification(photo, boutons, bulles, apercu)
+            val nSourdine = e.conversations.count { e.etat(it).sourdine }
+            ListeSousMenus(null, listOfNotNull(
+                ElementSous("Style des notifications", listOfNotNull(if (photo) "Photo" else "Initiale", if (boutons) "boutons" else null,
+                    if (apercu == 0) "message affiché" else "contenu masqué").joinToString(" · "), Icons.Outlined.Style, 0xFF3B5BDB),
+                if (android.os.Build.VERSION.SDK_INT >= 30) ElementSous("Bulles", if (bulles) "Conversations en bulle par-dessus les applis" else "Désactivées",
+                    Icons.Outlined.ChatBubbleOutline, 0xFF0C8599) else null,
+                ElementSous("Par messagerie", "Quand notifier, son, vibration et pop-up", Icons.Outlined.Forum, 0xFF2F9E44),
+                ElementSous("Heures de silence", if (cfg.silenceDebut < 0) "Désactivées" else "De ${cfg.silenceDebut} h à ${cfg.silenceFin} h",
+                    Icons.Outlined.Bedtime, 0xFF6741D9),
+                ElementSous("Réception et batterie", when { !veille -> "Économie max"; cfg.economie -> "Temps réel économe"; else -> "Temps réel" },
+                    Icons.Outlined.BatteryChargingFull, 0xFFE8590C),
+                ElementSous("Icône et sourdine", "Chiffre sur l'icône" + if (nSourdine > 0) " · $nSourdine en sourdine" else "",
+                    Icons.Outlined.NotificationsPaused, 0xFF5C677D),
+            ))
         }
-        if (bulles) TextButton(onClick = {
-            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
-                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }) { Text("Autoriser les bulles dans Android") }
-        var etatBulles by remember { mutableStateOf(fr.messagerie.unifiee.Bulles.etat(ctx)) }
-        var essai by remember { mutableStateOf<String?>(null) }
-        // Revérifié au retour des réglages Android
-        val cycleBulles = androidx.lifecycle.compose.LocalLifecycleOwner.current
-        androidx.compose.runtime.DisposableEffect(cycleBulles) {
-            val o = androidx.lifecycle.LifecycleEventObserver { _, ev -> if (ev == androidx.lifecycle.Lifecycle.Event.ON_RESUME) etatBulles = fr.messagerie.unifiee.Bulles.etat(ctx) }
-            cycleBulles.lifecycle.addObserver(o); onDispose { cycleBulles.lifecycle.removeObserver(o) }
-        }
-        Explication(etatBulles)
-        var essais by remember { mutableIntStateOf(0) }
-        var journal by remember { mutableStateOf("") }
-        OutlinedButton(onClick = {
-            essai = fr.messagerie.unifiee.Bulles.essayer(ctx)
-                ?: "Bulle d'essai affichée (rien n'est envoyé). Si elle n'apparaît pas, autorisez les bulles pour « Toutes les conversations »."
-            essais++
-        }) { Text("Essayer une bulle") }
-        essai?.let { Explication(it) }
-        // Diagnostic : ce que devient la bulle pendant 8 s (à copier pour le transmettre)
-        LaunchedEffect(essais) {
-            if (essais == 0) return@LaunchedEffect
-            for (t in listOf(500L, 1500L, 3000L, 3000L)) { kotlinx.coroutines.delay(t); journal = fr.messagerie.unifiee.Bulles.diagnostic(ctx) }
-        }
-        if (journal.isNotEmpty()) {
-            Text(journal, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(10.dp))
-            TextButton(onClick = {
-                val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic bulle", journal))
-            }) { Text("Copier le diagnostic") }
-        }
-    }
-    Text("Contenu affiché", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Choix(listOf(0 to "Le message", 1 to "« Nouveau message »"), apercu) { apercu = it; cfg.notifApercu = it }
-    Text("Sur l'écran verrouillé", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Choix(listOf(0 to "Tout afficher", 1 to "Masquer le contenu", 2 to "Ne rien afficher"), verrou) { verrou = it; cfg.notifVerrouille = it }
-    HorizontalDivider()
-    Text("Par messagerie", fontWeight = FontWeight.SemiBold)
-    Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")
-    key(maj) {
-        Source.entries.filter { e.statistiques[it] != null }.forEach { s ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LogoSource(s, 26.dp); Spacer(Modifier.width(10.dp))
-                Text(s.libelle, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        "Style des notifications" -> {
+            ApercuNotification(photo, boutons, bulles, apercu)
+            Section(aide = "Comme WhatsApp ou Messages. S'applique aux prochaines notifications.") {
+            Interrupteur("Photo du contact", photo, "Sinon, son initiale.") { photo = it; cfg.notifPhoto = it }
+            Interrupteur("Boutons Répondre, Marquer comme lu, Silence", boutons) { boutons = it; cfg.notifBoutons = it }
             }
-            val modes = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
-            androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                modes.forEachIndexed { i, (v, l) ->
-                    SegmentedButton(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ },
-                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
-                        label = { Text(l, fontSize = 12.sp, maxLines = 1) })
-                }
+            Section {
+            Text("Contenu affiché", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Choix(listOf(0 to "Le message", 1 to "« Nouveau message »"), apercu) { apercu = it; cfg.notifApercu = it }
+            Text("Sur l'écran verrouillé", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Choix(listOf(0 to "Tout afficher", 1 to "Masquer le contenu", 2 to "Ne rien afficher"), verrou) { verrou = it; cfg.notifVerrouille = it }
             }
-            // Son, vibration, pop-up, écran verrouillé : réglages Android du canal de cette messagerie
-            if (android.os.Build.VERSION.SDK_INT >= 26) TextButton(onClick = {
-                val canal = Moteur.canalMessages(s)
-                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, canal).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            }) { Text("Son, vibration et pop-up ${s.id}") }
         }
-    }
-    HorizontalDivider()
-    Text("Heures de silence", fontWeight = FontWeight.SemiBold)
-    Explication("Les notifications arrivent sans son ni vibration pendant ces heures.")
-    var debut by remember { mutableIntStateOf(cfg.silenceDebut) }
-    var fin by remember { mutableIntStateOf(cfg.silenceFin) }
-    Choix(listOf(-1 to "Désactivé", 20 to "Dès 20 h", 21 to "Dès 21 h", 22 to "Dès 22 h", 23 to "Dès 23 h"), debut) { debut = it; cfg.silenceDebut = it }
-    if (debut >= 0) {
-        Choix(listOf(6 to "Jusqu'à 6 h", 7 to "7 h", 8 to "8 h", 9 to "9 h"), fin) { fin = it; cfg.silenceFin = it }
-        Text("Messageries concernées", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        var majSilence by remember { mutableIntStateOf(0) }
-        key(majSilence) {
-            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        "Bulles" -> Section {
+            Interrupteur("Bulles de conversation", bulles, "La conversation s'ouvre dans une bulle ronde par-dessus les autres applis (icône en bas à droite de la notification).") {
+                bulles = it; cfg.notifBulles = it
+            }
+            if (bulles) TextButton(onClick = {
+                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_BUBBLE_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }) { Text("Autoriser les bulles dans Android") }
+            var etatBulles by remember { mutableStateOf(fr.messagerie.unifiee.Bulles.etat(ctx)) }
+            var essai by remember { mutableStateOf<String?>(null) }
+            // Revérifié au retour des réglages Android
+            val cycleBulles = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            androidx.compose.runtime.DisposableEffect(cycleBulles) {
+                val o = androidx.lifecycle.LifecycleEventObserver { _, ev -> if (ev == androidx.lifecycle.Lifecycle.Event.ON_RESUME) etatBulles = fr.messagerie.unifiee.Bulles.etat(ctx) }
+                cycleBulles.lifecycle.addObserver(o); onDispose { cycleBulles.lifecycle.removeObserver(o) }
+            }
+            Explication(etatBulles)
+            var essais by remember { mutableIntStateOf(0) }
+            var journal by remember { mutableStateOf("") }
+            OutlinedButton(onClick = {
+                essai = fr.messagerie.unifiee.Bulles.essayer(ctx)
+                    ?: "Bulle d'essai affichée (rien n'est envoyé). Si elle n'apparaît pas, autorisez les bulles pour « Toutes les conversations »."
+                essais++
+            }) { Text("Essayer une bulle") }
+            essai?.let { Explication(it) }
+            // Diagnostic : ce que devient la bulle pendant 8 s (à copier pour le transmettre)
+            LaunchedEffect(essais) {
+                if (essais == 0) return@LaunchedEffect
+                for (t in listOf(500L, 1500L, 3000L, 3000L)) { kotlinx.coroutines.delay(t); journal = fr.messagerie.unifiee.Bulles.diagnostic(ctx) }
+            }
+            if (journal.isNotEmpty()) {
+                Text(journal, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(10.dp))
+                TextButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic bulle", journal))
+                }) { Text("Copier le diagnostic") }
+            }
+        }
+        "Par messagerie" -> {
+            Section {
+                Interrupteur("Notifier quand une réponse est attendue", notifs, "Selon le résumé de l'IA, même pour une messagerie en « Aucune ».") { notifs = it; cfg.notifications = it }
+            }
+            key(maj) {
                 Source.entries.filter { e.statistiques[it] != null }.forEach { s ->
-                    FilterChip(selected = cfg.silencePour(s), onClick = { cfg.definirSilencePour(s, !cfg.silencePour(s)); majSilence++ },
-                        leadingIcon = { LogoSource(s, 18.dp) }, label = { Text(s.id, fontSize = 13.sp) })
+                    Section {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LogoSource(s, 30.dp); Spacer(Modifier.width(12.dp))
+                            Text(s.libelle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        }
+                        val modes = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
+                        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            modes.forEachIndexed { i, (v, l) ->
+                                SegmentedButton(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ },
+                                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
+                                    label = { Text(l, fontSize = 12.sp, maxLines = 1) })
+                            }
+                        }
+                        // Son, vibration, pop-up, écran verrouillé : réglages Android du canal de cette messagerie
+                        if (android.os.Build.VERSION.SDK_INT >= 26) TextButton(onClick = {
+                            val canal = Moteur.canalMessages(s)
+                            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, canal).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }) { Text("Son, vibration et pop-up") }
+                    }
                 }
             }
+            Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")
         }
-        Explication("Une messagerie décochée sonne normalement, même pendant les heures de silence.")
-    }
-    HorizontalDivider()
-    Text("Réception et batterie", fontWeight = FontWeight.SemiBold)
-    var economie by remember(version) { mutableStateOf(cfg.economie) }
-    val mode = if (!veille) 2 else if (economie) 1 else 0
-    val modes = listOf(1 to "Temps réel économe", 0 to "Temps réel", 2 to "Économie max")
-    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        modes.forEachIndexed { i, (v, l) ->
-            SegmentedButton(selected = mode == v, onClick = {
-                veille = v != 2; cfg.veilleArrierePlan = veille
-                if (v != 2) { economie = v == 1; cfg.economie = economie }
-                ServiceVeille.mettreAJour(ctx)
-            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
-                label = { Text(l, fontSize = 12.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center) })
+        "Heures de silence" -> Section(aide = "Les notifications arrivent sans son ni vibration pendant ces heures.") {
+        var debut by remember { mutableIntStateOf(cfg.silenceDebut) }
+        var fin by remember { mutableIntStateOf(cfg.silenceFin) }
+        Choix(listOf(-1 to "Désactivé", 20 to "Dès 20 h", 21 to "Dès 21 h", 22 to "Dès 22 h", 23 to "Dès 23 h"), debut) { debut = it; cfg.silenceDebut = it }
+        if (debut >= 0) {
+            Choix(listOf(6 to "Jusqu'à 6 h", 7 to "7 h", 8 to "8 h", 9 to "9 h"), fin) { fin = it; cfg.silenceFin = it }
+            Text("Messageries concernées", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            var majSilence by remember { mutableIntStateOf(0) }
+            key(majSilence) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Source.entries.filter { e.statistiques[it] != null }.forEach { s ->
+                        FilterChip(selected = cfg.silencePour(s), onClick = { cfg.definirSilencePour(s, !cfg.silencePour(s)); majSilence++ },
+                            leadingIcon = { LogoSource(s, 18.dp) }, label = { Text(s.id, fontSize = 13.sp) })
+                    }
+                }
+            }
+            Explication("Une messagerie décochée sonne normalement, même pendant les heures de silence.")
         }
-    }
-    Explication(when (mode) {
-        1 -> "Recommandé. Messages reçus tout de suite, appli fermée comprise. En arrière-plan, l'appli se réveille moins souvent et ignore les accusés de lecture. Notification permanente discrète."
-        0 -> "Messages reçus tout de suite, et ✓✓ / présences mis à jour en continu. Consomme un peu plus."
-        else -> "Rien ne tourne appli fermée : messages vérifiés environ toutes les 15 min. Le moins de batterie, mais avec du retard."
-    })
-    Interrupteur("Vérifier régulièrement appli fermée", fond, "Environ toutes les 15 min (géré par Android), sans notification permanente.") {
-        fond = it; cfg.synchroArrierePlan = it; fr.messagerie.unifiee.SynchroArrierePlan.programmer(ctx)
-    }
-    Interrupteur("Notifier quand une réponse est attendue", notifs, "Selon le résumé de l'IA, même pour une messagerie en « Aucune ».") { notifs = it; cfg.notifications = it }
-    TextButton(onClick = {
-        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-    }) { Text("Retirer l'appli des économies de batterie") }
-    Text("Vérification de secours toutes les :")
-    Choix(listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min", 900 to "15 min"), intervalle) { intervalle = it; cfg.intervalle = it }
-    HorizontalDivider()
-    Text("Chiffre sur l'icône", fontWeight = FontWeight.SemiBold)
-    Explication("Le chiffre suit le total des messages non lus, et baisse dès que vous les lisez. Il est porté par une notification discrète " +
-        "« N messages non lus » (sans son). Si l'icône montre un point, choisissez « Nombre » pour les pastilles d'icône dans les réglages Android.")
-    TextButton(onClick = {
-        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-    }) { Text("Réglages Android des notifications (son, vibration, pastille)") }
-    val sourdine = e.conversations.filter { e.etat(it).sourdine }
-    if (sourdine.isNotEmpty()) {
-        HorizontalDivider()
-        Text("Conversations en sourdine (${sourdine.size})", fontWeight = FontWeight.SemiBold)
-        sourdine.forEach { c ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LogoSource(c.source, 22.dp); Spacer(Modifier.width(10.dp))
-                Text(c.nom, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                TextButton(onClick = { Moteur.basculerSourdine(c) }) { Text("Réactiver") }
+        }
+        "Réception et batterie" -> Section {
+        var economie by remember(version) { mutableStateOf(cfg.economie) }
+        val mode = if (!veille) 2 else if (economie) 1 else 0
+        val modes = listOf(1 to "Temps réel économe", 0 to "Temps réel", 2 to "Économie max")
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            modes.forEachIndexed { i, (v, l) ->
+                SegmentedButton(selected = mode == v, onClick = {
+                    veille = v != 2; cfg.veilleArrierePlan = veille
+                    if (v != 2) { economie = v == 1; cfg.economie = economie }
+                    ServiceVeille.mettreAJour(ctx)
+                }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
+                    label = { Text(l, fontSize = 12.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center) })
+            }
+        }
+        Explication(when (mode) {
+            1 -> "Recommandé. Messages reçus tout de suite, appli fermée comprise. En arrière-plan, l'appli se réveille moins souvent et ignore les accusés de lecture. Notification permanente discrète."
+            0 -> "Messages reçus tout de suite, et ✓✓ / présences mis à jour en continu. Consomme un peu plus."
+            else -> "Rien ne tourne appli fermée : messages vérifiés environ toutes les 15 min. Le moins de batterie, mais avec du retard."
+        })
+        Interrupteur("Vérifier régulièrement appli fermée", fond, "Environ toutes les 15 min (géré par Android), sans notification permanente.") {
+            fond = it; cfg.synchroArrierePlan = it; fr.messagerie.unifiee.SynchroArrierePlan.programmer(ctx)
+        }
+        TextButton(onClick = {
+            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text("Retirer l'appli des économies de batterie") }
+        Text("Vérification de secours toutes les :")
+        Choix(listOf(30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min", 900 to "15 min"), intervalle) { intervalle = it; cfg.intervalle = it }
+        }
+        "Icône et sourdine" -> {
+            Section("Chiffre sur l'icône") {
+            Explication("Le chiffre suit le total des messages non lus, et baisse dès que vous les lisez. Il est porté par une notification discrète " +
+                "« N messages non lus » (sans son). Si l'icône montre un point, choisissez « Nombre » pour les pastilles d'icône dans les réglages Android.")
+            TextButton(onClick = {
+                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }) { Text("Réglages Android des notifications (son, vibration, pastille)") }
+            }
+            Section("Conversations en sourdine") {
+                if (e.conversations.none { e.etat(it).sourdine }) Explication("Aucune conversation en sourdine. Appui long sur une conversation pour la mettre en sourdine.")
+            val sourdine = e.conversations.filter { e.etat(it).sourdine }
+            if (sourdine.isNotEmpty()) {
+                sourdine.forEach { c ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LogoSource(c.source, 22.dp); Spacer(Modifier.width(10.dp))
+                        Text(c.nom, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { Moteur.basculerSourdine(c) }) { Text("Réactiver") }
+                    }
+                }
+            }
             }
         }
     }
@@ -806,10 +853,21 @@ private fun duree(ms: Long) = when {
 private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
     var maj by remember { mutableIntStateOf(0) }
-    Explication("Pro / Perso sert aux vues de la liste ; une conversation peut aussi être classée à la main (appui long sur la conversation).")
     val sources = Source.entries.filter { e.statistiques[it] != null || e.sources[it] is EtatSource.Ok || e.sources[it] is EtatSource.Erreur }
-    if (sources.isEmpty()) Explication("Aucune messagerie connectée pour l'instant.")
-    sources.forEach { s ->
+    val nav = LocalSousMenu.current
+    if (nav.actuel == null) {
+        if (sources.isEmpty()) Explication("Aucune messagerie connectée pour l'instant.")
+        ListeSousMenus(null, sources.map { s ->
+            val st = e.sources[s]
+            ElementSous(s.libelle,
+                (if (st is EtatSource.Erreur) "Erreur : ${st.message}" else if (cfg.pro(s)) "Pro" else "Perso") + " · notifications " +
+                    when (cfg.notif(s)) { "tous" -> "à chaque message"; "attendue" -> "si réponse attendue"; else -> "coupées" },
+                logo = { LogoSource(s, 36.dp) }, pastille = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else null)
+        })
+        Explication("Pro / Perso sert aux vues de la liste ; une conversation peut aussi être classée à la main (appui long sur la conversation).")
+        return
+    }
+    sources.filter { it.libelle == nav.actuel }.forEach { s ->
         key(s, maj) {
             val st = e.sources[s]
             val dernier = e.conversations.filter { it.source == s }.maxOfOrNull { it.derniere }
@@ -920,20 +978,20 @@ private fun BlocConnexion(e: Etat, s: Source) {
 private fun PageConfidentialite(version: Int) {
     val cfg = Moteur.cfg
     var reactions by remember(version) { mutableStateOf(cfg.envoyerReactions) }
+    var lusSms by remember(version) { mutableStateOf(cfg.lusSmsGoogle) }
+    Section("Lecture et réactions") {
     Interrupteur("Transmettre mes réactions aux contacts", reactions,
         "Désactivé, vos émoticônes restent sur ce téléphone. Rien ne part sans votre appui.") { reactions = it; cfg.envoyerReactions = it }
-    HorizontalDivider()
-    var lusSms by remember(version) { mutableStateOf(cfg.lusSmsGoogle) }
     Interrupteur("SMS lus aussi dans Google Messages", lusSms,
         "Un SMS lu ici (ou sur le Mac) passe en lu dans Google Messages. Gardez « Confirmations de lecture » désactivé dans Google Messages > Paramètres > RCS pour que vos contacts ne le voient pas. WhatsApp : toujours synchronisé, en « lu par moi » invisible des contacts. Jamais pour Telegram, Signal ni LinkedIn.") {
         lusSms = it; cfg.lusSmsGoogle = it
     }
-    HorizontalDivider()
+    }
     // Statut de présence choisi par vous
     val portee = rememberCoroutineScope()
     var presence by remember(version) { mutableStateOf(cfg.presence) }
     var retour by remember { mutableStateOf<String?>(null) }
-    Text("Mon statut de présence", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+    Section("Mon statut de présence") {
     androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         val choix = listOf("offline" to "Hors ligne", "unavailable" to "Absent", "online" to "En ligne")
         choix.forEachIndexed { i, (v, t) ->
@@ -950,7 +1008,7 @@ private fun PageConfidentialite(version: Int) {
     Explication("Ce que vos contacts voient de vous (« en ligne », « absent »), là où la messagerie le transmet. " +
         "Hors ligne par défaut. WhatsApp ne reprend pas toujours ce statut.")
     retour?.let { Text(it.trim(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    HorizontalDivider()
+    }
     Explication("Aucun accusé de lecture ni indicateur de saisie n'est envoyé : lu / non lu reste sur ce téléphone. " +
         "Aucun message ne part sans votre appui sur « Envoyer ».")
 }

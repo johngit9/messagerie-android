@@ -76,10 +76,21 @@ private val PALETTE = listOf(0xFF3B5BDB, 0xFF5B5FC7, 0xFF7048E8, 0xFFAE3EC9, 0xF
 internal fun PageAffichage() {
     val cfg = Moteur.cfg
     var messagerieOuverte by remember { mutableStateOf<Source?>(null) }
+    val nav = LocalSousMenu.current
+    val sous = nav.actuel
 
-    ApercuAccueil()
+    if (sous == null || sous == "Écran des messages") ApercuAccueil()
+    if (sous == null) ListeSousMenus(null, listOf(
+        ElementSous("Écran des messages", listOf("Classique", "Bandeau", "Épuré").getOrElse(Affichage.haut) { "Bandeau" } + " · " +
+            listOf("Cartes", "Lignes", "Colorée", "Aérée").getOrElse(Affichage.design) { "Cartes" }, Icons.Outlined.ViewAgenda, 0xFF3B5BDB),
+        ElementSous("Thème et couleur", listOf("Auto", "Clair", "Sombre").getOrElse(Affichage.theme) { "Auto" } +
+            if (Affichage.dynamique) " · Material You" else "", Icons.Outlined.Palette, 0xFF9C36B5),
+        ElementSous("Taille", "Texte ${Affichage.texte} % · interface ${Affichage.zoom} %", Icons.Outlined.FormatSize, 0xFF0C8599),
+        ElementSous("Couleur de chaque messagerie", Affichage.couleurs.size.let { if (it == 0) "Couleurs d'origine" else "$it personnalisée(s)" },
+            Icons.Outlined.ColorLens, 0xFFE8590C),
+    ))
 
-    CarteRubrique(Icons.Outlined.ViewAgenda, "Écran des messages") {
+    if (sous == "Écran des messages") CarteRubrique(Icons.Outlined.ViewAgenda, "Écran des messages") {
         SousTitre("En-tête")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             listOf(1 to "Bandeau", 2 to "Épuré", 0 to "Classique").forEach { (v, nom) ->
@@ -105,7 +116,7 @@ internal fun PageAffichage() {
             "Désactivée, la liste prend tout l'écran ; le filtre par messagerie reste dans le menu ☰.") { Affichage.barreBas = it; cfg.barreBas = it }
     }
 
-    CarteRubrique(Icons.Outlined.Palette, "Thème et couleur") {
+    if (sous == "Thème et couleur") CarteRubrique(Icons.Outlined.Palette, "Thème et couleur") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             listOf(0 to "Auto", 1 to "Clair", 2 to "Sombre").forEach { (v, nom) ->
                 Tuile(nom, Affichage.theme == v, Modifier.weight(1f), clic = { Affichage.theme = v; cfg.theme = v }) { MiniTheme(v) }
@@ -123,7 +134,7 @@ internal fun PageAffichage() {
         }
     }
 
-    CarteRubrique(Icons.Outlined.FormatSize, "Taille") {
+    if (sous == "Taille") CarteRubrique(Icons.Outlined.FormatSize, "Taille") {
         Curseur("Texte", listOf(85 to "Petit", 100 to "Normal", 115 to "Grand", 130 to "Très grand"), Affichage.texte) {
             Affichage.texte = it; cfg.tailleTexte = it
         }
@@ -132,7 +143,7 @@ internal fun PageAffichage() {
         }
     }
 
-    CarteRubrique(Icons.Outlined.ColorLens, "Couleur de chaque messagerie") {
+    if (sous == "Couleur de chaque messagerie") CarteRubrique(Icons.Outlined.ColorLens, "Couleur de chaque messagerie") {
         Explication("Pour le logo, vos bulles, les boutons et les notifications. Touchez une messagerie pour la changer.")
         Source.entries.forEachIndexed { i, src ->
             if (i > 0) HorizontalDivider()
@@ -158,7 +169,7 @@ internal fun PageAffichage() {
         }
     }
 
-    OutlinedButton(onClick = {
+    if (sous == null) OutlinedButton(onClick = {
         Affichage.zoom = 100; Affichage.texte = 100; Affichage.accent = 0L; Affichage.theme = 0; Affichage.couleurs.clear()
         Affichage.design = 0; Affichage.haut = 1; Affichage.barreBas = true; Affichage.bandeau = 0L
         cfg.zoom = 100; cfg.tailleTexte = 100; cfg.accent = 0L; cfg.theme = 0; cfg.design = 0; cfg.haut = 1; cfg.barreBas = true; cfg.couleurBandeau = 0L
