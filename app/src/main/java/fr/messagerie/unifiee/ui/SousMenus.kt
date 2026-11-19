@@ -25,6 +25,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,7 +109,7 @@ internal fun <T> LigneDeroulante(
     choisir: (T) -> Unit,
     extra: (@Composable () -> Unit)? = null,
 ) {
-    var ouvert by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var ouvert by remember { mutableStateOf(false) }
     if (separateur) HorizontalDivider(Modifier.padding(start = 60.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { logo() }
