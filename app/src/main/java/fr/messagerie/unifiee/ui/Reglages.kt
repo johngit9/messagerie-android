@@ -93,6 +93,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Style
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.BatteryChargingFull
@@ -671,12 +672,39 @@ private fun PageNotifications(version: Int) {
             EtatNotifications()
             ApercuNotification(photo, boutons, bulles, apercu)
             val nSourdine = e.conversations.count { e.etat(it).sourdine }
-            ListeSousMenus(null, listOfNotNull(
+            // Toutes les messageries dans une seule carte : un menu déroulant chacune, et son bouton son / vibration
+            Text("Par messagerie", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    key(maj) {
+                        Source.entries.filter { e.statistiques[it] != null }.forEachIndexed { i, s ->
+                            LigneDeroulante({ LogoSource(s, 30.dp) }, s.libelle, cfg.notif(s),
+                                listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune"), i > 0,
+                                choisir = { cfg.definirNotif(s, it); maj++ },
+                                extra = if (android.os.Build.VERSION.SDK_INT >= 26) ({
+                                    // Son, vibration, pop-up : réglages Android du canal de cette messagerie
+                                    IconButton(onClick = {
+                                        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                                            .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, Moteur.canalMessages(s))
+                                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                    }) { Icon(Icons.AutoMirrored.Outlined.VolumeUp, "Son et vibration ${s.libelle}", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                }) else null)
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Interrupteur("Toujours notifier une réponse attendue", notifs, "Selon le résumé de l'IA, même pour une messagerie en « Aucune ».") { notifs = it; cfg.notifications = it }
+                    }
+                }
+            }
+            Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse. 🔊 : son, vibration et pop-up de la messagerie.")
+            ListeSousMenus("Plus de réglages", listOfNotNull(
                 ElementSous("Style des notifications", listOfNotNull(if (photo) "Photo" else "Initiale", if (boutons) "boutons" else null,
                     if (apercu == 0) "message affiché" else "contenu masqué").joinToString(" · "), Icons.Outlined.Style, 0xFF3B5BDB),
                 if (android.os.Build.VERSION.SDK_INT >= 30) ElementSous("Bulles", if (bulles) "Conversations en bulle par-dessus les applis" else "Désactivées",
                     Icons.Outlined.ChatBubbleOutline, 0xFF0C8599) else null,
-                ElementSous("Par messagerie", "Quand notifier, son, vibration et pop-up", Icons.Outlined.Forum, 0xFF2F9E44),
                 ElementSous("Heures de silence", if (cfg.silenceDebut < 0) "Désactivées" else "De ${cfg.silenceDebut} h à ${cfg.silenceFin} h",
                     Icons.Outlined.Bedtime, 0xFF6741D9),
                 ElementSous("Réception et batterie", when { !veille -> "Économie max"; cfg.economie -> "Temps réel économe"; else -> "Temps réel" },
@@ -736,37 +764,6 @@ private fun PageNotifications(version: Int) {
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostic bulle", journal))
                 }) { Text("Copier le diagnostic") }
             }
-        }
-        "Par messagerie" -> {
-            Section {
-                Interrupteur("Notifier quand une réponse est attendue", notifs, "Selon le résumé de l'IA, même pour une messagerie en « Aucune ».") { notifs = it; cfg.notifications = it }
-            }
-            key(maj) {
-                Source.entries.filter { e.statistiques[it] != null }.forEach { s ->
-                    Section {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            LogoSource(s, 30.dp); Spacer(Modifier.width(12.dp))
-                            Text(s.libelle, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        }
-                        val modes = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
-                        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            modes.forEachIndexed { i, (v, l) ->
-                                SegmentedButton(selected = cfg.notif(s) == v, onClick = { cfg.definirNotif(s, v); maj++ },
-                                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, modes.size), icon = {},
-                                    label = { Text(l, fontSize = 12.sp, maxLines = 1) })
-                            }
-                        }
-                        // Son, vibration, pop-up, écran verrouillé : réglages Android du canal de cette messagerie
-                        if (android.os.Build.VERSION.SDK_INT >= 26) TextButton(onClick = {
-                            val canal = Moteur.canalMessages(s)
-                            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, canal).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        }) { Text("Son, vibration et pop-up") }
-                    }
-                }
-            }
-            Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse.")
         }
         "Heures de silence" -> Section(aide = "Les notifications arrivent sans son ni vibration pendant ces heures.") {
         var debut by remember { mutableIntStateOf(cfg.silenceDebut) }
@@ -856,12 +853,25 @@ private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
     val sources = Source.entries.filter { e.statistiques[it] != null || e.sources[it] is EtatSource.Ok || e.sources[it] is EtatSource.Erreur }
     val nav = LocalSousMenu.current
     if (nav.actuel == null) {
-        if (sources.isEmpty()) Explication("Aucune messagerie connectée pour l'instant.")
-        ListeSousMenus(null, sources.map { s ->
+        if (sources.isEmpty()) { Explication("Aucune messagerie connectée pour l'instant."); return }
+        // Rangement Pro / Perso de toutes les messageries dans une seule carte
+        Text("Vue Pro ou Perso", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+            Column {
+                key(maj) {
+                    sources.forEachIndexed { i, s ->
+                        LigneDeroulante({ LogoSource(s, 30.dp) }, s.libelle, cfg.pro(s), listOf(false to "Perso", true to "Pro"), i > 0,
+                            choisir = { cfg.definirPro(s, it); Moteur.chargerOrganisation(); maj++ })
+                    }
+                }
+            }
+        }
+        ListeSousMenus("État et détails", sources.map { s ->
             val st = e.sources[s]
             ElementSous(s.libelle,
-                (if (st is EtatSource.Erreur) "Erreur : ${st.message}" else if (cfg.pro(s)) "Pro" else "Perso") + " · notifications " +
-                    when (cfg.notif(s)) { "tous" -> "à chaque message"; "attendue" -> "si réponse attendue"; else -> "coupées" },
+                if (st is EtatSource.Erreur) "Erreur : ${st.message}"
+                else e.statistiques[s]?.let { "${it.first} conversations · connexion, délai de réception" } ?: "Connexion, délai de réception",
                 logo = { LogoSource(s, 36.dp) }, pastille = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else null)
         })
         Explication("Pro / Perso sert aux vues de la liste ; une conversation peut aussi être classée à la main (appui long sur la conversation).")

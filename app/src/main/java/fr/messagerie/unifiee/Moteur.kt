@@ -160,7 +160,7 @@ object Moteur {
     private fun nettoyerNotifications(e: Etat) {
         if (Build.VERSION.SDK_INT < 26) return
         val actives = app.getSystemService(NotificationManager::class.java).activeNotifications
-            .filter { it.notification.channelId?.startsWith("$CANAL_MESSAGES.") == true }.map { it.id }.toSet()
+            .filter { it.notification.channelId?.let { id -> id.startsWith("$CANAL_MESSAGES.") || id.startsWith("msg.") } == true }.map { it.id }.toSet()
         if (actives.isEmpty()) return
         e.conversations.forEach { c -> val id = c.cle.hashCode(); if (id in actives && !e.estNonLue(c)) Bulles.retirerNotification(app, id) }
     }
@@ -1176,7 +1176,8 @@ object Moteur {
     /** Appli visible (pas de notification alors) et conversation ouverte. */
     @Volatile var auPremierPlan = false
     @Volatile var convOuverte: String? = null
-    const val CANAL_MESSAGES = "msg"
+    // « msg2 » : les canaux « msg » d'avant refusaient les bulles (réglage figé à la création du canal)
+    const val CANAL_MESSAGES = "msg2"
 
     /** Délais de réception mesurés (ms) : date d'arrivée sur le téléphone − date du message sur le serveur. */
     fun delais(s: Source): List<Long> = liste("delais.${s.id}")
@@ -1223,10 +1224,24 @@ object Moteur {
     /** Canal Android d'une messagerie (son, vibration, pop-up : réglables dans Android). Créé au besoin. */
     fun canalMessages(s: Source): String {
         val canal = "$CANAL_MESSAGES.${s.id}"
-        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(canal, "Messages ${s.libelle}", NotificationManager.IMPORTANCE_HIGH).apply {
-                setShowBadge(false); if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
-            })
+        if (Build.VERSION.SDK_INT >= 26) {
+            val nm = app.getSystemService(NotificationManager::class.java)
+            if (nm.getNotificationChannel(canal) == null) {
+                // Reprend le son, la vibration et l'importance choisis sur l'ancien canal, puis le supprime
+                val ancien = nm.getNotificationChannel("msg.${s.id}")
+                nm.createNotificationChannel(
+                    NotificationChannel(canal, "Messages ${s.libelle}", ancien?.importance?.takeIf { it != NotificationManager.IMPORTANCE_NONE }
+                        ?: NotificationManager.IMPORTANCE_HIGH).apply {
+                        setShowBadge(false); if (Build.VERSION.SDK_INT >= 29) setAllowBubbles(true)
+                        if (ancien != null) {
+                            setSound(ancien.sound, ancien.audioAttributes)
+                            enableVibration(ancien.shouldVibrate()); ancien.vibrationPattern?.let { vibrationPattern = it }
+                            lockscreenVisibility = ancien.lockscreenVisibility
+                        }
+                    })
+                if (ancien != null) runCatching { nm.deleteNotificationChannel("msg.${s.id}") }
+            }
+        }
         return canal
     }
 
@@ -1314,7 +1329,7 @@ object Moteur {
         val intent = Intent(app, MainActivity::class.java).putExtra("cle", c.cle)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(app, c.cle.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(app, "$CANAL_MESSAGES.${c.source.id}")
+        val n = NotificationCompat.Builder(app, canalMessages(c.source))
             .setSmallIcon(R.drawable.ic_bulle)
             .setContentTitle(c.nom)
             .setContentText("Réponse non envoyée : $erreur")

@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -85,5 +88,47 @@ internal fun Section(titre: String? = null, aide: String? = null, contenu: @Comp
             if (aide != null) Explication(aide)
             contenu()
         }
+    }
+}
+
+/**
+ * Une ligne par messagerie dans une seule carte : logo, nom, et un menu déroulant pour choisir la valeur.
+ * [extra] ajoute un bouton en bout de ligne (ex. son de la messagerie).
+ */
+@Composable
+internal fun <T> LigneDeroulante(
+    logo: @Composable () -> Unit,
+    nom: String,
+    valeur: T,
+    options: List<Pair<T, String>>,
+    separateur: Boolean,
+    choisir: (T) -> Unit,
+    extra: (@Composable () -> Unit)? = null,
+) {
+    var ouvert by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (separateur) HorizontalDivider(Modifier.padding(start = 60.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { logo() }
+        Spacer(Modifier.width(12.dp))
+        Text(nom, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        Box {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { ouvert = true }) {
+                Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(options.firstOrNull { it.first == valeur }?.second ?: "—", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1)
+                    Icon(Icons.Outlined.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+            androidx.compose.material3.DropdownMenu(expanded = ouvert, onDismissRequest = { ouvert = false }) {
+                options.forEach { (v, l) ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(l, fontWeight = if (v == valeur) FontWeight.SemiBold else FontWeight.Normal) },
+                        leadingIcon = { if (v == valeur) Icon(Icons.Outlined.Check, null) else Spacer(Modifier.size(24.dp)) },
+                        onClick = { ouvert = false; choisir(v) })
+                }
+            }
+        }
+        if (extra != null) extra() else Spacer(Modifier.width(10.dp))
     }
 }
