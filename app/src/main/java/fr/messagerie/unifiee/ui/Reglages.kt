@@ -92,6 +92,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material.icons.outlined.BrightnessAuto
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.BatterySaver
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import fr.messagerie.unifiee.Plantages
 import fr.messagerie.unifiee.Ollama
 import fr.messagerie.unifiee.ServiceVeille
@@ -103,16 +112,17 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class Page(val titre: String, val icone: ImageVector) {
-    Matrix("Serveur Matrix", Icons.Outlined.Dns),
-    Element("Relais Element", Icons.Outlined.Hub),
-    IA("Intelligence artificielle", Icons.Outlined.AutoAwesome),
-    Messageries("Messageries", Icons.Outlined.Forum),
-    Affichage("Apparence et couleurs", Icons.Outlined.Palette),
-    Notifications("Notifications et actualisation", Icons.Outlined.Notifications),
-    Confidentialite("Confidentialité", Icons.Outlined.Shield),
-    Fichier("Fichier de configuration", Icons.Outlined.Description),
-    MiseAJour("Mise à jour de l'appli", Icons.Outlined.SystemUpdate),
+private enum class Page(val titre: String, val icone: ImageVector, val couleur: Long, val motsCles: String) {
+    Matrix("Serveur Matrix", Icons.Outlined.Dns, 0xFF0C8599, "synapse passerelle whatsapp sms telegram signal linkedin adresse jeton connexion"),
+    Element("Relais Element", Icons.Outlined.Hub, 0xFF0DBD8C, "element relais jeton connexion teams"),
+    IA("Intelligence artificielle", Icons.Outlined.AutoAwesome, 0xFFE67700, "ollama ia résumé suggestion modèle"),
+    Messageries("Messageries", Icons.Outlined.Forum, 0xFF3B5BDB, "pro perso source whatsapp sms telegram signal linkedin element teams"),
+    Affichage("Apparence et couleurs", Icons.Outlined.Palette, 0xFF9C36B5, "thème sombre clair couleur taille texte zoom bandeau material you design"),
+    Notifications("Notifications et réception", Icons.Outlined.Notifications, 0xFFE8590C, "bulle son vibration batterie temps réel arrière-plan économie silence verrouillage"),
+    Confidentialite("Confidentialité", Icons.Outlined.Shield, 0xFF2F9E44, "lu accusé lecture présence réaction google messages vie privée"),
+    Statistiques("Réception et statistiques", Icons.Outlined.Insights, 0xFF1971C2, "latence délai archive messages"),
+    Fichier("Fichier de configuration", Icons.Outlined.Description, 0xFF5C677D, "importer exporter json sauvegarde"),
+    MiseAJour("Mise à jour de l'appli", Icons.Outlined.SystemUpdate, 0xFF6741D9, "version apk installer"),
 }
 
 /** État de la vérification des mises à jour, gardé tant que l'appli tourne. */
@@ -166,6 +176,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
                 Page.Confidentialite -> PageConfidentialite(version)
                 Page.Fichier -> PageFichier { version++; connexionsModifiees = true }
                 Page.MiseAJour -> PageMiseAJour()
+                Page.Statistiques -> PageStatistiques(e) { page = it }
             }
         }
     }
@@ -182,21 +193,83 @@ private fun majDisponible(ctx: android.content.Context) =
 
 // MARK: Menu principal
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/** Une rubrique trouvée par la recherche ou affichée dans un groupe. */
+private class Entree(val page: Page, val resume: String, val pastille: Boolean = false)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
     val ctx = LocalContext.current
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("Réglages") },
-            navigationIcon = { if (!accueil) IconButton(onClick = quitter) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
-        )
-    }) { pad ->
+    val defilement = androidx.compose.material3.TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var recherche by rememberSaveable { mutableStateOf("") }
+
+    fun resume(s: Source) = when (val st = e.sources[s]) {
+        is EtatSource.Ok -> "Connecté"
+        is EtatSource.Erreur -> "Erreur : ${st.message}"
+        else -> null
+    }
+    val sourcesMatrix = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN, Source.SIGNAL)
+    val okMatrix = sourcesMatrix.filter { e.sources[it] is EtatSource.Ok }
+    val actives = Source.entries.filter { e.statistiques[it] != null }
+    val n = cfg.imports.size
+
+    val entrees = mapOf(
+        Page.Messageries to Entree(Page.Messageries, if (actives.isEmpty()) "Pro / Perso, couleurs, délai de réception"
+            else actives.joinToString(" · ") { it.id + if (e.pro.contains(it)) " (pro)" else "" }),
+        Page.Notifications to Entree(Page.Notifications, when {
+            !cfg.veilleArrierePlan -> "Économie max · vérification toutes les 15 min"
+            cfg.economie -> "Temps réel économe · bulles, boutons, sons"
+            else -> "Temps réel · bulles, boutons, sons"
+        }),
+        Page.Confidentialite to Entree(Page.Confidentialite, if (cfg.envoyerReactions) "Aucun accusé de lecture · réactions transmises" else "Aucun accusé de lecture · réactions gardées ici"),
+        Page.Affichage to Entree(Page.Affichage, listOf("Thème clair", "Thème sombre").getOrNull(Affichage.theme - 1).let { it ?: "Thème du téléphone" } +
+            " · texte ${Affichage.texte} %" + (if (Affichage.dynamique) " · Material You" else if (Affichage.accent != 0L) " · couleur perso" else "")),
+        Page.Matrix to Entree(Page.Matrix, when {
+            !cfg.matrixConfigure -> "Non configuré"
+            okMatrix.isNotEmpty() -> "Connecté · " + okMatrix.joinToString(", ") { it.libelle }
+            else -> sourcesMatrix.firstNotNullOfOrNull { resume(it) } ?: "Configuré"
+        }),
+        Page.Element to Entree(Page.Element, if (!cfg.relaisConfigure) "Non configuré" else resume(Source.ELEMENT) ?: "Configuré"),
+        Page.IA to Entree(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée"),
+        Page.Statistiques to Entree(Page.Statistiques, "Délai de réception, messages archivés"),
+        Page.Fichier to Entree(Page.Fichier, "Importer, exporter" + if (n > 0) " · $n import(s) mémorisé(s)" else ""),
+        Page.MiseAJour to Entree(Page.MiseAJour, when {
+            majDisponible(ctx) -> "Version ${EtatMaj.derniere!!.nom} disponible"
+            EtatMaj.derniere != null -> "Version ${MiseAJour.nomInstalle(ctx)} · à jour"
+            else -> "Version ${MiseAJour.nomInstalle(ctx)}"
+        }, pastille = majDisponible(ctx)),
+    )
+
+    Scaffold(
+        modifier = Modifier.nestedScroll(defilement.nestedScrollConnection),
+        topBar = {
+            androidx.compose.material3.LargeTopAppBar(
+                title = { Text("Réglages", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = { if (!accueil) IconButton(onClick = quitter) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Retour") } },
+                scrollBehavior = defilement,
+            )
+        },
+    ) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.padding(pad).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            ChampRecherche(recherche) { recherche = it }
+
+            val q = sansAccents(recherche.trim())
+            if (q.isNotEmpty()) {
+                val trouves = Page.entries.filter { p ->
+                    val ent = entrees[p] ?: return@filter false
+                    sansAccents(p.titre + " " + ent.resume + " " + p.motsCles).contains(q)
+                }
+                if (trouves.isEmpty()) Text("Aucun réglage ne correspond à « ${recherche.trim()} ».",
+                    modifier = Modifier.padding(8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else Groupe("Résultats") { trouves.forEachIndexed { i, p -> Rubrique(entrees.getValue(p), ouvrir, separateur = i > 0) } }
+                Spacer(Modifier.navigationBarsPadding().height(16.dp))
+                return@Column
+            }
+
             if (accueil) {
                 Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Column(Modifier.padding(16.dp)) {
@@ -226,85 +299,26 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 }
             }
 
-            fun resume(s: Source) = when (val st = e.sources[s]) {
-                is EtatSource.Ok -> "Connecté"
-                is EtatSource.Erreur -> "Erreur : ${st.message}"
-                else -> null
-            }
-            val sourcesMatrix = listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.LINKEDIN, Source.SIGNAL)
-            val okMatrix = sourcesMatrix.count { e.sources[it] is EtatSource.Ok }
+            if (cfg.configure) CarteEtat(e) { ouvrir(Page.Messageries) }
+            Raccourcis()
 
-            Groupe("Connexions") {
-                Rubrique(Page.Matrix, when {
-                    !cfg.matrixConfigure -> "Non configuré"
-                    okMatrix > 0 -> "Connecté · $okMatrix messagerie(s) : " + sourcesMatrix.filter { e.sources[it] is EtatSource.Ok }.joinToString(", ") { it.libelle }
-                    else -> sourcesMatrix.firstNotNullOfOrNull { resume(it) } ?: "Configuré"
-                }, ouvrir)
-                Rubrique(Page.Element, if (!cfg.relaisConfigure) "Non configuré" else resume(Source.ELEMENT) ?: "Configuré", ouvrir)
-                Rubrique(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée", ouvrir)
+            Groupe("Messages") {
+                Rubrique(entrees.getValue(Page.Messageries), ouvrir)
+                Rubrique(entrees.getValue(Page.Notifications), ouvrir, separateur = true)
+                Rubrique(entrees.getValue(Page.Confidentialite), ouvrir, separateur = true)
             }
-            Groupe("Préférences") {
-                val actives = Source.entries.filter { e.statistiques[it] != null }
-                Rubrique(Page.Messageries, if (actives.isEmpty()) "Pro / Perso, notifications, délai de réception"
-                    else actives.joinToString(" · ") { it.id + if (e.pro.contains(it)) " (pro)" else "" }, ouvrir)
-                Rubrique(Page.Affichage, listOf("Thème clair", "Thème sombre").getOrNull(Affichage.theme - 1).let { it ?: "Thème du téléphone" } +
-                    " · texte ${Affichage.texte} %" + (if (Affichage.dynamique) " · Material You" else if (Affichage.accent != 0L) " · couleur perso" else ""), ouvrir)
-                Rubrique(Page.Notifications, (if (cfg.notifications) "Notifications activées" else "Notifications coupées") +
-                    (if (cfg.veilleArrierePlan) " · à l'écoute en arrière-plan" else ""), ouvrir)
-                Rubrique(Page.Confidentialite, if (cfg.envoyerReactions) "Réactions transmises · aucun accusé de lecture" else "Réactions gardées sur le téléphone", ouvrir)
+            Groupe("Apparence") {
+                Rubrique(entrees.getValue(Page.Affichage), ouvrir)
+            }
+            Groupe("Connexions") {
+                Rubrique(entrees.getValue(Page.Matrix), ouvrir)
+                Rubrique(entrees.getValue(Page.Element), ouvrir, separateur = true)
+                Rubrique(entrees.getValue(Page.IA), ouvrir, separateur = true)
             }
             Groupe("Appli") {
-                val n = cfg.imports.size
-                Rubrique(Page.Fichier, "Importer, exporter" + if (n > 0) " · $n import(s) mémorisé(s)" else "", ouvrir)
-                Rubrique(Page.MiseAJour, when {
-                    majDisponible(ctx) -> "Version ${EtatMaj.derniere!!.nom} disponible"
-                    EtatMaj.derniere != null -> "Version ${MiseAJour.nomInstalle(ctx)} · à jour"
-                    else -> "Version ${MiseAJour.nomInstalle(ctx)}"
-                }, ouvrir, pastille = majDisponible(ctx))
-            }
-
-            // Latence de réception : heure du message sur le serveur → arrivée sur ce téléphone
-            val latences by androidx.compose.runtime.produceState(emptyList<Pair<Source, List<Long>>>(), e.derniereActualisation) {
-                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
-                }
-            }
-            Groupe("Latence de réception (serveur → téléphone)") {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (latences.isEmpty()) Text("Pas encore mesurée : elle s'affichera après les prochains messages reçus.",
-                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    latences.forEach { (src, _) -> BlocLatence(src, e.derniereActualisation) }
-                    if (latences.isNotEmpty()) Text("Médiane sur les 50 derniers messages reçus « en direct » (imports d'historique exclus). " +
-                        "« 9 sur 10 » : 90 % des messages arrivent plus vite que ce délai.",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Appli fermée, Android ne la réveille que toutes les 15 min environ : d'où des délais de plusieurs minutes.
-                    if (latences.any { it.second.average() > 60_000 } && !cfg.veilleArrierePlan) {
-                        Text("Délai élevé : appli fermée, Android ne vérifie que toutes les 15 min environ. Pour recevoir en quelques secondes, " +
-                            "activez « à l'écoute en arrière-plan » (Notifications) et retirez l'appli des économies de batterie.",
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Réglage Notifications") }
-                            TextButton(onClick = {
-                                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                            }) { Text("Économies de batterie") }
-                        }
-                    }
-                }
-            }
-
-            if (e.statistiques.isNotEmpty()) Groupe("Messages archivés") {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Source.entries.forEach { s ->
-                        val st = e.statistiques[s] ?: return@forEach
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            PastilleSource(s, 22.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(s.libelle, modifier = Modifier.weight(1f))
-                            Text("${st.first} conv. · ${st.second} messages", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
+                Rubrique(entrees.getValue(Page.Statistiques), ouvrir)
+                Rubrique(entrees.getValue(Page.Fichier), ouvrir, separateur = true)
+                Rubrique(entrees.getValue(Page.MiseAJour), ouvrir, separateur = true)
             }
 
             if (accueil) Button(
@@ -317,35 +331,174 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
     }
 }
 
+private fun sansAccents(t: String) =
+    java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+@Composable
+private fun ChampRecherche(valeur: String, maj: (String) -> Unit) {
+    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f)) {
+                if (valeur.isEmpty()) Text("Rechercher un réglage", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.foundation.text.BasicTextField(
+                    value = valeur, onValueChange = maj, singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (valeur.isNotEmpty()) IconButton(onClick = { maj("") }) { Icon(Icons.Outlined.Close, "Effacer") }
+        }
+    }
+}
+
+/** En-tête : chaque messagerie avec un point vert (connectée), rouge (erreur) ou gris. */
+@Composable
+private fun CarteEtat(e: Etat, ouvrir: () -> Unit) {
+    val suivies = Source.entries.filter { e.sources[it] != null }
+    if (suivies.isEmpty()) return
+    val ok = suivies.count { e.sources[it] is EtatSource.Ok }
+    val erreurs = suivies.filter { e.sources[it] is EtatSource.Erreur }
+    val vert = Color(0xFF2F9E44); val rouge = MaterialTheme.colorScheme.error
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = ouvrir)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(if (erreurs.isEmpty()) vert else rouge))
+                Spacer(Modifier.width(10.dp))
+                Text(if (erreurs.isEmpty()) "Tout fonctionne" else "${erreurs.size} messagerie(s) en erreur",
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("$ok / ${suivies.size} connectées", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                suivies.forEach { s ->
+                    Box {
+                        LogoSource(s, 30.dp)
+                        val c = when (e.sources[s]) { is EtatSource.Ok -> vert; is EtatSource.Erreur -> rouge; else -> Color.Gray }
+                        Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow).padding(2.dp).clip(CircleShape).background(c))
+                    }
+                }
+            }
+            erreurs.firstOrNull()?.let { s ->
+                Text("${s.libelle} : ${(e.sources[s] as EtatSource.Erreur).message}", fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+        }
+    }
+}
+
+/** Raccourcis : thème et mode de réception, changés d'un appui. */
+@Composable
+private fun Raccourcis() {
+    val cfg = Moteur.cfg
+    val ctx = LocalContext.current
+    var mode by remember { mutableIntStateOf(if (!cfg.veilleArrierePlan) 2 else if (cfg.economie) 1 else 0) }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        val themes = listOf("Auto", "Clair", "Sombre")
+        val iconesTheme = listOf(Icons.Outlined.BrightnessAuto, Icons.Outlined.LightMode, Icons.Outlined.DarkMode)
+        TuileRapide(iconesTheme[Affichage.theme.coerceIn(0, 2)], "Thème", themes[Affichage.theme.coerceIn(0, 2)],
+            Affichage.theme != 0, Modifier.weight(1f)) {
+            val v = (Affichage.theme + 1) % 3; Affichage.theme = v; cfg.theme = v
+        }
+        val libelles = listOf("Temps réel", "Économe", "Économie max")
+        TuileRapide(if (mode == 2) Icons.Outlined.BatterySaver else Icons.Outlined.Bolt, "Réception", libelles[mode],
+            mode != 2, Modifier.weight(1f)) {
+            mode = when (mode) { 1 -> 0; 0 -> 2; else -> 1 }
+            cfg.veilleArrierePlan = mode != 2
+            if (mode != 2) cfg.economie = mode == 1
+            ServiceVeille.mettreAJour(ctx)
+        }
+    }
+}
+
+@Composable
+private fun TuileRapide(icone: ImageVector, titre: String, valeur: String, actif: Boolean, modifier: Modifier, clic: () -> Unit) {
+    val fond = if (actif) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
+    val texte = if (actif) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    Surface(shape = RoundedCornerShape(20.dp), color = fond, modifier = modifier.clickable(onClick = clic)) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icone, null, tint = texte, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(titre, fontSize = 12.sp, color = texte.copy(alpha = 0.75f))
+                Text(valeur, fontWeight = FontWeight.SemiBold, color = texte, maxLines = 1)
+            }
+        }
+    }
+}
+
 @Composable
 private fun Groupe(titre: String, contenu: @Composable ColumnScope.() -> Unit) {
     Text(titre, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 4.dp))
+        modifier = Modifier.padding(start = 8.dp, top = 8.dp))
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column(content = contenu)
     }
 }
 
 @Composable
-private fun Rubrique(p: Page, resume: String, ouvrir: (Page) -> Unit, pastille: Boolean = false) {
+private fun Rubrique(ent: Entree, ouvrir: (Page) -> Unit, separateur: Boolean = false) {
+    val p = ent.page
+    if (separateur) HorizontalDivider(Modifier.padding(start = 68.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     Row(
         Modifier.fillMaxWidth().clickable { ouvrir(p) }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(38.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(p.icone, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
-            }
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(Color(p.couleur)), contentAlignment = Alignment.Center) {
+            Icon(p.icone, null, tint = Color.White, modifier = Modifier.size(21.dp))
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(p.titre, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            Text(resume, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            Text(ent.resume, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
-        if (pastille) Box(Modifier.size(10.dp).padding(end = 0.dp)) {
-            Surface(shape = RoundedCornerShape(5.dp), color = MaterialTheme.colorScheme.error, modifier = Modifier.size(10.dp)) {}
-        }
+        if (ent.pastille) Box(Modifier.padding(end = 6.dp).size(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error))
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Délai de réception et volume archivé, sortis du menu principal. */
+@Composable
+private fun PageStatistiques(e: Etat, ouvrir: (Page) -> Unit) {
+    val cfg = Moteur.cfg
+    val ctx = LocalContext.current
+    // Latence de réception : heure du message sur le serveur → arrivée sur ce téléphone
+    val latences by androidx.compose.runtime.produceState(emptyList<Pair<Source, List<Long>>>(), e.derniereActualisation) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
+        }
+    }
+    Text("Délai de réception (serveur → téléphone)", fontWeight = FontWeight.SemiBold)
+    if (latences.isEmpty()) Explication("Pas encore mesuré : il s'affichera après les prochains messages reçus.")
+    latences.forEach { (src, _) -> BlocLatence(src, e.derniereActualisation) }
+    if (latences.isNotEmpty()) Explication("Médiane sur les 50 derniers messages reçus « en direct » (imports d'historique exclus). " +
+        "« 9 sur 10 » : 90 % des messages arrivent plus vite que ce délai.")
+    if (latences.any { it.second.average() > 60_000 } && !cfg.veilleArrierePlan) {
+        Explication("Délai élevé : appli fermée, Android ne vérifie que toutes les 15 min environ. Pour recevoir en quelques secondes, " +
+            "choisissez « Temps réel » (Notifications) et retirez l'appli des économies de batterie.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Réception") }
+            TextButton(onClick = {
+                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }) { Text("Économies de batterie") }
+        }
+    }
+    if (e.statistiques.isNotEmpty()) {
+        HorizontalDivider()
+        Text("Messages archivés", fontWeight = FontWeight.SemiBold)
+        Source.entries.forEach { s ->
+            val st = e.statistiques[s] ?: return@forEach
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PastilleSource(s, 22.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(s.libelle, modifier = Modifier.weight(1f))
+                Text("${st.first} conv. · ${st.second} messages", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
