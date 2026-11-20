@@ -1401,7 +1401,15 @@ object Moteur {
         // Le contact (ou le groupe) avec sa photo : notification « conversation » et bulle
         val contact = androidx.core.app.Person.Builder().setName(c.nom.ifEmpty { "Contact" }).setKey(c.cle)
             .setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(Bulles.image(app, c))).build()
-        msgs.takeLast(6).forEach { m ->
+        // Tous les messages reçus non lus de la conversation (pas seulement ceux qui viennent d'arriver),
+        // sinon la nouvelle notification remplace l'ancienne et les messages précédents disparaissent
+        val nonLus = run {
+            val e = _etat.value
+            val actuelle = e.conversations.firstOrNull { it.cle == c.cle } ?: c
+            val depuis = e.luJusqua(actuelle)
+            (actuelle.messages.filter { !it.deMoi && it.date > depuis } + msgs).distinctBy { it.cle }.sortedBy { it.date }
+        }
+        nonLus.takeLast(8).forEach { m ->
             style.addMessage(if (cfg.notifApercu == 1) "Nouveau message" else m.texteUtile, m.date, if (c.estGroupe) membre(c, m.auteur) else contact)
         }
         val n = NotificationCompat.Builder(app, canal)
