@@ -110,6 +110,9 @@ object Spam {
             }
             if (imite != null) { score += 35; raisons += "« $d » imite ${imite.key.trimEnd('-')} sans être son site officiel"; break }
         }
+        // Tous les liens mènent au site officiel d'une marque connue (ex. my.dpd.fr) : vrai message probable
+        val officiels = MARQUES.values.flatten().toSet()
+        if (domaines.isNotEmpty() && domaines.all { d -> officiels.any { o -> d == o || d.endsWith(".$o") } }) score -= 30
         val themes = THEMES.filter { it.first.containsMatchIn(texte) }.map { it.second }
         if (themes.isNotEmpty()) { score += minOf(30, 15 * themes.size); raisons += "sujet typique des arnaques : " + themes.joinToString(", ") }
         if (URGENCE.containsMatchIn(texte)) { score += 15; raisons += "pousse à agir vite" }
