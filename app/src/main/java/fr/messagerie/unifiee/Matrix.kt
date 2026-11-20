@@ -421,6 +421,11 @@ class SyncPont(
         for ((id, i) in infos) {
             val contacts = i.avatars.filterKeys { it.startsWith(pont.prefixe) && it != moi }
             (i.avatarSalon ?: contacts.values.singleOrNull() ?: contacts.values.firstOrNull().takeIf { contacts.size == 1 })?.let { photos[cle(id)] = it }
+            // Groupes : photo de chaque participant, retrouvée par son nom (pour les notifications)
+            if (contacts.size > 1) for ((u, mxc) in contacts) {
+                val nomMembre = i.membres[u]?.replace(" (WA)", "") ?: continue
+                photos["membre:" + cle(id) + ":" + nomMembre] = mxc
+            }
         }
         archive.definirAvatars(photos)
 

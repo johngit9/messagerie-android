@@ -1379,6 +1379,15 @@ object Moteur {
         e.conversations.filter { e.estPro(it) }.forEach { runCatching { NotificationManagerCompat.from(app).cancel(it.cle.hashCode()) } }
     }
 
+    /** Participant d'un groupe pour la notification, avec sa photo (téléchargée au besoin) ou son initiale en couleur. */
+    private fun membre(c: Conversation, nom: String): androidx.core.app.Person {
+        val b = androidx.core.app.Person.Builder().setName(nom).setKey(c.cle + ":" + nom)
+        val f = if (!cfg.notifPhoto) null else runCatching { kotlinx.coroutines.runBlocking { photoContact("membre:" + c.cle + ":" + nom) } }.getOrNull()
+        val image = f?.let { runCatching { android.graphics.BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+        if (image != null) b.setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(image))
+        return b.build()
+    }
+
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
@@ -1393,7 +1402,7 @@ object Moteur {
         val contact = androidx.core.app.Person.Builder().setName(c.nom.ifEmpty { "Contact" }).setKey(c.cle)
             .setIcon(androidx.core.graphics.drawable.IconCompat.createWithBitmap(Bulles.image(app, c))).build()
         msgs.takeLast(6).forEach { m ->
-            style.addMessage(if (cfg.notifApercu == 1) "Nouveau message" else m.texteUtile, m.date, if (c.estGroupe) androidx.core.app.Person.Builder().setName(m.auteur).build() else contact)
+            style.addMessage(if (cfg.notifApercu == 1) "Nouveau message" else m.texteUtile, m.date, if (c.estGroupe) membre(c, m.auteur) else contact)
         }
         val n = NotificationCompat.Builder(app, canal)
             .setSmallIcon(R.drawable.ic_bulle)
