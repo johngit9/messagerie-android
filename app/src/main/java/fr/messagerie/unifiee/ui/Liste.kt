@@ -158,6 +158,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                             vue == Vue.ATraiter -> Triple(Icons.Outlined.DoneAll, "Tout est à jour", "Personne n'attend de réponse de votre part.")
                             vue == Vue.NonLus -> Triple(Icons.Outlined.DoneAll, "Tout est lu", "")
                             vue == Vue.Archivees -> Triple(Icons.Outlined.Inbox, "Aucune conversation archivée", "Appui long sur une conversation pour l'archiver.")
+                            vue == Vue.Spam -> Triple(Icons.Outlined.DoneAll, "Aucun spam", "Les messages suspects d'expéditeurs inconnus arrivent ici, sans notification.")
                             else -> Triple(Icons.Outlined.Forum, "Aucune conversation", "")
                         },
                     )
@@ -255,9 +256,11 @@ private fun Entete(
         // Pastilles de vue
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Vue.entries.forEach { v ->
+                if (v == Vue.Spam && e.nombreSpams == 0 && vue != Vue.Spam) return@forEach   // pastille Spam seulement s'il y en a
                 val n = when (v) {
                     Vue.ATraiter -> e.nombreATraiter(source, espace.pro)
                     Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro)
+                    Vue.Spam -> e.nombreSpams
                     else -> 0
                 }
                 PastilleVue(v.libelle, n, v == vue) { choisirVue(v) }
@@ -712,7 +715,8 @@ private fun EnteteCompact(
             horizontalArrangement = Arrangement.spacedBy(if (bandeau) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
             if (source != null) PuceCompacte(bandeau, source.libelle + " ✕", 0, false, true) { choisirSource(null) }
             Vue.entries.forEach { v ->
-                val n = when (v) { Vue.ATraiter -> e.nombreATraiter(source, espace.pro); Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro); else -> 0 }
+                if (v == Vue.Spam && e.nombreSpams == 0 && vue != Vue.Spam) return@forEach
+                val n = when (v) { Vue.ATraiter -> e.nombreATraiter(source, espace.pro); Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro); Vue.Spam -> e.nombreSpams; else -> 0 }
                 PuceCompacte(bandeau, v.libelle, n, v == Vue.ATraiter, v == vue) { choisirVue(v) }
             }
             Box {

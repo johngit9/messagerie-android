@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Vues de la liste (pastilles en haut). */
-enum class Vue(val libelle: String) { Toutes("Toutes"), NonLus("Non lues"), ATraiter("À traiter"), Archivees("Archivées") }
+enum class Vue(val libelle: String) { Toutes("Toutes"), NonLus("Non lues"), ATraiter("À traiter"), Archivees("Archivées"), Spam("Spam") }
 /** Discussions à deux ou groupes. */
 enum class Genre(val libelle: String) { Tous("Tous"), Discussions("Discussions"), Groupes("Groupes") }
 /** Vues Pro / Perso. */
@@ -58,10 +58,11 @@ class ListeVM : ViewModel() {
             l = when (f.genre) { Genre.Tous -> l; Genre.Discussions -> l.filter { !it.estGroupe }; Genre.Groupes -> l.filter { it.estGroupe } }
             l = when (f.espace) { Espace.Tout -> l; Espace.Perso -> l.filter { !e.estPro(it) }; Espace.Pro -> l.filter { e.estPro(it) } }
             l = when (f.vue) {
-                Vue.ATraiter -> l.filter { e.aTraiter(it) && !e.estArchivee(it) }
-                Vue.NonLus -> l.filter { (e.estNonLue(it) || it.cle == derniereOuverte) && !e.estArchivee(it) }
-                Vue.Toutes -> l.filter { !e.estArchivee(it) }
-                Vue.Archivees -> l.filter { e.estArchivee(it) }
+                Vue.ATraiter -> l.filter { e.aTraiter(it) && !e.estArchivee(it) && !e.estSpam(it) }
+                Vue.NonLus -> l.filter { (e.estNonLue(it) || it.cle == derniereOuverte) && !e.estArchivee(it) && !e.estSpam(it) }
+                Vue.Toutes -> l.filter { !e.estArchivee(it) && !e.estSpam(it) }
+                Vue.Archivees -> l.filter { e.estArchivee(it) && !e.estSpam(it) }
+                Vue.Spam -> l.filter { e.estSpam(it) }
             }
             val r = q.trim()
             if (r.isNotEmpty()) l = l.filter { c -> c.nom.contains(r, true) || c.cle in t || e.synthese(c)?.resume?.contains(r, true) == true }

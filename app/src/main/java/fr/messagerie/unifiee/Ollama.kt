@@ -67,6 +67,17 @@ class Ollama(private val cfg: Config) {
 
     private fun decrire(c: Conversation) = if (c.estGroupe) "groupe « ${c.nom} »" else "discussion privée avec ${c.nom}"
 
+    /** Anti-spam : l'IA juge si les messages d'un expéditeur inconnu sont une arnaque ; null si Ollama est injoignable. */
+    fun estArnaque(c: Conversation): Boolean? {
+        val r = chat("Tu détectes les messages indésirables reçus par SMS ou messagerie : spam, hameçonnage, fausses livraisons de colis, " +
+            "fausses banques, amendes, CPF, remboursements, faux « nouveau numéro » d'un proche. Les vrais messages (livreur réel, rendez-vous, " +
+            "proche, professionnel) ne sont pas du spam. Réponds en JSON.",
+            "Expéditeur : ${c.nom} (${c.source.libelle}), à qui l'utilisateur n'a jamais écrit.\nMessages reçus :\n" +
+                transcription(c.messages.filter { !it.deMoi }.takeLast(5), 1500),
+            schema("spam" to "boolean", "raison" to "string")) ?: return null
+        return r.optBoolean("spam")
+    }
+
     /** Résumé d'une conversation : null si Ollama est injoignable. */
     fun synthetiser(c: Conversation, messages: List<Message>): Synthese? {
         val prompt = "Conversation ${c.source.id} (${decrire(c)}) :\n\n" + transcription(messages, 8000) +

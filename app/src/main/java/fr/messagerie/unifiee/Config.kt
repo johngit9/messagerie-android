@@ -58,6 +58,9 @@ class Config(context: Context) {
     fun definirNotif(s: Source, v: String) = p.edit().putString("notif.${s.id}", v).apply()
 
     /** Messagerie rangée en « Pro » par défaut (Element et LinkedIn). */
+    /** Anti-spam local (activé par défaut) et avis de l'IA pour les cas douteux. */
+    var antiSpam: Boolean get() = p.getBoolean("antiSpam", true); set(v) = p.edit().putBoolean("antiSpam", v).apply()
+    var spamIA: Boolean get() = p.getBoolean("spamIA", false); set(v) = p.edit().putBoolean("spamIA", v).apply()
     /** Mode vacances : aucune notification pour les messageries et conversations rangées en Pro. */
     var vacances: Boolean get() = p.getBoolean("vacances", false); set(v) = p.edit().putBoolean("vacances", v).apply()
     fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN || s == Source.TEAMS)

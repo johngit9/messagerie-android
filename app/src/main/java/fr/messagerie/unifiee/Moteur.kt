@@ -55,7 +55,11 @@ data class Etat(
     val categories: Map<String, String> = emptyMap(),
     val archivees: Map<String, Long> = emptyMap(),
     val epinglees: List<String> = emptyList(),
+    /** Score anti-spam des conversations à risque (score ≥ 30), voir [Spam]. */
+    val risques: Map<String, Spam.Verdict> = emptyMap(),
 ) {
+    fun estSpam(c: Conversation) = risques[c.cle]?.estSpam == true
+    val nombreSpams get() = conversations.count { estSpam(it) }
     fun estPro(c: Conversation) = categories[c.cle]?.let { it == "pro" } ?: (c.source in pro)
     /** Archivée tant qu'aucun message n'est reçu après l'archivage. */
     fun estArchivee(c: Conversation) = archivees[c.cle]?.let { a -> c.messages.none { !it.deMoi && it.date > a } } ?: false
@@ -74,7 +78,7 @@ data class Etat(
     fun estNonLue(c: Conversation) = estForcee(c) || nombreNonLus(c) > 0
     /** Non-lus (messages) d'une messagerie, en option seulement Pro (true) ou Perso (false) ; archivées exclues. */
     fun nombreMessagesNonLus(s: Source?, pro: Boolean? = null) =
-        conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && !estArchivee(it) }
+        conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && !estArchivee(it) && !estSpam(it) }
             .sumOf { maxOf(nombreNonLus(it), if (estForcee(it)) 1 else 0) }
 
     val depuis get() = System.currentTimeMillis() - jours * 86_400_000L
@@ -94,9 +98,9 @@ data class Etat(
         return s.actionRequise && e.traitee != c.derniere
     }
 
-    val nombreATraiter get() = conversations.count { aTraiter(it) && !estArchivee(it) }
+    val nombreATraiter get() = conversations.count { aTraiter(it) && !estArchivee(it) && !estSpam(it) }
     fun nombreATraiter(s: Source?, pro: Boolean?) =
-        conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && aTraiter(it) && !estArchivee(it) }
+        conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && aTraiter(it) && !estArchivee(it) && !estSpam(it) }
     fun libelleSource(c: Conversation) = if (c.cle in rcs) "RCS" else c.source.id
 }
 
@@ -126,6 +130,7 @@ object Moteur {
         app = context.applicationContext
         cfg = Config(app)
         archive = Archive(app)
+        Spam.init(app)
         chargerOrganisation()
         _etat.update { it.copy(jours = cfg.jours, debutLecture = cfg.debutLecture,
             rcs = archive.curseur("sms.rcs")?.split("\n")?.filter { s -> s.isNotEmpty() }?.toSet() ?: emptySet()) }
@@ -360,17 +365,52 @@ object Moteur {
 
     fun recharger() {
         val e = _etat.value
+        val connus = HashSet<String>()
         val convs = archive.conversations(e.depuis, 60).map { c ->
             if (c.source == Source.TEAMS || !estUnNumero(c.nom)) c
-            else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { c.copy(nom = it) } ?: c
+            else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { connus += c.cle; c.copy(nom = it) } ?: c
         }
+        carnetConnus = connus
+        val risques = if (!cfg.antiSpam) emptyMap() else convs.mapNotNull { c -> Spam.evaluer(c, c.cle in connus).takeIf { it.score >= 30 }?.let { c.cle to it } }.toMap()
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
-        _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources,
+        verifierSpamIA(convs, risques)
+        _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources, risques = risques,
             etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
             mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
+
+    // MARK: Anti-spam (local)
+
+    /** Conversations dont l'expéditeur est dans le carnet d'adresses (nom retrouvé à partir du numéro). */
+    @Volatile private var carnetConnus: Set<String> = emptySet()
+    private var iaSpamEnCours = false
+
+    fun estSpam(c: Conversation) = cfg.antiSpam && Spam.evaluer(c, c.cle in carnetConnus).estSpam
+
+    /** Cas douteux : avis de l'IA (Ollama de votre serveur), quelques conversations à la fois, puis nouveau calcul. */
+    private fun verifierSpamIA(convs: List<Conversation>, risques: Map<String, Spam.Verdict>) {
+        if (!cfg.spamIA || !cfg.ollamaConfigure || iaSpamEnCours) return
+        val aVoir = convs.filter { c -> risques[c.cle]?.let { Spam.iaAVerifier(c, it) } == true }.take(3)
+        if (aVoir.isEmpty()) return
+        iaSpamEnCours = true
+        portee.launch {
+            try { aVoir.forEach { c -> Ollama(cfg).estArnaque(c)?.let { Spam.noterIA(c, it) } } }
+            finally { iaSpamEnCours = false }
+            recharger()
+        }
+    }
+
+    /** « Spam » / « Pas spam » (local : rien n'est signalé à la messagerie). */
+    fun marquerSpam(c: Conversation, spam: Boolean) {
+        Spam.marquer(c, spam)
+        if (spam) runCatching { NotificationManagerCompat.from(app).cancel(c.cle.hashCode()) }
+        rafraichirSpam()
+    }
+
+    /** Recalcule les scores (hors du fil d'affichage). */
+    fun rafraichirSpam() { portee.launch { recharger() } }
 
     // MARK: Transcriptions des vocaux (gardées sur le téléphone)
 
@@ -1234,6 +1274,7 @@ object Moteur {
         nouveaux.filter { maintenant - it.second.date < 3_600_000 }.groupBy { it.first }.forEach { (c, l) ->
             if (cfg.notif(c.source) != "tous" || e.etat(c).sourdine || c.cle == convOuverte) return@forEach
             if (cfg.vacances && e.estPro(c)) return@forEach   // mode vacances : rien pour le Pro
+            if (estSpam(c)) return@forEach                     // spam : jamais de notification
             notifierMessages(c, l.map { it.second })
         }
     }
@@ -1322,6 +1363,7 @@ object Moteur {
         val ec = e.etat(c)
         if (!cfg.notifications || cfg.notif(c.source) == "aucun" || ec.sourdine || !e.aTraiter(c) || ec.notifiee == c.derniere) return
         if (cfg.vacances && e.estPro(c)) return   // mode vacances : rien pour le Pro
+        if (estSpam(c)) return
         val s = e.synthese(c) ?: return
         majEtat(c.cle) { it.copy(notifiee = c.derniere) }
         if (Build.VERSION.SDK_INT >= 33 &&

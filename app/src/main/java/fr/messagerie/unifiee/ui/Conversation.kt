@@ -459,6 +459,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
             if (!rechercheOuverte && !modeSelection) AussiSur(e, c, ouvrir)
+            // Anti-spam : alerte sur une conversation suspecte (score ≥ 30), avec le pourquoi
+            e.risques[c.cle]?.takeIf { !it.manuel || it.estSpam }?.let { v -> AlerteSpam(v) { spam -> Moteur.marquerSpam(c, spam) } }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = liste, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
                 item(key = "resume") { CarteResume(e, c) { brouillon = it } }
                 items(lignes.asReversed(), key = { it.cle }) { l ->
@@ -1294,6 +1296,27 @@ private fun ApercuLien(url: String, moi: Boolean, couleur: Color, auto: Boolean)
             a.titre?.let { Text(it, color = couleur, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             a.description?.let { Text(it, color = couleur.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
             Text(a.site, color = couleur.copy(alpha = 0.6f), fontSize = 11.sp, maxLines = 1)
+        }
+    }
+}
+
+/** Bandeau anti-spam en haut d'une conversation suspecte : raisons, puis « Spam » / « Pas spam » (qui apprennent). */
+@Composable
+private fun AlerteSpam(v: fr.messagerie.unifiee.Spam.Verdict, marquer: (Boolean) -> Unit) {
+    val rouge = v.estSpam
+    val fond = if (rouge) Color(0xFFFDE2E1) else Color(0xFFFDEEDC)
+    val texte = if (rouge) Color(0xFF8A1C1C) else Color(0xFF7A3A08)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(fond, RoundedCornerShape(14.dp)).padding(12.dp)) {
+        Text(if (v.manuel) "⚠️ Vous avez marqué cette conversation comme spam"
+            else if (rouge) "⚠️ Spam probable (risque ${v.score} %)" else "⚠️ Message à vérifier (risque ${v.score} %)",
+            color = texte, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        if (v.raisons.isNotEmpty()) Text(v.raisons.joinToString(" · ").replaceFirstChar { it.uppercase() }, color = texte, fontSize = 12.sp,
+            modifier = Modifier.padding(top = 2.dp))
+        if (!v.manuel) Text("N'ouvrez pas le lien et ne donnez aucune information si vous avez un doute.", color = texte.copy(alpha = 0.85f), fontSize = 12.sp,
+            modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!v.estSpam || !v.manuel) TextButton(onClick = { marquer(true) }) { Text("C'est un spam", color = texte, fontWeight = FontWeight.SemiBold) }
+            TextButton(onClick = { marquer(false) }) { Text("Ce n'est pas un spam", color = texte) }
         }
     }
 }

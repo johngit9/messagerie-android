@@ -1033,6 +1033,18 @@ private fun PageConfidentialite(version: Int) {
     val portee = rememberCoroutineScope()
     var presence by remember(version) { mutableStateOf(cfg.presence) }
     var retour by remember { mutableStateOf<String?>(null) }
+    Section("Anti-spam", aide = "Les messages suspects d'expéditeurs inconnus (faux colis, banque, amende, liens douteux) vont dans " +
+        "la vue « Spam » de la liste, sans notification. Tout est calculé sur ce téléphone : rien n'est signalé aux messageries.") {
+        var antiSpam by remember(version) { mutableStateOf(cfg.antiSpam) }
+        var spamIA by remember(version) { mutableStateOf(cfg.spamIA) }
+        var appris by remember { mutableIntStateOf(fr.messagerie.unifiee.Spam.nombreAppris) }
+        Interrupteur("Détecter le spam", antiSpam) { antiSpam = it; cfg.antiSpam = it; Moteur.rafraichirSpam() }
+        if (antiSpam && cfg.ollamaConfigure) Interrupteur("Demander l'avis de l'IA pour les cas douteux", spamIA,
+            "Ollama sur votre serveur relit les messages entre 30 et 60 % de risque.") { spamIA = it; cfg.spamIA = it; Moteur.rafraichirSpam() }
+        Explication(if (appris == 0) "Touchez « C'est un spam » ou « Ce n'est pas un spam » dans une conversation : l'appli apprend de vos choix."
+            else "Appris de $appris conversation(s) marquée(s) par vous.")
+        if (appris > 0) TextButton(onClick = { fr.messagerie.unifiee.Spam.oublier(); appris = 0; Moteur.rafraichirSpam() }) { Text("Oublier ce qui a été appris") }
+    }
     Section("Mon statut de présence") {
     androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         val choix = listOf("offline" to "Hors ligne", "unavailable" to "Absent", "online" to "En ligne")

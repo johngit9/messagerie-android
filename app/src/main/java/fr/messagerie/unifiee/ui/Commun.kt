@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.MarkEmailRead
@@ -159,6 +161,9 @@ fun actionsConversation(e: Etat, c: Conversation): List<Action> = buildList {
     if (e.estPro(c)) add(Action("Ranger en Perso", Icons.Outlined.Person) { Moteur.classer(c, if (c.source in e.pro) "perso" else null) })
     else add(Action("Ranger en Pro", Icons.Outlined.Work) { Moteur.classer(c, if (c.source in e.pro) null else "pro") })
     if (manuel != null) add(Action("Classer selon la messagerie", Icons.Outlined.Restore) { Moteur.classer(c, null) })
+    // Anti-spam local : rien n'est signalé à la messagerie
+    if (e.estSpam(c)) add(Action("Ce n'est pas un spam", Icons.Outlined.VerifiedUser) { Moteur.marquerSpam(c, false) })
+    else if (!c.estGroupe && c.messages.none { it.deMoi }) add(Action("Marquer comme spam", Icons.Outlined.Report) { Moteur.marquerSpam(c, true) })
     add(Action("Supprimer la conversation", Icons.Outlined.DeleteOutline,
         confirmer = "Supprimer « ${c.nom} » de Messagerie ? Les messages restent chez vos contacts et dans ${c.source.libelle}. " +
             "La conversation reviendra si un nouveau message arrive.") { Moteur.supprimerConversation(c) })
