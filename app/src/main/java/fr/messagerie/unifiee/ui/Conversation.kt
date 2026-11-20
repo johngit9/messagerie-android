@@ -105,6 +105,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -949,7 +950,12 @@ private fun Bulle(
                 "image" -> PhotoMessage(m, couleur)
                 "video" -> VideoMessage(m, couleur, afficherMessage)
                 "fichier" -> FichierMessage(m, couleur, afficherMessage)
-                else -> Text(avecLiens(m.texte, couleur), color = couleur)
+                else -> {
+                    Text(avecLiens(m.texte, couleur), color = couleur)
+                    // Aperçu du premier lien (titre, description, image de la page)
+                    // (désactivé tant qu'Alain n'a pas choisi : la page serait lue même pour un SMS inconnu)
+                    if (Moteur.cfg.apercusLiens) LIEN.find(m.texte)?.let { ApercuLien(urlComplete(it.value), moi, couleur) }
+                }
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                 Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f))
@@ -1207,13 +1213,17 @@ private fun lancerAppel(ctx: Context, lien: String) {
     }
 }
 
-private val LIEN = Regex("""(?i)\b((?:https?://|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]}])""")
+// Liens avec http(s):// ou www., et aussi sans schéma (« my.dpd.fr/47yabsol2 ») quand le domaine finit par une extension connue
+private val LIEN = Regex("""(?i)(?<![@\w.\-/])((?:https?://|www\.)[^\s<>"']*[^\s<>"'.,;:!?)\]}]|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:fr|com|net|org|eu|be|ch|io|co|me|app|info|biz|de|uk|es|it|nl|lu|ca|us|ly|gl|gle|link|page|dev|xyz|shop|store|online|site|tv|re|mq|gp|pf|nc)\b(?::\d+)?(?:/[^\s<>"']*[^\s<>"'.,;:!?)\]}])?/?)""")
+
+/** Adresse complète d'un lien trouvé dans le texte (https:// ajouté s'il manque). */
+private fun urlComplete(brut: String) = if (Regex("(?i)^https?://").containsMatchIn(brut)) brut else "https://$brut"
 
 /** Texte avec liens web cliquables (soulignés), ouverts dans le navigateur. */
 /** Appui sur une bulle qui contient un lien : ouvre le premier lien (appel Jitsi dans l'appli, sinon navigateur). */
 private fun ouvrirLien(t: String, ctx: Context) {
     val brut = LIEN.find(t)?.value ?: return
-    val url = if (brut.startsWith("www.", true)) "https://$brut" else brut
+    val url = urlComplete(brut)
     val hote = runCatching { android.net.Uri.parse(url).host }.getOrNull()
     if (hote != null && (hote == "meet.jit.si" || hote == runCatching { android.net.Uri.parse(Moteur.cfg.jitsi).host }.getOrNull()))
         fr.messagerie.unifiee.AppelJitsi.ouvrir(Moteur.app, url)
@@ -1225,7 +1235,7 @@ private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.Annot
         var i = 0
         for (r in LIEN.findAll(t)) {
             append(t.substring(i, r.range.first))
-            val url = r.value.let { if (it.startsWith("www.", true)) "https://$it" else it }
+            val url = urlComplete(r.value)
             val style = androidx.compose.ui.text.TextLinkStyles(androidx.compose.ui.text.SpanStyle(color = couleur,
                 textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
             val hote = runCatching { android.net.Uri.parse(url).host }.getOrNull()
@@ -1242,3 +1252,27 @@ private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.Annot
 
 /** Pièce jointe en attente d'envoi ; [contact] = nom et numéros quand c'est une fiche contact. */
 private class PieceJointe(val octets: ByteArray, val mime: String, val nom: String, val contact: String? = null)
+
+/** Carte d'aperçu d'un lien sous le texte de la bulle ; rien ne s'affiche si la page ne donne ni titre ni image. */
+@Composable
+private fun ApercuLien(url: String, moi: Boolean, couleur: Color) {
+    val apercu by androidx.compose.runtime.produceState(fr.messagerie.unifiee.ApercusLiens.enCache(url), url) {
+        if (value == null && !fr.messagerie.unifiee.ApercusLiens.dejaEssaye(url))
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.ApercusLiens.charger(url) }
+    }
+    val a = apercu ?: return
+    val ctx = LocalContext.current
+    val fond = if (moi) Color.White.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface
+    Column(Modifier.padding(top = 8.dp).widthIn(max = 276.dp).clip(RoundedCornerShape(12.dp)).background(fond)
+        .clickable { runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(a.url))) } }) {
+        a.image?.let {
+            coil3.compose.AsyncImage(model = it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().height(140.dp))
+        }
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            a.titre?.let { Text(it, color = couleur, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            a.description?.let { Text(it, color = couleur.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+            Text(a.site, color = couleur.copy(alpha = 0.6f), fontSize = 11.sp, maxLines = 1)
+        }
+    }
+}
