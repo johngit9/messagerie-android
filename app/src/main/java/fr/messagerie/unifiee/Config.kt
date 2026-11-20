@@ -112,6 +112,8 @@ class Config(context: Context) {
     var jitsi: String get() = s("jitsi").ifEmpty { "https://meet.jit.si" }.trimEnd('/'); set(v) = set("jitsi", v)
     /** Votre statut de présence choisi : offline (par défaut, discret), unavailable (absent) ou online. */
     var presence: String get() = s("presence").ifEmpty { "offline" }; set(v) = set("presence", v)
+    /** Statut montré sur Element (relais), indépendant du compte Matrix ; reprend l'ancien statut commun s'il n'a jamais été choisi. */
+    var presenceElement: String get() = s("presenceElement").ifEmpty { presence }; set(v) = set("presenceElement", v)
     var design: Int get() = p.getInt("design", 0); set(v) = p.edit().putInt("design", v).apply()
     /** Haut de la liste : 0 classique, 1 Bandeau, 2 Épuré. */
     /** Barre des messageries en bas de la liste. */

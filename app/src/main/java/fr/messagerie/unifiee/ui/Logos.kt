@@ -43,3 +43,6 @@ fun LogoSource(s: Source, taille: Dp = 24.dp, modifier: Modifier = Modifier) {
         Icon(s.logo(), s.libelle, tint = Color.White, modifier = Modifier.size(taille * 0.58f))
     }
 }
+
+/** Tracé SVG brut du logo (24 × 24), pour les dessins hors Compose (notification permanente). */
+internal fun cheminLogo(s: Source): String? = chemins[s]

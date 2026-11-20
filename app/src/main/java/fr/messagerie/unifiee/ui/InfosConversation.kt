@@ -27,6 +27,8 @@ import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.AddAPhoto
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.PermMedia
 import androidx.compose.material.icons.outlined.Search
@@ -92,6 +94,8 @@ fun FeuilleInfos(
     val demandeContacts = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> accesContacts = ok }
     val membres by produceState<List<Moteur.Membre>?>(null, c.cle, accesContacts) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
+    var modifier by remember { mutableStateOf(false) }
+    if (modifier) DialogueModifierContact(c) { modifier = false }
 
     ModalBottomSheet(onDismissRequest = fermer, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = cs.surfaceContainerLow) {
@@ -116,6 +120,7 @@ fun FeuilleInfos(
                 BoutonInfo("Appeler", Icons.Outlined.Call, c.source.teinte(), Modifier.weight(1f)) { fermer(); appeler() }
                 BoutonInfo("Rechercher", Icons.Outlined.Search, c.source.teinte(), Modifier.weight(1f)) { fermer(); rechercher() }
                 BoutonInfo("Sélectionner", Icons.Outlined.Checklist, c.source.teinte(), Modifier.weight(1f)) { fermer(); selectionner() }
+                BoutonInfo("Modifier", Icons.Outlined.Edit, c.source.teinte(), Modifier.weight(1f)) { modifier = true }
             }
             // Médias, liens et documents (messages chargés)
             val photos = historique.filter { it.type == "image" && it.media != null }
@@ -360,4 +365,52 @@ fun AussiSur(e: Etat, c: Conversation, ouvrir: (String) -> Unit) {
             }
         }
     }
+}
+
+/** Nom et photo choisis par vous pour ce contact ou ce groupe, gardés dans Messagerie seulement. */
+@Composable
+private fun DialogueModifierContact(c: Conversation, fermer: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val portee = rememberCoroutineScope()
+    val nomPerso = remember { Moteur.nomPerso(c.cle) }
+    var nom by remember { mutableStateOf(nomPerso ?: c.nom) }
+    var photo by remember { mutableStateOf<android.net.Uri?>(null) }
+    var retirer by remember { mutableStateOf(false) }
+    val aPhotoPerso = remember { Moteur.photoPerso(c.cle) != null }
+    val choisir = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) { photo = uri; retirer = false } }
+    AlertDialog(
+        onDismissRequest = fermer,
+        title = { Text(if (c.estGroupe) "Modifier le groupe" else "Modifier le contact") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Box(Modifier.size(96.dp).clip(CircleShape).clickable {
+                    choisir.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }, contentAlignment = Alignment.Center) {
+                    when {
+                        photo != null -> coil3.compose.AsyncImage(model = photo, contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(96.dp).clip(CircleShape))
+                        retirer -> Avatar(nom, c.source, c.estGroupe, taille = 96.dp)
+                        else -> Avatar(nom, c.source, c.estGroupe, taille = 96.dp, cle = c.cle)
+                    }
+                    Box(Modifier.align(Alignment.BottomEnd).size(32.dp).background(cs.primary, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Outlined.AddAPhoto, "Choisir une photo", tint = cs.onPrimary, modifier = Modifier.size(18.dp))
+                    }
+                }
+                if ((aPhotoPerso && !retirer) || photo != null) TextButton(onClick = { photo = null; retirer = true }) { Text("Photo d'origine") }
+                OutlinedTextField(value = nom, onValueChange = { nom = it }, label = { Text("Nom") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Visible seulement dans Messagerie : rien n'est changé sur la messagerie ni chez le contact.",
+                    fontSize = 12.sp, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
+                if (nomPerso != null) TextButton(onClick = { nom = "" }) { Text("Nom d'origine") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val n = nom.trim()
+                portee.launch { Moteur.modifierContact(c.cle, if (n.isEmpty()) null else n, photo, retirer) }
+                fermer()
+            }) { Text("Enregistrer") }
+        },
+        dismissButton = { TextButton(onClick = fermer) { Text("Annuler") } },
+    )
 }

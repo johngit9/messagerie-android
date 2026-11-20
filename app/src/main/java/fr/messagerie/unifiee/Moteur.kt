@@ -369,7 +369,7 @@ object Moteur {
         val convs = archive.conversations(e.depuis, 60).map { c ->
             if (c.source == Source.TEAMS || !estUnNumero(c.nom)) c
             else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { connus += c.cle; c.copy(nom = it) } ?: c
-        }
+        }.map { c -> nomPerso(c.cle)?.let { n -> connus += c.cle; c.copy(nom = n) } ?: c }   // nom choisi par vous
         carnetConnus = connus
         val risques = if (!cfg.antiSpam) emptyMap() else convs.mapNotNull { c -> Spam.evaluer(c, c.cle in connus).takeIf { it.score >= 30 }?.let { c.cle to it } }.toMap()
         val stats = archive.statistiques()
@@ -1027,15 +1027,25 @@ object Moteur {
      * Applique votre statut de présence (choisi dans les Réglages) au serveur Matrix et au relais Element.
      * Renvoie la liste des endroits où il a été appliqué et ceux en échec.
      */
-    suspend fun definirPresence(etat: String): Pair<List<String>, List<String>> = withContext(Dispatchers.IO) {
-        cfg.presence = etat
+    suspend fun definirPresence(etat: String, matrix: Boolean = true, element: Boolean = true): Pair<List<String>, List<String>> = withContext(Dispatchers.IO) {
         val ok = ArrayList<String>(); val ko = ArrayList<String>()
-        if (cfg.matrixConfigure) runCatching { Matrix(cfg).definirPresence(etat) }
-            .onSuccess { ok += "serveur Matrix (WhatsApp, Telegram, SMS, LinkedIn)" }.onFailure { ko += "serveur Matrix" }
-        if (cfg.relaisConfigure) runCatching { Relais(cfg).presence(etat) }
-            .onSuccess { ok += "Element" }.onFailure { ko += "Element (le relais ne le gère pas encore)" }
+        if (matrix) {
+            cfg.presence = etat
+            if (cfg.matrixConfigure) runCatching { Matrix(cfg).definirPresence(etat) }
+                .onSuccess { ok += "WhatsApp et Telegram" }.onFailure { ko += "serveur Matrix" }
+        }
+        if (element) {
+            cfg.presenceElement = etat
+            if (cfg.relaisConfigure) runCatching { Relais(cfg).presence(etat) }
+                .onSuccess { ok += "Element" }.onFailure { ko += "Element" }
+        }
+        _statut.value = cfg.presence to cfg.presenceElement
         ok to ko
     }
+
+    /** Statuts montrés aux autres : (compte Matrix = WhatsApp, Telegram ; Element). */
+    private val _statut by lazy { MutableStateFlow(cfg.presence to cfg.presenceElement) }
+    val statut: StateFlow<Pair<String, String>> get() = _statut
 
     /** Supprime des messages DANS MESSAGERIE seulement (rien n'est supprimé chez les contacts ni sur les messageries). */
     fun supprimerMessages(cles: List<String>) {
@@ -1171,8 +1181,46 @@ object Moteur {
 
     private val photos = java.util.concurrent.ConcurrentHashMap<String, java.io.File>()
 
+    // MARK: Contacts modifiés (nom et photo choisis par vous, gardés sur ce téléphone seulement)
+    private val prefsContacts by lazy { app.getSharedPreferences("contacts", android.content.Context.MODE_PRIVATE) }
+    private val _versionPhotos = MutableStateFlow(0)
+    /** Change à chaque photo modifiée : les avatars se rechargent. */
+    val versionPhotos: StateFlow<Int> get() = _versionPhotos
+
+    fun nomPerso(cle: String): String? = prefsContacts.getString("nom.$cle", null)?.takeIf { it.isNotBlank() }
+
+    private fun fichierPhotoPerso(cle: String): java.io.File {
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(cle.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        return java.io.File(java.io.File(app.filesDir, "photos-perso"), "$hash.jpg")
+    }
+
+    fun photoPerso(cle: String): java.io.File? = fichierPhotoPerso(cle).takeIf { it.exists() && it.length() > 0 }
+
+    /**
+     * Modifie le nom et/ou la photo d'un contact DANS MESSAGERIE (rien n'est changé sur les messageries ni chez le contact).
+     * nom vide = nom d'origine ; photo = image choisie dans la galerie ; retirerPhoto = photo d'origine.
+     */
+    suspend fun modifierContact(cle: String, nom: String?, photo: android.net.Uri?, retirerPhoto: Boolean) = withContext(Dispatchers.IO) {
+        prefsContacts.edit().apply { if (nom.isNullOrBlank()) remove("nom.$cle") else putString("nom.$cle", nom.trim()) }.apply()
+        val f = fichierPhotoPerso(cle)
+        if (retirerPhoto) f.delete()
+        if (photo != null) runCatching {
+            val source = app.contentResolver.openInputStream(photo)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching
+            // Carré central, 512 px au plus
+            val cote = minOf(source.width, source.height)
+            val carre = android.graphics.Bitmap.createBitmap(source, (source.width - cote) / 2, (source.height - cote) / 2, cote, cote)
+            val finale = if (cote > 512) android.graphics.Bitmap.createScaledBitmap(carre, 512, 512, true) else carre
+            f.parentFile?.mkdirs()
+            f.outputStream().use { finale.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+        }
+        photos.remove(cle)
+        _versionPhotos.value++
+        recharger()
+    }
+
     /** Photo de contact déjà téléchargée (sans réseau), pour les notifications et les bulles. */
     fun photoEnCache(conv: String): java.io.File? {
+        photoPerso(conv)?.let { return it }
         photos[conv]?.let { return it }
         val mxc = archive.avatar(conv) ?: return null
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(mxc.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
@@ -1198,6 +1246,7 @@ object Moteur {
 
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
     suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
+        photoPerso(conv)?.let { return@withContext it }
         photos[conv]?.let { return@withContext it }
         val mxc = archive.avatar(conv) ?: return@withContext null
         val dossier = java.io.File(app.cacheDir, "avatars").apply { mkdirs() }

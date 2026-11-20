@@ -291,7 +291,7 @@ private fun TuileIcone(nom: String, icone: ImageVector, actif: Boolean, modifier
 
 /** Rangée de pastilles qui défile ; la première (« A ») remet la couleur d'origine. */
 @Composable
-private fun RangeeCouleurs(choisie: Long, origine: Long, choisir: (Long) -> Unit) {
+internal fun RangeeCouleurs(choisie: Long, origine: Long, choisir: (Long) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

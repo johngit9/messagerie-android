@@ -95,6 +95,8 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.BeachAccess
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Work
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.BatteryChargingFull
@@ -120,12 +122,11 @@ import java.util.Date
 import java.util.Locale
 
 private enum class Page(val titre: String, val icone: ImageVector, val couleur: Long, val motsCles: String) {
-    Matrix("Serveur Matrix", Icons.Outlined.Dns, 0xFF0C8599, "synapse passerelle whatsapp sms telegram signal linkedin adresse jeton connexion"),
-    Element("Relais Element", Icons.Outlined.Hub, 0xFF0DBD8C, "element relais jeton connexion teams"),
+    Connexions("Serveur et relais", Icons.Outlined.Dns, 0xFF0C8599, "matrix synapse passerelle whatsapp sms telegram signal linkedin element relais teams adresse jeton connexion"),
     IA("Intelligence artificielle", Icons.Outlined.AutoAwesome, 0xFFE67700, "ollama ia résumé suggestion modèle"),
-    Messageries("Messageries", Icons.Outlined.Forum, 0xFF3B5BDB, "pro perso source whatsapp sms telegram signal linkedin element teams"),
+    Messageries("Messageries, Pro et Perso", Icons.Outlined.Forum, 0xFF3B5BDB, "pro perso espace source whatsapp sms telegram signal linkedin element teams notification couleur silence"),
     Affichage("Apparence et couleurs", Icons.Outlined.Palette, 0xFF9C36B5, "thème sombre clair couleur taille texte zoom bandeau material you design police typo caractères icône fond"),
-    Notifications("Notifications et réception", Icons.Outlined.Notifications, 0xFFE8590C, "bulle son vibration batterie temps réel arrière-plan économie silence verrouillage"),
+    Notifications("Notifications et réception", Icons.Outlined.Notifications, 0xFFE8590C, "bulle son vibration batterie temps réel arrière-plan économie silence verrouillage vacances"),
     Confidentialite("Confidentialité", Icons.Outlined.Shield, 0xFF2F9E44, "lu accusé lecture présence réaction google messages vie privée"),
     Statistiques("Réception et statistiques", Icons.Outlined.Insights, 0xFF1971C2, "latence délai archive messages"),
     Fichier("Fichier de configuration", Icons.Outlined.Description, 0xFF5C677D, "importer exporter json sauvegarde"),
@@ -180,8 +181,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
         else androidx.compose.runtime.CompositionLocalProvider(LocalSousMenu provides NavSous(sm) { sous = it }) {
             PageReglage(sm ?: p.titre, retour = { if (sm != null) sous = null else aller(null) }) {
                 when (p) {
-                    Page.Matrix -> PageMatrix(version) { connexionsModifiees = true }
-                    Page.Element -> PageElement(version) { connexionsModifiees = true }
+                    Page.Connexions -> PageConnexions(e, version) { connexionsModifiees = true }
                     Page.IA -> PageIA(version)
                     Page.Messageries -> PageMessageries(e) { aller(it) }
                     Page.Affichage -> PageAffichage()
@@ -231,22 +231,24 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
     val entrees = mapOf(
         Page.Messageries to Entree(Page.Messageries, if (actives.isEmpty()) "Pro / Perso, couleurs, délai de réception"
             else actives.joinToString(" · ") { it.id + if (e.pro.contains(it)) " (pro)" else "" }),
-        Page.Notifications to Entree(Page.Notifications, when {
+        Page.Notifications to Entree(Page.Notifications, (if (cfg.vacances) "Mode vacances activé · " else "") + when {
             !cfg.veilleArrierePlan -> "Économie max · vérification toutes les 15 min"
             cfg.economie -> "Temps réel économe · bulles, boutons, sons"
             else -> "Temps réel · bulles, boutons, sons"
-        }),
+        }, pastille = cfg.vacances),
         Page.Confidentialite to Entree(Page.Confidentialite, if (cfg.envoyerReactions) "Aucun accusé de lecture · réactions transmises" else "Aucun accusé de lecture · réactions gardées ici"),
         Page.Affichage to Entree(Page.Affichage, listOf("Thème clair", "Thème sombre").getOrNull(Affichage.theme - 1).let { it ?: "Thème du téléphone" } +
             " · texte ${Affichage.texte} %" + (if (Affichage.dynamique) " · Material You" else if (Affichage.accent != 0L) " · couleur perso" else "")),
-        Page.Matrix to Entree(Page.Matrix, when {
-            !cfg.matrixConfigure -> "Non configuré"
-            okMatrix.isNotEmpty() -> "Connecté · " + okMatrix.joinToString(", ") { it.libelle }
-            else -> sourcesMatrix.firstNotNullOfOrNull { resume(it) } ?: "Configuré"
-        }),
-        Page.Element to Entree(Page.Element, if (!cfg.relaisConfigure) "Non configuré" else resume(Source.ELEMENT) ?: "Configuré"),
+        Page.Connexions to Entree(Page.Connexions, listOf(
+            "Matrix " + when {
+                !cfg.matrixConfigure -> "non configuré"
+                okMatrix.isNotEmpty() -> "connecté"
+                else -> sourcesMatrix.firstNotNullOfOrNull { resume(it) }?.lowercase() ?: "configuré"
+            },
+            "Element " + if (!cfg.relaisConfigure) "non configuré" else (resume(Source.ELEMENT)?.lowercase() ?: "configuré"),
+        ).joinToString(" · ")),
         Page.IA to Entree(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée"),
-        Page.Statistiques to Entree(Page.Statistiques, "Délai de réception, messages archivés"),
+        Page.Statistiques to Entree(Page.Statistiques, "${e.statistiques.values.sumOf { it.second }} messages archivés · délai de réception"),
         Page.Fichier to Entree(Page.Fichier, "Importer, exporter" + if (n > 0) " · $n import(s) mémorisé(s)" else ""),
         Page.MiseAJour to Entree(Page.MiseAJour, when {
             majDisponible(ctx) -> "Version ${EtatMaj.derniere!!.nom} disponible"
@@ -269,7 +271,6 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
             Modifier.padding(pad).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            CarteVacances(e)
             ChampRecherche(recherche) { recherche = it }
 
             val q = sansAccents(recherche.trim())
@@ -326,8 +327,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 Rubrique(entrees.getValue(Page.Affichage), ouvrir)
             }
             Groupe("Connexions") {
-                Rubrique(entrees.getValue(Page.Matrix), ouvrir)
-                Rubrique(entrees.getValue(Page.Element), ouvrir, separateur = true)
+                Rubrique(entrees.getValue(Page.Connexions), ouvrir)
                 Rubrique(entrees.getValue(Page.IA), ouvrir, separateur = true)
             }
             Groupe("Appli") {
@@ -505,44 +505,89 @@ private fun Rubrique(ent: Entree, ouvrir: (Page) -> Unit, separateur: Boolean = 
     }
 }
 
-/** Délai de réception et volume archivé, sortis du menu principal. */
+/** Réception et statistiques : chiffres clés, délai par messagerie, volume archivé en barres. */
 @Composable
 private fun PageStatistiques(e: Etat, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
     val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
     // Latence de réception : heure du message sur le serveur → arrivée sur ce téléphone
     val latences by androidx.compose.runtime.produceState(emptyList<Pair<Source, List<Long>>>(), e.derniereActualisation) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             Source.entries.mapNotNull { src -> Moteur.delais(src).takeIf { it.isNotEmpty() }?.let { src to it } }
         }
     }
-    Text("Délai de réception (serveur → téléphone)", fontWeight = FontWeight.SemiBold)
-    if (latences.isEmpty()) Explication("Pas encore mesuré : il s'affichera après les prochains messages reçus.")
-    latences.forEach { (src, _) -> BlocLatence(src, e.derniereActualisation) }
-    if (latences.isNotEmpty()) Explication("Médiane sur les 50 derniers messages reçus « en direct » (imports d'historique exclus). " +
-        "« 9 sur 10 » : 90 % des messages arrivent plus vite que ce délai.")
-    if (latences.any { it.second.average() > 60_000 } && !cfg.veilleArrierePlan) {
-        Explication("Délai élevé : appli fermée, Android ne vérifie que toutes les 15 min environ. Pour recevoir en quelques secondes, " +
-            "choisissez « Temps réel » (Notifications) et retirez l'appli des économies de batterie.")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Réception") }
-            TextButton(onClick = {
-                runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            }) { Text("Économies de batterie") }
+    val toutes = latences.flatMap { it.second }
+    val totalConv = e.statistiques.values.sumOf { it.first }
+    val totalMsg = e.statistiques.values.sumOf { it.second }
+    // Chiffres clés
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        TuileChiffre("Messages", compteLong(totalMsg), Icons.Outlined.Forum, 0xFF3B5BDB, Modifier.weight(1f))
+        TuileChiffre("Conversations", compteLong(totalConv), Icons.Outlined.Insights, 0xFF9C36B5, Modifier.weight(1f))
+        TuileChiffre("Délai médian", if (toutes.isEmpty()) "—" else duree(centile(toutes, 0.5)), Icons.Outlined.Bolt,
+            when { toutes.isEmpty() -> 0xFF5C677D; centile(toutes, 0.5) < 10_000 -> 0xFF2F9E44; centile(toutes, 0.5) < 120_000 -> 0xFFE8590C; else -> 0xFFC92A2A },
+            Modifier.weight(1f))
+    }
+    Section("Délai de réception", aide = "Du serveur jusqu'à ce téléphone. Médiane des 50 derniers messages reçus en direct ; " +
+        "« 9 sur 10 » : 90 % arrivent plus vite.") {
+        if (latences.isEmpty()) Explication("Pas encore mesuré : il s'affichera après les prochains messages reçus.")
+        latences.forEachIndexed { i, (src, _) ->
+            if (i > 0) HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
+            BlocLatence(src, e.derniereActualisation)
         }
     }
-    if (e.statistiques.isNotEmpty()) {
-        HorizontalDivider()
-        Text("Messages archivés", fontWeight = FontWeight.SemiBold)
-        Source.entries.forEach { s ->
-            val st = e.statistiques[s] ?: return@forEach
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PastilleSource(s, 22.dp)
-                Spacer(Modifier.width(10.dp))
-                Text(s.libelle, modifier = Modifier.weight(1f))
-                Text("${st.first} conv. · ${st.second} messages", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (latences.any { it.second.average() > 60_000 } && !cfg.veilleArrierePlan) {
+        Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFFFDEEDC), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Délai élevé", fontWeight = FontWeight.SemiBold, color = Color(0xFF7A3A08))
+                Text("Appli fermée, Android ne vérifie que toutes les 15 min environ. Pour recevoir en quelques secondes, " +
+                    "choisissez « Temps réel » et retirez l'appli des économies de batterie.", fontSize = 13.sp, color = Color(0xFF7A3A08))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Réception") }
+                    TextButton(onClick = {
+                        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }) { Text("Économies de batterie") }
+                }
             }
+        }
+    }
+    if (e.statistiques.isNotEmpty()) Section("Messages archivés") {
+        val max = e.statistiques.values.maxOf { it.second }.coerceAtLeast(1)
+        Source.entries.filter { e.statistiques[it] != null }.sortedByDescending { e.statistiques[it]!!.second }.forEach { s ->
+            val st = e.statistiques.getValue(s)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LogoSource(s, 22.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(s.libelle, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(compteLong(st.second), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text("  · ${st.first} conv.", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                }
+                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(cs.surfaceContainerHighest)) {
+                    Box(Modifier.fillMaxWidth((st.second.toFloat() / max).coerceIn(0.02f, 1f)).fillMaxHeight()
+                        .clip(RoundedCornerShape(4.dp)).background(s.teinte()))
+                }
+            }
+        }
+    }
+}
+
+private fun compteLong(n: Int) = when {
+    n >= 1_000_000 -> "%.1f M".format(n / 1_000_000.0)
+    n >= 10_000 -> "${n / 1000} k"
+    else -> "%,d".format(n).replace(',', ' ')
+}
+
+@Composable
+private fun TuileChiffre(titre: String, valeur: String, icone: ImageVector, couleur: Long, modifier: Modifier) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(Color(couleur).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                Icon(icone, null, tint = Color(couleur), modifier = Modifier.size(18.dp))
+            }
+            Text(valeur, fontWeight = FontWeight.Bold, fontSize = 20.sp, maxLines = 1)
+            Text(titre, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
     }
 }
@@ -565,6 +610,80 @@ private fun PageReglage(titre: String, retour: () -> Unit, contenu: @Composable 
 
 @Composable
 internal fun Explication(t: String) = Text(t, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+/** Serveur Matrix et relais Element sur une même page : une carte chacun, le détail en sous-menu. */
+@Composable
+private fun PageConnexions(e: Etat, version: Int, modifie: () -> Unit) {
+    val cfg = Moteur.cfg
+    val nav = LocalSousMenu.current
+    when (nav.actuel) {
+        "Serveur Matrix" -> PageMatrix(version, modifie)
+        "Relais Element" -> PageElement(version, modifie)
+        else -> {
+            Explication("Vos deux points d'accès sur le serveur. Touchez une carte pour ses adresses et jetons ; tout est enregistré aussitôt.")
+            CarteConnexion("Serveur Matrix", "Passerelles de votre serveur Synapse", Icons.Outlined.Dns, 0xFF0C8599,
+                cfg.matrixConfigure, listOf(Source.WHATSAPP, Source.SMS, Source.TELEGRAM, Source.SIGNAL, Source.LINKEDIN), e)
+            CarteConnexion("Relais Element", "Element et Teams (lecture seule)", Icons.Outlined.Hub, 0xFF0DBD8C,
+                cfg.relaisConfigure, listOfNotNull(Source.ELEMENT, Source.TEAMS.takeIf { cfg.afficherTeams }), e)
+        }
+    }
+}
+
+@Composable
+private fun CarteConnexion(titre: String, sousTitre: String, icone: ImageVector, couleur: Long, configure: Boolean, sources: List<Source>, e: Etat) {
+    val nav = LocalSousMenu.current
+    val cs = MaterialTheme.colorScheme
+    val vert = Color(0xFF2F9E44)
+    val suivies = sources.filter { e.sources[it] != null }
+    val erreurs = suivies.filter { e.sources[it] is EtatSource.Erreur }
+    val (pointCouleur, etat) = when {
+        !configure -> cs.outline to "Non configuré"
+        suivies.isEmpty() -> cs.outline to "Configuré, en attente de synchro"
+        erreurs.isEmpty() -> vert to "Connecté"
+        erreurs.size == suivies.size -> cs.error to "Injoignable"
+        else -> Color(0xFFE8590C) to "${erreurs.size} en erreur"
+    }
+    Surface(shape = RoundedCornerShape(24.dp), color = cs.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.6f)),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).clickable { nav.ouvrir(titre) }) {
+        Column {
+            // Bandeau coloré
+            Row(Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Brush.horizontalGradient(
+                listOf(Color(couleur), Color(couleur).copy(alpha = 0.75f)))).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+                    Icon(icone, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(titre, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = Color.White)
+                    Text(sousTitre, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                }
+                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Color.White)
+            }
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(9.dp).background(pointCouleur, CircleShape))
+                    Spacer(Modifier.width(8.dp))
+                    Text(etat, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    e.derniereActualisation?.takeIf { configure }?.let { Text("Synchro " + heure(it), fontSize = 12.sp, color = cs.onSurfaceVariant) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    sources.forEach { s ->
+                        val c = when (e.sources[s]) { is EtatSource.Ok -> vert; is EtatSource.Erreur -> cs.error; else -> cs.outline }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box {
+                                LogoSource(s, 34.dp)
+                                Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(cs.surfaceContainerLow).padding(2.dp).clip(CircleShape).background(c))
+                            }
+                            Text(s.id, fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                }
+                erreurs.firstOrNull()?.let { s -> Text("${s.libelle} : ${(e.sources[s] as EtatSource.Erreur).message}", fontSize = 12.sp, color = cs.error, maxLines = 2) }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PageMatrix(version: Int, modifie: () -> Unit) {
@@ -701,6 +820,7 @@ private fun PageNotifications(version: Int) {
     val nav = LocalSousMenu.current
     when (nav.actuel) {
         null -> {
+            CarteVacances(e)
             EtatNotifications()
             ApercuNotification(photo, boutons, bulles, apercu)
             val nSourdine = e.conversations.count { e.etat(it).sourdine }
@@ -883,84 +1003,163 @@ private fun duree(ms: Long) = when {
     else -> "${ms / 3_600_000} h ${(ms / 60_000) % 60} min"
 }
 
-/** Chaque messagerie : état de connexion, dernier message, Pro / Perso, couleur, latence. */
+private val CHOIX_NOTIF = listOf("tous" to "Chaque message", "attendue" to "Réponse attendue", "aucun" to "Aucune")
+
+/** Chaque messagerie et chaque espace (Pro, Perso) a sa page de réglages : notifications, silence, couleur, rangement, connexion. */
 @Composable
 private fun PageMessageries(e: Etat, ouvrir: (Page) -> Unit) {
     val cfg = Moteur.cfg
     var maj by remember { mutableIntStateOf(0) }
     val sources = Source.entries.filter { e.statistiques[it] != null || e.sources[it] is EtatSource.Ok || e.sources[it] is EtatSource.Erreur }
     val nav = LocalSousMenu.current
-    if (nav.actuel == null) {
-        if (sources.isEmpty()) { Explication("Aucune messagerie connectée pour l'instant."); return }
-        // Rangement Pro / Perso de toutes les messageries dans une seule carte
-        Text("Vue Pro ou Perso", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp, top = 4.dp))
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-            Column {
-                key(maj) {
+    if (sources.isEmpty()) { Explication("Aucune messagerie connectée pour l'instant."); return }
+    fun libelleNotif(v: String) = CHOIX_NOTIF.firstOrNull { it.first == v }?.second ?: v
+    when (nav.actuel) {
+        null -> key(maj) {
+            // Espaces Pro et Perso : réglages groupés
+            ListeSousMenus("Espaces", listOf(false, true).map { pro ->
+                val membres = sources.filter { cfg.pro(it) == pro }
+                val notifs = membres.map { cfg.notif(it) }.distinct()
+                ElementSous(if (pro) "Pro" else "Perso",
+                    (if (membres.isEmpty()) "Aucune messagerie" else membres.joinToString(", ") { it.id }) +
+                        (notifs.singleOrNull()?.let { " · " + libelleNotif(it).lowercase() } ?: "") +
+                        (if (pro && cfg.vacances) " · vacances" else ""),
+                    if (pro) Icons.Outlined.Work else Icons.Outlined.Person, if (pro) 0xFF1971C2 else 0xFF2F9E44,
+                    pastille = if (pro && cfg.vacances) Color(0xFFE8590C) else null)
+            })
+            // Rangement Pro / Perso de toutes les messageries dans une seule carte
+            Text("Rangement", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                Column {
                     sources.forEachIndexed { i, s ->
                         LigneDeroulante({ LogoSource(s, 30.dp) }, s.libelle, cfg.pro(s), listOf(false to "Perso", true to "Pro"), i > 0,
                             choisir = { cfg.definirPro(s, it); Moteur.chargerOrganisation(); maj++ })
                     }
                 }
             }
+            ListeSousMenus("Par messagerie", sources.map { s ->
+                val st = e.sources[s]
+                ElementSous(s.libelle,
+                    if (st is EtatSource.Erreur) "Erreur : ${st.message}"
+                    else listOf(if (cfg.pro(s)) "Pro" else "Perso", "notifications : " + libelleNotif(cfg.notif(s)).lowercase()).joinToString(" · "),
+                    logo = { LogoSource(s, 36.dp) }, pastille = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else null)
+            })
+            Explication("Une conversation peut aussi être classée à la main en Pro ou Perso (appui long sur la conversation).")
         }
-        ListeSousMenus("État et détails", sources.map { s ->
-            val st = e.sources[s]
-            ElementSous(s.libelle,
-                if (st is EtatSource.Erreur) "Erreur : ${st.message}"
-                else e.statistiques[s]?.let { "${it.first} conversations · connexion, délai de réception" } ?: "Connexion, délai de réception",
-                logo = { LogoSource(s, 36.dp) }, pastille = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else null)
-        })
-        Explication("Pro / Perso sert aux vues de la liste ; une conversation peut aussi être classée à la main (appui long sur la conversation).")
-        return
+        "Perso", "Pro" -> key(maj) { PageEspace(e, nav.actuel == "Pro", sources) { maj++ } }
+        else -> sources.filter { it.libelle == nav.actuel }.forEach { s -> key(s, maj) { PageSource(e, s) { maj++ } } }
     }
-    sources.filter { it.libelle == nav.actuel }.forEach { s ->
-        key(s, maj) {
-            val st = e.sources[s]
-            val dernier = e.conversations.filter { it.source == s }.maxOfOrNull { it.derniere }
-            val nonLus = e.nombreMessagesNonLus(s)
-            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        LogoSource(s, 40.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(s.libelle, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(8.dp).background(if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else Color(0xFF2F9E44), CircleShape))
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (st is EtatSource.Erreur) "Erreur : ${st.message}"
-                                    else "Synchronisée" + (dernier?.let { " · dernier message ${dateCourte(it)}" } ?: ""),
-                                    fontSize = 12.sp, maxLines = 2,
-                                    color = if (st is EtatSource.Erreur) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        if (nonLus > 0) Surface(shape = CircleShape, color = s.teinte()) {
-                            Text("$nonLus", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                        }
+}
+
+/** Réglages communs à toutes les messageries d'un espace. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PageEspace(e: Etat, pro: Boolean, sources: List<Source>, maj: () -> Unit) {
+    val cfg = Moteur.cfg
+    val membres = sources.filter { cfg.pro(it) == pro }
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(if (pro) "Espace Pro" else "Espace Perso", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            if (membres.isEmpty()) Explication("Aucune messagerie rangée ici. Changez le rangement sur la page précédente.")
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                membres.forEach { s ->
+                    Row(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        LogoSource(s, 24.dp); Spacer(Modifier.width(6.dp))
+                        Text(s.libelle, fontSize = 13.sp)
+                        val n = e.nombreMessagesNonLus(s)
+                        if (n > 0) Text("  $n", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = s.teinte())
                     }
-                    BlocConnexion(e, s)
-                    e.statistiques[s]?.let { Text("${it.first} conversations · ${it.second} messages archivés", fontSize = 13.sp) }
-                    Interrupteur("Ranger en « Pro »", cfg.pro(s), if (cfg.pro(s)) "Visible dans la vue Pro" else "Visible dans la vue Perso") {
-                        cfg.definirPro(s, it); Moteur.chargerOrganisation(); maj++
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Notifications : " + when (cfg.notif(s)) { "tous" -> "chaque message"; "attendue" -> "réponse attendue"; else -> "aucune" },
-                            fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { ouvrir(Page.Notifications) }) { Text("Changer") }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(18.dp).background(s.teinte(), CircleShape)); Spacer(Modifier.width(8.dp))
-                        Text("Couleur", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { ouvrir(Page.Affichage) }) { Text("Changer") }
-                    }
-                    HorizontalDivider()
-                    BlocLatence(s, e.derniereActualisation)
                 }
             }
         }
+    }
+    if (membres.isEmpty()) return
+    if (pro) CarteVacances(e)
+    Section("Notifications", aide = "S'applique à toutes les messageries " + (if (pro) "Pro" else "Perso") + ". Chacune reste réglable à part.") {
+        val actuel = membres.map { cfg.notif(it) }.distinct().singleOrNull()
+        ChoixTexte(CHOIX_NOTIF, actuel) { v -> membres.forEach { cfg.definirNotif(it, v) }; maj() }
+    }
+    Section("Heures de silence") {
+        val toutes = membres.all { cfg.silencePour(it) }
+        Interrupteur("Concernées par les heures de silence", toutes,
+            if (cfg.silenceDebut < 0) "Les heures de silence sont désactivées (Notifications > Heures de silence)."
+            else "De ${cfg.silenceDebut} h à ${cfg.silenceFin} h, sans son ni vibration.") { v -> membres.forEach { cfg.definirSilencePour(it, v) }; maj() }
+    }
+}
+
+/** Tous les réglages d'une messagerie sur une page. */
+@Composable
+private fun PageSource(e: Etat, s: Source, maj: () -> Unit) {
+    val cfg = Moteur.cfg
+    val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    val st = e.sources[s]
+    val dernier = e.conversations.filter { it.source == s }.maxOfOrNull { it.derniere }
+    val nonLus = e.nombreMessagesNonLus(s)
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            LogoSource(s, 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(s.libelle, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(if (st is EtatSource.Erreur) cs.error else Color(0xFF2F9E44), CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (st is EtatSource.Erreur) "Erreur : ${st.message}"
+                        else "Synchronisée" + (dernier?.let { " · dernier message ${dateCourte(it)}" } ?: ""),
+                        fontSize = 12.sp, maxLines = 2, color = if (st is EtatSource.Erreur) cs.error else cs.onSurfaceVariant)
+                }
+            }
+            if (nonLus > 0) Surface(shape = CircleShape, color = s.teinte()) {
+                Text("$nonLus", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+            }
+        }
+    }
+    Section("Espace") {
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            listOf(false to "Perso", true to "Pro").forEachIndexed { i, (v, t) ->
+                SegmentedButton(selected = cfg.pro(s) == v, onClick = { cfg.definirPro(s, v); Moteur.chargerOrganisation(); maj() },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(t) }
+            }
+        }
+        if (cfg.pro(s) && cfg.vacances) Explication("Mode vacances activé : aucune notification pour ${s.libelle}.")
+    }
+    Section("Notifications") {
+        ChoixTexte(CHOIX_NOTIF, cfg.notif(s)) { cfg.definirNotif(s, it); maj() }
+        Interrupteur("Concernée par les heures de silence", cfg.silencePour(s),
+            if (cfg.silenceDebut < 0) "Heures de silence désactivées pour l'instant." else "De ${cfg.silenceDebut} h à ${cfg.silenceFin} h.") {
+            cfg.definirSilencePour(s, it); maj()
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 26) TextButton(onClick = {
+            runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, Moteur.canalMessages(s))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) {
+            Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Son, vibration et pop-up")
+        }
+    }
+    Section("Couleur") {
+        RangeeCouleurs(Affichage.couleurs[s] ?: 0L, s.couleur) { c ->
+            if (c == 0L) Affichage.couleurs.remove(s) else Affichage.couleurs[s] = c
+            cfg.definirCouleur(s, c); maj()
+        }
+    }
+    BlocConnexion(e, s)
+    Section("Réception") {
+        e.statistiques[s]?.let { Text("${it.first} conversations · ${it.second} messages archivés", fontSize = 13.sp) }
+        BlocLatence(s, e.derniereActualisation)
+    }
+}
+
+/** Puces à choix unique sur des valeurs texte (aucune choisie si valeur = null). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChoixTexte(options: List<Pair<String, String>>, valeur: String?, maj: (String) -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.forEach { (v, l) -> FilterChip(selected = v == valeur, onClick = { maj(v) }, label = { Text(l, fontSize = 13.sp) }) }
     }
 }
 
@@ -1036,9 +1235,6 @@ private fun PageConfidentialite(version: Int) {
     }
     }
     // Statut de présence choisi par vous
-    val portee = rememberCoroutineScope()
-    var presence by remember(version) { mutableStateOf(cfg.presence) }
-    var retour by remember { mutableStateOf<String?>(null) }
     Section("Anti-spam", aide = "Les messages suspects d'expéditeurs inconnus (faux colis, banque, amende, liens douteux) vont dans " +
         "la vue « Spam » de la liste, sans notification. Tout est calculé sur ce téléphone : rien n'est signalé aux messageries.") {
         var antiSpam by remember(version) { mutableStateOf(cfg.antiSpam) }
@@ -1051,24 +1247,7 @@ private fun PageConfidentialite(version: Int) {
             else "Appris de $appris conversation(s) marquée(s) par vous.")
         if (appris > 0) TextButton(onClick = { fr.messagerie.unifiee.Spam.oublier(); appris = 0; Moteur.rafraichirSpam() }) { Text("Oublier ce qui a été appris") }
     }
-    Section("Mon statut de présence") {
-    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        val choix = listOf("offline" to "Hors ligne", "unavailable" to "Absent", "online" to "En ligne")
-        choix.forEachIndexed { i, (v, t) ->
-            SegmentedButton(selected = presence == v, onClick = {
-                presence = v; retour = "Application…"
-                portee.launch {
-                    val (ok, ko) = Moteur.definirPresence(v)
-                    retour = (if (ok.isNotEmpty()) "Appliqué : " + ok.joinToString(", ") + "." else "") +
-                        (if (ko.isNotEmpty()) " Non appliqué : " + ko.joinToString(", ") + "." else "")
-                }
-            }, shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, choix.size), icon = {}) { Text(t) }
-        }
-    }
-    Explication("Ce que vos contacts voient de vous (« en ligne », « absent »), là où la messagerie le transmet. " +
-        "Hors ligne par défaut. WhatsApp ne reprend pas toujours ce statut.")
-    retour?.let { Text(it.trim(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    }
+    Section("Statut montré aux autres") { ChoixStatuts() }
     Explication("Aucun accusé de lecture ni indicateur de saisie n'est envoyé : lu / non lu reste sur ce téléphone. " +
         "Aucun message ne part sans votre appui sur « Envoyer ».")
 }

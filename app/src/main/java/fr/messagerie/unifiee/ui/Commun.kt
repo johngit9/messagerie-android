@@ -107,9 +107,11 @@ fun Avatar(nom: String, source: Source, groupe: Boolean, taille: Dp = 44.dp, bor
             else Text(initiales, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = (taille.value * 0.36f).sp)
         }
         if (cle != null) {
-            val photo by androidx.compose.runtime.produceState<java.io.File?>(null, cle) { value = Moteur.photoContact(cle) }
+            val version by Moteur.versionPhotos.collectAsState()
+            val photo by androidx.compose.runtime.produceState<java.io.File?>(null, cle, version) { value = Moteur.photoContact(cle) }
             photo?.let { f ->
-                coil3.compose.AsyncImage(model = f, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                coil3.compose.AsyncImage(model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(f)
+                    .memoryCacheKey(f.path + ":" + f.lastModified()).diskCacheKey(f.path + ":" + f.lastModified()).build(), contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                     modifier = Modifier.size(taille).clip(CircleShape))
             }
         }

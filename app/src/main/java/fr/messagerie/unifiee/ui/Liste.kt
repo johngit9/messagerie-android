@@ -201,6 +201,9 @@ private fun Entete(
             } else IconButton(onClick = { Moteur.actualiserMaintenant() }) {
                 Icon(Icons.Outlined.Refresh, "Actualiser", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            var feuilleStatut by remember { mutableStateOf(false) }
+            BoutonStatut(MaterialTheme.colorScheme.onSurfaceVariant) { feuilleStatut = true }
+            if (feuilleStatut) FeuilleStatut { feuilleStatut = false }
             IconButton(onClick = ouvrirReglages) { Icon(Icons.Outlined.Settings, "Réglages", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Row(verticalAlignment = Alignment.Bottom) {
@@ -689,6 +692,8 @@ private fun EnteteCompact(
     }
     var menuEspace by remember { mutableStateOf(false) }
     var menuVue by remember { mutableStateOf(false) }
+    var feuilleStatut by remember { mutableStateOf(false) }
+    if (feuilleStatut) FeuilleStatut { feuilleStatut = false }
     Column(
         Modifier.fillMaxWidth().background(fondHaut).statusBarsPadding()
             .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = if (bandeau) 24.dp else 0.dp),
@@ -718,6 +723,7 @@ private fun EnteteCompact(
                     Icon(Icons.AutoMirrored.Outlined.ManageSearch, "Rechercher dans les messages (filtres)", tint = Color(0xFF3B5BDB))
                 }
             }
+            if (!bandeau) BoutonStatut(cs.onSurfaceVariant) { feuilleStatut = true }
             if (e.enCours) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = texteHaut)
             } else IconButton(onClick = ouvrirReglages) { Icon(Icons.Outlined.Settings, "Réglages", tint = if (bandeau) Color.White else cs.onSurfaceVariant) }
@@ -758,15 +764,18 @@ private fun EnteteCompact(
             PuceCompacte(bandeau, Genre.Discussions.libelle, 0, false, genre == Genre.Discussions) { choisirGenre(Genre.Discussions) }
             PuceCompacte(bandeau, Genre.Groupes.libelle, 0, false, genre == Genre.Groupes) { choisirGenre(Genre.Groupes) }
         }
-        if (bandeau) Text(
-            when {
-                e.importEnCours != null -> e.importEnCours
-                e.enCours -> "Actualisation…"
-                else -> (e.derniereActualisation?.let { "Actualisé à " + heure(it) + " · " } ?: "") + "$nombre conversation" + if (nombre > 1) "s" else ""
-            },
-            fontSize = 12.sp, color = Color.White.copy(alpha = 0.75f),
-            modifier = Modifier.padding(start = 8.dp).clickable { Moteur.actualiserMaintenant() },
-        )
+        if (bandeau) Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    e.importEnCours != null -> e.importEnCours
+                    e.enCours -> "Actualisation…"
+                    else -> (e.derniereActualisation?.let { "Actualisé à " + heure(it) + " · " } ?: "") + "$nombre conversation" + if (nombre > 1) "s" else ""
+                },
+                fontSize = 12.sp, color = Color.White.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 8.dp).clickable { Moteur.actualiserMaintenant() },
+            )
+            PuceStatut { feuilleStatut = true }
+        }
         if (!bandeau) HorizontalDivider(color = cs.outlineVariant)
     }
 }
