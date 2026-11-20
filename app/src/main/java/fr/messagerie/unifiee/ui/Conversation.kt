@@ -249,6 +249,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         if (!e.estForcee(c)) Moteur.marquerLue(c)
     }
 
+    // Contact connu = conversation où vous avez déjà écrit : aperçu automatique des liens seulement là
+    val contactConnu = remember(historique, c.messages) { historique.any { it.deMoi } || c.messages.any { it.deMoi } }
     val lignes = remember(historique, luAvant) {
         val l = ArrayList<Ligne>()
         var nonLusPlace = false
@@ -465,7 +467,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         is Ligne.NonLus -> Text("— Nouveaux messages —", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        is Ligne.Msg -> Row(Modifier.fillMaxWidth().background(
+                        is Ligne.Msg -> androidx.compose.runtime.CompositionLocalProvider(LocalContactConnu provides contactConnu) { Row(Modifier.fillMaxWidth().background(
                             when {
                                 l.m.cle in selection -> c.source.teinte().copy(alpha = 0.14f)
                                 l.m.cle == courant -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
@@ -489,7 +491,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             luParContact = e.lusParContacts[c.cle] ?: 0L,
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
                             basculer = { basculerSelection(l.m) },
-                            supprimer = { aSupprimer = setOf(l.m.cle) }) } }
+                            supprimer = { aSupprimer = setOf(l.m.cle) }) } } }
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -953,8 +955,8 @@ private fun Bulle(
                 else -> {
                     Text(avecLiens(m.texte, couleur), color = couleur)
                     // Aperçu du premier lien (titre, description, image de la page)
-                    // (désactivé tant qu'Alain n'a pas choisi : la page serait lue même pour un SMS inconnu)
-                    if (Moteur.cfg.apercusLiens) LIEN.find(m.texte)?.let { ApercuLien(urlComplete(it.value), moi, couleur) }
+                    // Contact connu : aperçu chargé tout de suite ; inconnu : domaine bien visible, aperçu seulement à la demande
+                    LIEN.find(m.texte)?.let { ApercuLien(urlComplete(it.value), moi, couleur, LocalContactConnu.current) }
                 }
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -1253,14 +1255,33 @@ private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.Annot
 /** Pièce jointe en attente d'envoi ; [contact] = nom et numéros quand c'est une fiche contact. */
 private class PieceJointe(val octets: ByteArray, val mime: String, val nom: String, val contact: String? = null)
 
+private val LocalContactConnu = androidx.compose.runtime.compositionLocalOf { false }
+
 /** Carte d'aperçu d'un lien sous le texte de la bulle ; rien ne s'affiche si la page ne donne ni titre ni image. */
 @Composable
-private fun ApercuLien(url: String, moi: Boolean, couleur: Color) {
-    val apercu by androidx.compose.runtime.produceState(fr.messagerie.unifiee.ApercusLiens.enCache(url), url) {
-        if (value == null && !fr.messagerie.unifiee.ApercusLiens.dejaEssaye(url))
+private fun ApercuLien(url: String, moi: Boolean, couleur: Color, auto: Boolean) {
+    var demande by remember(url) { mutableStateOf(auto) }
+    var essaye by remember(url) { mutableStateOf(false) }
+    val apercu by androidx.compose.runtime.produceState(fr.messagerie.unifiee.ApercusLiens.enCache(url), url, demande) {
+        if (value == null && demande) {
             value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.ApercusLiens.charger(url) }
+            essaye = true
+        }
     }
-    val a = apercu ?: return
+    val site = remember(url) { runCatching { android.net.Uri.parse(url).host?.removePrefix("www.") }.getOrNull() ?: url }
+    val a = apercu
+    if (a == null) {
+        // Domaine bien lisible (repérer un faux site) ; l'aperçu ne se charge que sur appui
+        Row(Modifier.padding(top = 6.dp).clip(RoundedCornerShape(10.dp)).background(if (moi) Color.White.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface)
+            .then(if (!demande) Modifier.clickable { demande = true } else Modifier).padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("🔗 ", fontSize = 12.sp)
+            Text(site, color = couleur, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false))
+            Text(when { !demande -> "  · Aperçu"; essaye -> "  · pas d'aperçu"; else -> "  · …" }, color = couleur.copy(alpha = 0.7f), fontSize = 12.sp)
+        }
+        return
+    }
     val ctx = LocalContext.current
     val fond = if (moi) Color.White.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface
     Column(Modifier.padding(top = 8.dp).widthIn(max = 276.dp).clip(RoundedCornerShape(12.dp)).background(fond)
