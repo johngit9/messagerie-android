@@ -64,7 +64,12 @@ object Bulles {
 
     /** Photo du contact déjà en cache (pas de téléchargement ici), sinon initiale sur la couleur de la messagerie. */
     fun image(ctx: Context, c: Conversation): Bitmap {
-        val photo = if (!Moteur.cfg.notifPhoto) null else Moteur.photoEnCache(c.cle)?.let { f -> runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() }
+        // Photo : cache, sinon téléchargée maintenant (hors fil principal), sinon celle du carnet d'adresses du téléphone
+        val enLigne = android.os.Looper.myLooper() != android.os.Looper.getMainLooper()
+        val fichier = if (!Moteur.cfg.notifPhoto) null else Moteur.photoEnCache(c.cle)
+            ?: if (enLigne) runCatching { kotlinx.coroutines.runBlocking { Moteur.photoContact(c.cle) } }.getOrNull() else null
+        val photo = if (!Moteur.cfg.notifPhoto) null
+            else fichier?.let { f -> runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() } ?: Moteur.photoCarnet(c)
         val b = Bitmap.createBitmap(T, T, Bitmap.Config.ARGB_8888)
         val cv = Canvas(b)
         if (photo != null) {

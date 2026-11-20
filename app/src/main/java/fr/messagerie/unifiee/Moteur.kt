@@ -1179,6 +1179,23 @@ object Moteur {
         return java.io.File(java.io.File(app.cacheDir, "avatars"), "$hash.img").takeIf { it.exists() && it.length() > 0 }
     }
 
+    /** Photo du contact dans le carnet d'adresses du téléphone (numéro tiré de la conversation), lecture locale. */
+    fun photoCarnet(c: Conversation): android.graphics.Bitmap? {
+        if (c.estGroupe || androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return null
+        val numero = c.jid.substringBefore('@').filter { it.isDigit() }.takeIf { it.length >= 6 }
+            ?: nomsCarnet.entries.firstOrNull { it.value == c.nom }?.key?.filter { it.isDigit() }?.takeIf { it.length >= 6 }
+            ?: c.nom.filter { it.isDigit() }.takeIf { it.length >= 6 && c.nom.none { ch -> ch.isLetter() } }
+            ?: return null
+        return runCatching {
+            val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode("+$numero"))
+            val photo = app.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.PHOTO_URI), null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) cur.getString(0) else null
+            } ?: return null
+            app.contentResolver.openInputStream(android.net.Uri.parse(photo))?.use { android.graphics.BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
+
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
     suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
         photos[conv]?.let { return@withContext it }
