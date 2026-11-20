@@ -1270,6 +1270,12 @@ object Moteur {
             ajouter("delais.pont.${s.id}", decoupes.map { it.first.coerceAtLeast(0) })
             ajouter("delais.tel.${s.id}", decoupes.map { it.second.coerceAtLeast(0) })
         }
+        // Appel entrant (moins d'une minute) : on ouvre l'appli officielle pour décrocher
+        nouveaux.filter { it.second.type == "appel" && !it.second.texte.startsWith("📵") && maintenant - it.second.date in 0..60_000 }
+            .distinctBy { it.first.cle }.forEach { (c, _) ->
+                val e2 = _etat.value
+                if (cfg.appelsOfficiels && !(cfg.vacances && e2.estPro(c)) && !estSpam(c) && !e2.etat(c).sourdine) ouvrirPourAppel(c)
+            }
         if (auPremierPlan) return
         nouveaux.filter { maintenant - it.second.date < 3_600_000 }.groupBy { it.first }.forEach { (c, l) ->
             if (cfg.notif(c.source) != "tous" || e.etat(c).sourdine || c.cle == convOuverte) return@forEach
@@ -1277,6 +1283,44 @@ object Moteur {
             if (estSpam(c)) return@forEach                     // spam : jamais de notification
             notifierMessages(c, l.map { it.second })
         }
+    }
+
+    /** Paquet Android de l'appli officielle d'une messagerie (null : SMS, gérés par le téléphone). */
+    fun appliOfficielle(s: Source): String? = when (s) {
+        Source.WHATSAPP -> "com.whatsapp"; Source.TELEGRAM -> "org.telegram.messenger"; Source.SIGNAL -> "org.thoughtcrime.securesms"
+        Source.LINKEDIN -> "com.linkedin.android"; Source.ELEMENT -> "im.vector.app"; Source.TEAMS -> "com.microsoft.teams"; Source.SMS -> null
+    }
+
+    /**
+     * Appel reçu : Messagerie ne gère pas les appels, on ouvre l'appli officielle pour décrocher.
+     * Appli au premier plan : ouverte tout de suite. Sinon Android interdit d'ouvrir une appli depuis l'arrière-plan :
+     * notification d'appel plein écran (écran verrouillé) qui ouvre l'appli officielle, avec le bouton « Ouvrir … ».
+     */
+    private fun ouvrirPourAppel(c: Conversation) {
+        val paquet = appliOfficielle(c.source) ?: return
+        val lancer = app.packageManager.getLaunchIntentForPackage(paquet)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return
+        if (auPremierPlan && runCatching { app.startActivity(lancer) }.isSuccess) return
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val canal = "appels"
+        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(canal, "Appels reçus", NotificationManager.IMPORTANCE_HIGH).apply { setShowBadge(false) })
+        val pi = PendingIntent.getActivity(app, ("appel" + c.cle).hashCode(), lancer, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val nom = c.source.libelle.substringBefore(" /")
+        val n = NotificationCompat.Builder(app, canal)
+            .setSmallIcon(R.drawable.ic_bulle)
+            .setContentTitle(c.nom)
+            .setContentText("Appel $nom : touchez pour répondre dans $nom")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setColor(cfg.couleurEffective(c.source).toInt())
+            .setContentIntent(pi)
+            .setFullScreenIntent(pi, true)
+            .addAction(0, "Ouvrir $nom", pi)
+            .setAutoCancel(true)
+            .setTimeoutAfter(60_000)
+            .build()
+        try { NotificationManagerCompat.from(app).notify(("appel" + c.cle).hashCode(), n) } catch (_: SecurityException) {}
     }
 
     /** Notification d'essai, locale (rien n'est envoyé sur le réseau). */

@@ -620,7 +620,18 @@ class SyncPont(
         var type = "texte"; var texte = corps; var media: String? = null; var duree: Double? = null
         val info = c.optJSONObject("info")
         when (val mt = c.optString("msgtype")) {
-            "m.text", "m.notice", "m.emote" -> if (corps.isEmpty()) return null
+            "m.text", "m.notice", "m.emote" -> {
+                if (corps.isEmpty()) return null
+                // Appel reçu sur l'appli officielle : la passerelle l'annonce par un avis (« Incoming call… »)
+                if (mt == "m.notice" && APPEL.containsMatchIn(corps)) {
+                    type = "appel"
+                    val video = Regex("(?i)vid[eé]o").containsMatchIn(corps)
+                    texte = when {
+                        Regex("(?i)missed|manqu").containsMatchIn(corps) -> if (video) "📵 Appel vidéo manqué" else "📵 Appel manqué"
+                        else -> if (video) "📹 Appel vidéo entrant" else "📞 Appel entrant"
+                    }
+                }
+            }
             "m.audio" -> {
                 type = "audio"; texte = ""
                 c.optString("url").takeIf { it.isNotEmpty() }?.let { media = it + "#" + (info?.optString("mimetype")?.ifEmpty { null } ?: "audio/mpeg") }
@@ -652,6 +663,9 @@ class SyncPont(
         return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree)
     }
 }
+
+/** Avis d'appel des passerelles mautrix (WhatsApp, Signal, Telegram…), en anglais ou en français. */
+private val APPEL = Regex("""(?i)^\s*(incoming|missed|started an?|unsupported)?\s*(voice |video |audio |group )?call\b|\bappel (entrant|manqué|vidéo|audio|vocal)""")
 
 /** Heure d'arrivée de chaque nouveau message sur le serveur (mémoire seulement, quelques centaines au plus). */
 object ArriveesServeur {

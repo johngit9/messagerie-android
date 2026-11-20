@@ -732,6 +732,12 @@ private fun PageNotifications(version: Int) {
                 }
             }
             Explication("« Réponse attendue » : seulement quand l'IA juge qu'on attend votre réponse. 🔊 : son, vibration et pop-up de la messagerie.")
+            var appels by remember(version) { mutableStateOf(cfg.appelsOfficiels) }
+            Section {
+                Interrupteur("Appels : ouvrir l'appli officielle", appels,
+                    "Un appel audio ou vidéo reçu sur WhatsApp, Signal, Telegram… ouvre l'appli officielle pour décrocher " +
+                        "(Messagerie ne gère pas les appels). Appli fermée : notification d'appel en plein écran.") { appels = it; cfg.appelsOfficiels = it }
+            }
             ListeSousMenus("Plus de réglages", listOfNotNull(
                 ElementSous("Style des notifications", listOfNotNull(if (photo) "Photo" else "Initiale", if (boutons) "boutons" else null,
                     if (apercu == 0) "message affiché" else "contenu masqué").joinToString(" · "), Icons.Outlined.Style, 0xFF3B5BDB),
