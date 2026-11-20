@@ -643,6 +643,28 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    /**
+     * Envoie un fichier (vidéo, document, fiche contact .vcf…) — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu.
+     * Les images passent par [envoyerImage].
+     */
+    suspend fun envoyerFichier(octets: ByteArray, typeMime: String, nom: String, c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!imagePossible(c)) return@withContext "envoi de fichiers impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val m = Matrix(cfg)
+            val mxc = m.televerser(octets, typeMime, nom)
+            val (msgtype, type, apercu) = when {
+                typeMime.startsWith("video/") -> Triple("m.video", "video", "[vidéo]")
+                typeMime.startsWith("audio/") -> Triple("m.audio", "fichier", nom)
+                else -> Triple("m.file", "fichier", nom)
+            }
+            val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
+            val eid = m.envoyerContenu(salon, org.json.JSONObject().put("msgtype", msgtype).put("body", nom).put("filename", nom).put("url", mxc).put("info", info))
+            afficherEnvoye(c, eid, apercu, type = type, media = "$mxc#$typeMime#$nom")
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
     /** Le message envoyé s'affiche tout de suite (même clé que l'écho du serveur : pas de doublon). */
     private fun afficherEnvoye(c: Conversation, eid: String, texte: String, type: String = "texte", media: String? = null, duree: Double? = null) {
         if (eid.isNotEmpty()) runCatching {

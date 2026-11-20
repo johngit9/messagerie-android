@@ -39,6 +39,11 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -156,6 +161,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
     // Image collée depuis le presse-papiers (copie d'écran…) : envoyée seulement sur « Envoyer »
     var imageCollee by remember(c.cle) { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    var pieceJointe by remember(c.cle) { mutableStateOf<PieceJointe?>(null) }
+    var menuJoindre by remember { mutableStateOf(false) }
     var imageDispo by remember { mutableStateOf(false) }
     var reponseA by remember(c.cle) { mutableStateOf<Message?>(null) }
     var envoi by remember { mutableStateOf(false) }
@@ -263,6 +270,59 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
 
     fun afficher(t: String) { portee.launch { snack.showSnackbar(t) } }
+
+    // Pièces jointes : photo / vidéo, fichier, contact. Rien ne part avant l'appui sur « Envoyer » de l'aperçu.
+    fun chargerFichier(uri: android.net.Uri) {
+        runCatching {
+            val cr = ctxVocal.contentResolver
+            val mime = cr.getType(uri) ?: "application/octet-stream"
+            var nom = "fichier"; var taille = -1L
+            cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use {
+                if (it.moveToFirst()) { nom = it.getString(0) ?: nom; if (!it.isNull(1)) taille = it.getLong(1) }
+            }
+            if (taille > 50_000_000) error("fichier trop lourd (50 Mo au plus)")
+            val octets = cr.openInputStream(uri)?.use { it.readBytes() } ?: error("fichier illisible")
+            if (octets.size > 50_000_000) error("fichier trop lourd (50 Mo au plus)")
+            if (mime.startsWith("image/") && mime != "image/svg+xml") imageCollee = octets to mime
+            else pieceJointe = PieceJointe(octets, mime, nom)
+        }.onFailure { afficher("Impossible de joindre le fichier : ${it.message}") }
+    }
+    fun chargerContact(uri: android.net.Uri) {
+        runCatching {
+            val cr = ctxVocal.contentResolver
+            var id = ""; var cleRecherche = ""; var nom = "Contact"
+            cr.query(uri, arrayOf(android.provider.ContactsContract.Contacts._ID, android.provider.ContactsContract.Contacts.LOOKUP_KEY,
+                android.provider.ContactsContract.Contacts.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) { id = it.getString(0) ?: ""; cleRecherche = it.getString(1) ?: ""; nom = it.getString(2) ?: nom }
+            }
+            if (cleRecherche.isEmpty()) error("contact introuvable")
+            val numeros = mutableListOf<String>()
+            cr.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?", arrayOf(id), null)?.use {
+                while (it.moveToNext()) it.getString(0)?.let { n -> if (numeros.none { x -> x.filter(Char::isDigit) == n.filter(Char::isDigit) }) numeros += n }
+            }
+            val vcf = android.net.Uri.withAppendedPath(android.provider.ContactsContract.Contacts.CONTENT_VCARD_URI, cleRecherche)
+            val octets = cr.openAssetFileDescriptor(vcf, "r")?.use { it.createInputStream().use { s -> s.readBytes() } } ?: error("fiche illisible")
+            val texte = (listOf(nom) + numeros).joinToString("\n")
+            pieceJointe = PieceJointe(octets, "text/vcard", nom.replace(Regex("""[\\/:*?"<>|]"""), "") + ".vcf", texte)
+        }.onFailure { afficher("Impossible de joindre le contact : ${it.message}") }
+    }
+    val choisirMedia = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { it?.let { u -> chargerFichier(u) } }
+    val choisirFichier = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { it?.let { u -> chargerFichier(u) } }
+    val choisirContact = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickContact()) { it?.let { u -> chargerContact(u) } }
+    val permissionContacts = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) choisirContact.launch(null) else afficher("Autorisez l'accès aux contacts pour en joindre un")
+    }
+    fun joindreContact() {
+        val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctxVocal, android.Manifest.permission.READ_CONTACTS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (ok) choisirContact.launch(null) else permissionContacts.launch(android.Manifest.permission.READ_CONTACTS)
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
@@ -522,6 +582,42 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             }
                         }
                     }
+                    // Fichier ou contact joint : aperçu, puis envoi sur appui
+                    pieceJointe?.let { pj ->
+                        Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(14.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.size(48.dp).background(c.source.teinte().copy(alpha = 0.18f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                Icon(when {
+                                    pj.contact != null -> Icons.Outlined.Person
+                                    pj.mime.startsWith("video/") -> Icons.Outlined.Movie
+                                    else -> Icons.Outlined.Description
+                                }, null, tint = c.source.teinte())
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(pj.contact?.substringBefore('\n') ?: pj.nom, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (pj.contact != null) "Fiche contact" + pj.contact.lines().drop(1).firstOrNull()?.let { " · $it" }.orEmpty()
+                                    else if (pj.octets.size >= 1_048_576) "%.1f Mo".format(pj.octets.size / 1_048_576.0) else "${pj.octets.size / 1024} Ko",
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                if (pj.contact != null) Text("Mettre en texte", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
+                                    modifier = Modifier.clickable {
+                                        brouillon = (if (brouillon.isBlank()) "" else brouillon.trimEnd() + "\n") + pj.contact
+                                        pieceJointe = null
+                                    }.padding(vertical = 4.dp))
+                            }
+                            IconButton(onClick = { pieceJointe = null }) { Icon(Icons.Outlined.Close, "Retirer la pièce jointe") }
+                            Button(onClick = {
+                                envoi = true
+                                portee.launch {
+                                    val err = Moteur.envoyerFichier(pj.octets, pj.mime, pj.nom, c)
+                                    envoi = false
+                                    if (err == null) { pieceJointe = null; afficher(if (pj.contact != null) "Contact envoyé" else "Fichier envoyé") } else afficher("Échec : $err")
+                                }
+                            }, enabled = !envoi, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
+                                if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                                else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer la pièce jointe")
+                            }
+                        }
+                    }
                     if (imageCollee == null && imageDispo && Moteur.imagePossible(c)) Text("📋 Coller l'image copiée",
                         fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
                         modifier = Modifier.background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(16.dp))
@@ -614,6 +710,23 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
                         val fautesActuelles = if (fautes.first == brouillon) fautes.second else emptyList()
                         val rougeFaute = MaterialTheme.colorScheme.error
+                        // Trombone : joindre une photo, une vidéo, un fichier ou un contact
+                        if (Moteur.imagePossible(c)) Box(Modifier.align(Alignment.CenterVertically)) {
+                            IconButton(onClick = { menuJoindre = true }) { Icon(Icons.Outlined.AttachFile, "Joindre", tint = c.source.teinte()) }
+                            DropdownMenu(expanded = menuJoindre, onDismissRequest = { menuJoindre = false }) {
+                                DropdownMenuItem(text = { Text("Photo ou vidéo") }, leadingIcon = { Icon(Icons.Outlined.Image, null) }, onClick = {
+                                    menuJoindre = false
+                                    choisirMedia.launch(androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                                })
+                                DropdownMenuItem(text = { Text("Fichier") }, leadingIcon = { Icon(Icons.Outlined.Description, null) }, onClick = {
+                                    menuJoindre = false; choisirFichier.launch(arrayOf("*/*"))
+                                })
+                                DropdownMenuItem(text = { Text("Contact") }, leadingIcon = { Icon(Icons.Outlined.Person, null) }, onClick = {
+                                    menuJoindre = false; joindreContact()
+                                })
+                            }
+                        }
                         OutlinedTextField(
                             value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -1126,3 +1239,6 @@ private fun avecLiens(t: String, couleur: Color): androidx.compose.ui.text.Annot
         }
         append(t.substring(i))
     }
+
+/** Pièce jointe en attente d'envoi ; [contact] = nom et numéros quand c'est une fiche contact. */
+private class PieceJointe(val octets: ByteArray, val mime: String, val nom: String, val contact: String? = null)
