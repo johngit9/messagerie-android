@@ -49,6 +49,28 @@ object MiseAJour {
         Version(numero, tag, j.optString("body").trim(), apk, taille)
     }
 
+    /**
+     * Nouveautés des versions publiées après « depuis » (la plus récente d'abord) : section « ## Nouveautés » de chaque Release.
+     * Les anciennes Releases sans cette section sont ignorées.
+     */
+    suspend fun nouveautes(depuis: Int): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val c = URL(DERNIERE.removeSuffix("/latest") + "?per_page=30").openConnection() as HttpURLConnection
+        c.connectTimeout = 8_000; c.readTimeout = 15_000
+        c.setRequestProperty("Accept", "application/vnd.github+json")
+        if (c.responseCode != 200) return@withContext emptyList()
+        val a = org.json.JSONArray(c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
+        (0 until a.length()).mapNotNull { i ->
+            val j = a.getJSONObject(i)
+            val tag = j.optString("tag_name")
+            val n = tag.substringAfterLast('.').toIntOrNull() ?: return@mapNotNull null
+            if (n <= depuis) return@mapNotNull null
+            val corps = j.optString("body")
+            if ("## Nouveautés" !in corps) return@mapNotNull null
+            val texte = corps.substringAfter("## Nouveautés").substringBefore("\n---").trim()
+            if (texte.isEmpty()) null else Triple(n, tag, texte)
+        }.sortedByDescending { it.first }.map { it.second to it.third }
+    }
+
     /** Télécharge l'APK (progression de 0 à 1). */
     suspend fun telecharger(ctx: Context, v: Version, progression: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         val dossier = File(ctx.cacheDir, "maj").apply { deleteRecursively(); mkdirs() }

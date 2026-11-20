@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
@@ -60,15 +62,41 @@ jobs:
           name: Messagerie-apk
           path: Messagerie-v1.${{ github.run_number }}.apk
 
+      - name: Rédiger les nouveautés
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Messages des commits depuis la Release précédente : titre et lignes « - … » (sans les signatures)
+          PREC=$(git tag --list 'v1.*' --sort=-v:refname | head -1)
+          PLAGE=${PREC:+$PREC..}HEAD
+          {
+            echo "## Nouveautés"
+            git log $PLAGE --no-merges --format='%s%n%b%x1e' | python3 -c '
+          import sys
+          vus = set()
+          for bloc in sys.stdin.read().split("\x1e"):
+              lignes = [l.rstrip() for l in bloc.strip().splitlines() if l.strip()]
+              if not lignes: continue
+              for i, l in enumerate(lignes):
+                  if l.startswith(("Co-Authored-By", "Claude-Session")): continue
+                  if i == 0: t = "- " + l
+                  elif l.lstrip().startswith("- "): t = "  " + l.strip()
+                  elif l.startswith("  ") and not l.lstrip().startswith("- "): t = "    " + l.strip()
+                  else: continue
+                  if t not in vus: vus.add(t); print(t)
+          '
+            echo
+            echo "---"
+            echo "APK de la Messagerie unifiée pour Android : touchez **Messagerie-v1.${{ github.run_number }}.apk** ci-dessous pour le télécharger, puis installez-le."
+            echo "Au premier lancement, renseignez vos serveurs dans **Réglages** (aucune adresse ni jeton n'est inclus dans l'appli)."
+          } > notes.md
+          cat notes.md
+
       - name: Publier dans les Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.${{ github.run_number }}
           name: Messagerie v1.${{ github.run_number }}
-          body: |
-            APK de la Messagerie unifiée pour Android.
-            Sur le téléphone : touchez **Messagerie-v1.${{ github.run_number }}.apk** ci-dessous pour le télécharger, puis installez-le.
-            Au premier lancement, renseignez vos serveurs dans **Réglages** (aucune adresse ni jeton n'est inclus dans l'appli).
+          body_path: notes.md
           files: Messagerie-v1.${{ github.run_number }}.apk
           make_latest: true

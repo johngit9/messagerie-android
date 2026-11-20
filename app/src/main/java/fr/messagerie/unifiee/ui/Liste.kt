@@ -3,6 +3,8 @@ package fr.messagerie.unifiee.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.BeachAccess
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -148,6 +150,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     rechercheAvancee = { rechercher(vm.recherche.value) })
                 val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
                 if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
+                val vacances by Moteur.vacances.collectAsState()
+                if (choisies.isEmpty() && vacances) BandeauVacances()
 
                 if (visibles.isEmpty()) {
                     val q = recherche.trim()
@@ -622,6 +626,30 @@ private fun TuileAction(libelle: String, icone: ImageVector, teinte: Color, modi
 }
 
 /** Alerte : une ou plusieurs messageries sont déconnectées (on ne reçoit plus leurs messages). */
+/** Rappel visible tant que le mode vacances est actif, avec de quoi le couper d'un appui. */
+@Composable
+private fun BandeauVacances() {
+    val pro = Moteur.etat.collectAsState().value.pro
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .background(Color(0xFFFDEEDC), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFFF5C99B), RoundedCornerShape(16.dp))
+            .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp).background(Color(0xFFE8590C), RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.BeachAccess, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Mode vacances", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color(0xFF7A3A08))
+            Text("Aucune notification Pro" + if (pro.isNotEmpty()) " (" + pro.joinToString(", ") { it.id } + ")" else "",
+                fontSize = 12.sp, color = Color(0xFF7A3A08), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        TextButton(onClick = { Moteur.definirVacances(false) }) { Text("Désactiver", color = Color(0xFFA04A0B), fontWeight = FontWeight.SemiBold) }
+    }
+}
+
 @Composable
 private fun BandeauPannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, ouvrir: () -> Unit) {
     val cs = MaterialTheme.colorScheme

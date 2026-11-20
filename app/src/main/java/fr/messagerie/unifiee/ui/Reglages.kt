@@ -139,6 +139,7 @@ private object EtatMaj {
     var erreur by mutableStateOf<String?>(null)
     var verifie by mutableStateOf(false)
     var progression by mutableStateOf<Float?>(null)
+    var nouveautes by mutableStateOf<List<Pair<String, String>>>(emptyList())
 }
 
 /**
@@ -199,6 +200,12 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
 private suspend fun verifierMaj(ctx: android.content.Context) {
     EtatMaj.erreur = null
     try { EtatMaj.derniere = MiseAJour.derniere() } catch (ex: Exception) { EtatMaj.erreur = ex.message ?: ex.javaClass.simpleName }
+    // Nouveautés depuis la version installée ; à jour : celles de la version installée
+    runCatching {
+        val installee = MiseAJour.versionInstallee(ctx)
+        val dispo = (EtatMaj.derniere?.numero ?: 0) > installee
+        EtatMaj.nouveautes = MiseAJour.nouveautes(if (dispo) installee else installee - 1)
+    }
     EtatMaj.verifie = true
 }
 
@@ -352,12 +359,12 @@ private fun sansAccents(t: String) =
 /** Mode vacances, tout en haut des Réglages : coupe les notifications de tout ce qui est rangé en Pro. */
 @Composable
 private fun CarteVacances(e: Etat) {
-    var actif by remember { mutableStateOf(Moteur.cfg.vacances) }
+    val actif by Moteur.vacances.collectAsState()
     val cs = MaterialTheme.colorScheme
     val fond = if (actif) Color(0xFFFDEEDC) else cs.surfaceContainerLow
     val texte = if (actif) Color(0xFF7A3A08) else cs.onSurface
     val pro = Source.entries.filter { it in e.pro && (e.statistiques[it] != null || e.sources[it] != null) }
-    fun basculer(v: Boolean) { actif = v; Moteur.definirVacances(v) }
+    fun basculer(v: Boolean) { Moteur.definirVacances(v) }
     Surface(shape = RoundedCornerShape(20.dp), color = fond,
         border = if (actif) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFE8590C)) else null,
         modifier = Modifier.fillMaxWidth().clickable { basculer(!actif) }) {
@@ -1343,7 +1350,21 @@ private fun PageMiseAJour() {
                 dispo -> "Nouvelle version disponible : ${d.nom}" + if (d.taille > 0) " (%.1f Mo)".format(d.taille / 1_048_576.0) else ""
                 else -> "Vous avez la dernière version (${d.nom})."
             }, color = if (dispo) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            if (dispo && d!!.notes.isNotEmpty()) Text(d.notes, fontSize = 13.sp, maxLines = 8)
+        }
+    }
+    if (EtatMaj.nouveautes.isNotEmpty()) Section(if (dispo) "Ce qui change" else "Nouveautés de votre version") {
+        EtatMaj.nouveautes.forEachIndexed { i, (tag, texte) ->
+            if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(tag, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            texte.lines().filter { it.isNotBlank() }.forEach { l ->
+                val niveau = l.takeWhile { it == ' ' }.length / 2
+                val t = l.trim().removePrefix("- ")
+                Row(Modifier.padding(start = (niveau * 14).dp)) {
+                    Text(if (niveau == 0) "•  " else if (l.trim().startsWith("- ")) "–  " else "    ", fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(t, fontSize = 14.sp, fontWeight = if (niveau == 0) FontWeight.Medium else FontWeight.Normal)
+                }
+            }
         }
     }
 

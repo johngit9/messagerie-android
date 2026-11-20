@@ -1421,8 +1421,13 @@ object Moteur {
     }
 
     /** Mode vacances : active ou coupe les notifications Pro ; à l'activation, retire celles déjà affichées. */
+    private val _vacances by lazy { MutableStateFlow(cfg.vacances) }
+    /** Mode vacances actif (pour le bandeau de l'accueil). */
+    val vacances: StateFlow<Boolean> get() = _vacances
+
     fun definirVacances(actif: Boolean) {
         cfg.vacances = actif
+        _vacances.value = actif
         if (!actif) return
         val e = _etat.value
         e.conversations.filter { e.estPro(it) }.forEach { runCatching { NotificationManagerCompat.from(app).cancel(it.cle.hashCode()) } }
