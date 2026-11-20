@@ -9,6 +9,10 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -1035,6 +1039,8 @@ private fun Bulle(
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
                            reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit) {
+    var partie by remember { mutableStateOf(false) }
+    if (partie) { DialogueSelectionTexte(m.texte) { partie = false; fermer() }; return }
     ModalBottomSheet(onDismissRequest = fermer) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Text("Réagir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1058,7 +1064,8 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
-            if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
+            if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier tout le texte") { copier() }
+            if (m.type != "audio" && m.texte.isNotBlank()) ElementAction(Icons.Outlined.TextFields, "Copier une partie du texte") { partie = true }
             ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
             ElementAction(Icons.Outlined.DeleteOutline, "Supprimer") { supprimer() }
         }
@@ -1327,6 +1334,63 @@ private fun AlerteSpam(v: fr.messagerie.unifiee.Spam.Verdict, marquer: (Boolean)
         Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!v.estSpam || !v.manuel) TextButton(onClick = { marquer(true) }) { Text("C'est un spam", color = texte, fontWeight = FontWeight.SemiBold) }
             TextButton(onClick = { marquer(false) }) { Text("Ce n'est pas un spam", color = texte) }
+        }
+    }
+}
+
+/**
+ * Texte du message sélectionnable : appui long sur un mot puis poignées pour choisir la partie à copier.
+ * Les blocs de code (entre ```) sont en police à chasse fixe, défilables, avec leur propre bouton « Copier le code ».
+ */
+@Composable
+private fun DialogueSelectionTexte(texte: String, fermer: () -> Unit) {
+    val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    // Découpage en morceaux : texte normal / bloc de code
+    val morceaux = remember(texte) {
+        val res = ArrayList<Pair<Boolean, String>>()
+        var reste = texte
+        val bloc = Regex("```[a-zA-Z0-9_+-]*\\n?([\\s\\S]*?)```")
+        var debut = 0
+        bloc.findAll(texte).forEach { r ->
+            if (r.range.first > debut) res += false to texte.substring(debut, r.range.first).trim('\n')
+            res += true to r.groupValues[1].trimEnd('\n')
+            debut = r.range.last + 1
+        }
+        if (debut < texte.length) res += false to texte.substring(debut).trim('\n')
+        res.filter { it.second.isNotBlank() }.ifEmpty { listOf(false to reste) }
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = fermer,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(shape = RoundedCornerShape(24.dp), color = cs.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 600.dp)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Copier une partie", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("Appui long sur un mot, ajustez avec les poignées, puis « Copier ».", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    morceaux.forEach { (code, t) ->
+                        if (!code) androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(t, fontSize = 16.sp, lineHeight = 22.sp)
+                        } else Column(Modifier.fillMaxWidth().background(cs.surfaceContainerLowest, RoundedCornerShape(12.dp))
+                            .border(1.dp, cs.outlineVariant, RoundedCornerShape(12.dp))) {
+                            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Code", fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { copier(ctx, t) }) {
+                                    Icon(Icons.Outlined.ContentCopy, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copier le code")
+                                }
+                            }
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(t, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, softWrap = false,
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 12.dp))
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { copier(ctx, texte); fermer() }) { Text("Tout copier") }
+                    TextButton(onClick = fermer) { Text("Fermer") }
+                }
+            }
         }
     }
 }
