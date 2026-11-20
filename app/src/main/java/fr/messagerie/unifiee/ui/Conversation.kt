@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.DropdownMenuItem
@@ -715,100 +716,109 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
                         val fautesActuelles = if (fautes.first == brouillon) fautes.second else emptyList()
                         val rougeFaute = MaterialTheme.colorScheme.error
-                        // Trombone : joindre une photo, une vidéo, un fichier ou un contact
-                        if (Moteur.imagePossible(c)) Box(Modifier.align(Alignment.CenterVertically)) {
-                            IconButton(onClick = { menuJoindre = true }) { Icon(Icons.Outlined.AttachFile, "Joindre", tint = c.source.teinte()) }
-                            DropdownMenu(expanded = menuJoindre, onDismissRequest = { menuJoindre = false }) {
-                                DropdownMenuItem(text = { Text("Photo ou vidéo") }, leadingIcon = { Icon(Icons.Outlined.Image, null) }, onClick = {
-                                    menuJoindre = false
-                                    choisirMedia.launch(androidx.activity.result.PickVisualMediaRequest(
-                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                                })
-                                DropdownMenuItem(text = { Text("Fichier") }, leadingIcon = { Icon(Icons.Outlined.Description, null) }, onClick = {
-                                    menuJoindre = false; choisirFichier.launch(arrayOf("*/*"))
-                                })
-                                DropdownMenuItem(text = { Text("Contact") }, leadingIcon = { Icon(Icons.Outlined.Person, null) }, onClick = {
-                                    menuJoindre = false; joindreContact()
-                                })
-                            }
-                        }
-                        OutlinedTextField(
-                            value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
-                                autoCorrectEnabled = true, keyboardType = androidx.compose.ui.text.input.KeyboardType.Text),
-                            // Fautes soulignées en rouge
-                            visualTransformation = if (fautesActuelles.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None
-                                else androidx.compose.ui.text.input.VisualTransformation { texte ->
-                                    val souligne = androidx.compose.ui.text.SpanStyle(color = rougeFaute,
-                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
-                                    val a = androidx.compose.ui.text.buildAnnotatedString {
-                                        append(texte)
-                                        fautesActuelles.forEach { f -> if (f.fin <= texte.length) addStyle(souligne, f.debut, f.fin) }
+                        // Barre de saisie d'une ligne (comme Messages) : trombone et IA dans la pastille, qui grandit avec le texte
+                        Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(horizontal = 2.dp)) {
+                                if (Moteur.imagePossible(c)) Box {
+                                    IconButton(onClick = { menuJoindre = true }) { Icon(Icons.Outlined.AddCircleOutline, "Joindre", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    DropdownMenu(expanded = menuJoindre, onDismissRequest = { menuJoindre = false }) {
+                                        DropdownMenuItem(text = { Text("Photo ou vidéo") }, leadingIcon = { Icon(Icons.Outlined.Image, null) }, onClick = {
+                                            menuJoindre = false
+                                            choisirMedia.launch(androidx.activity.result.PickVisualMediaRequest(
+                                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                                        })
+                                        DropdownMenuItem(text = { Text("Fichier") }, leadingIcon = { Icon(Icons.Outlined.Description, null) }, onClick = {
+                                            menuJoindre = false; choisirFichier.launch(arrayOf("*/*"))
+                                        })
+                                        DropdownMenuItem(text = { Text("Contact") }, leadingIcon = { Icon(Icons.Outlined.Person, null) }, onClick = {
+                                            menuJoindre = false; joindreContact()
+                                        })
                                     }
-                                    androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
-                                },
-                            placeholder = { Text(if (c.source == Source.SMS) "Écrire un SMS…" else "Écrire une réponse…") },
-                            minLines = if (saisieAgrandie) 8 else 2, maxLines = if (saisieAgrandie) 16 else 8,
-                            trailingIcon = {
-                                IconButton(onClick = { saisieAgrandie = !saisieAgrandie }) {
-                                    Icon(if (saisieAgrandie) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
-                                        if (saisieAgrandie) "Réduire la zone de saisie" else "Agrandir la zone de saisie", modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            shape = RoundedCornerShape(20.dp), modifier = Modifier.weight(1f),
-                        )
-                        // Champ vide : réponses rapides (modèles et brouillons IA) ; sinon, améliorer avec l'IA
-                        if (brouillon.isBlank() && !iaEnCours) OutlinedButton(onClick = { reponsesRapides = true },
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
-                            Icon(Icons.Outlined.Bolt, "Réponses rapides")
-                        }
-                        else if (Moteur.cfg.ollamaConfigure) Box {
-                            OutlinedButton(onClick = { menuIA = true }, enabled = brouillon.isNotBlank() && !iaEnCours,
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) {
-                                if (iaEnCours) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.AutoAwesome, "Améliorer avec l'IA")
-                            }
-                            DropdownMenu(expanded = menuIA, onDismissRequest = { menuIA = false }) {
-                                Ollama.Facon.entries.forEach { f ->
-                                    DropdownMenuItem(text = { Text(f.libelle) }, onClick = {
-                                        menuIA = false
-                                        val avant = brouillon
-                                        iaEnCours = true
-                                        portee.launch {
-                                            val r = Moteur.ameliorer(avant, f, c)
-                                            iaEnCours = false
-                                            if (r != null) { versionsIA = versionsIA + avant; brouillon = r } else afficher("L'IA n'a pas répondu")
+                                } else Spacer(Modifier.width(14.dp))
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = valeurChamp, onValueChange = { champ = it; brouillon = it.text }, enabled = !iaEnCours,
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(c.source.teinte()),
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                        capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
+                                        autoCorrectEnabled = true, keyboardType = androidx.compose.ui.text.input.KeyboardType.Text),
+                                    // Fautes soulignées en rouge
+                                    visualTransformation = if (fautesActuelles.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None
+                                        else androidx.compose.ui.text.input.VisualTransformation { texte ->
+                                            val souligne = androidx.compose.ui.text.SpanStyle(color = rougeFaute,
+                                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                                            val a = androidx.compose.ui.text.buildAnnotatedString {
+                                                append(texte)
+                                                fautesActuelles.forEach { f -> if (f.fin <= texte.length) addStyle(souligne, f.debut, f.fin) }
+                                            }
+                                            androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
+                                        },
+                                    minLines = if (saisieAgrandie) 8 else 1, maxLines = if (saisieAgrandie) 16 else 6,
+                                    modifier = Modifier.weight(1f).padding(vertical = 13.dp),
+                                    decorationBox = { champTexte ->
+                                        Box {
+                                            if (brouillon.isEmpty()) Text(if (c.source == Source.SMS) "Message SMS" else "Message ${c.source.id}",
+                                                style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                            champTexte()
                                         }
-                                    })
+                                    },
+                                )
+                                // Texte long : agrandir / réduire la zone
+                                if (saisieAgrandie || brouillon.length > 120 || brouillon.count { it == '\n' } >= 3)
+                                    IconButton(onClick = { saisieAgrandie = !saisieAgrandie }) {
+                                        Icon(if (saisieAgrandie) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
+                                            if (saisieAgrandie) "Réduire la zone de saisie" else "Agrandir la zone de saisie", modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                // Champ vide : réponses rapides ; sinon, améliorer avec l'IA
+                                if (brouillon.isBlank() && !iaEnCours) IconButton(onClick = { reponsesRapides = true }) {
+                                    Icon(Icons.Outlined.Bolt, "Réponses rapides", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                else if (Moteur.cfg.ollamaConfigure) Box {
+                                    IconButton(onClick = { menuIA = true }, enabled = brouillon.isNotBlank() && !iaEnCours) {
+                                        if (iaEnCours) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        else Icon(Icons.Outlined.AutoAwesome, "Améliorer avec l'IA", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    DropdownMenu(expanded = menuIA, onDismissRequest = { menuIA = false }) {
+                                        Ollama.Facon.entries.forEach { f ->
+                                            DropdownMenuItem(text = { Text(f.libelle) }, onClick = {
+                                                menuIA = false
+                                                val avant = brouillon
+                                                iaEnCours = true
+                                                portee.launch {
+                                                    val r = Moteur.ameliorer(avant, f, c)
+                                                    iaEnCours = false
+                                                    if (r != null) { versionsIA = versionsIA + avant; brouillon = r } else afficher("L'IA n'a pas répondu")
+                                                }
+                                            })
+                                        }
+                                    }
                                 }
                             }
                         }
-                        if (brouillon.isBlank() && Moteur.vocalPossible(c)) Button(
-                            onClick = {
-                                val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctxVocal, android.Manifest.permission.RECORD_AUDIO) ==
-                                    android.content.pm.PackageManager.PERMISSION_GRANTED
-                                if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }.onFailure { afficher("Micro indisponible") }
-                                else demandeMicro.launch(android.Manifest.permission.RECORD_AUDIO)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte()),
-                        ) { Icon(Icons.Outlined.Mic, "Enregistrer un vocal") }
-                        else Button(
-                            onClick = {
-                                envoi = true
-                                portee.launch {
-                                    val err = Moteur.envoyer(brouillon, c, reponseA, mentions)
-                                    envoi = false
-                                    if (err == null) {
-                                        brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
-                                        afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
-                                    } else afficher("Échec : $err")
+                        // Bouton rond : micro quand le champ est vide, sinon envoyer
+                        val micro = brouillon.isBlank() && Moteur.vocalPossible(c)
+                        Box(Modifier.size(52.dp).clip(CircleShape).background(if (micro || brouillon.isNotBlank()) c.source.teinte() else c.source.teinte().copy(alpha = 0.4f))
+                            .clickable(enabled = micro || (brouillon.isNotBlank() && !envoi)) {
+                                if (micro) {
+                                    val ok = androidx.core.content.ContextCompat.checkSelfPermission(ctxVocal, android.Manifest.permission.RECORD_AUDIO) ==
+                                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                                    if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }.onFailure { afficher("Micro indisponible") }
+                                    else demandeMicro.launch(android.Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    envoi = true
+                                    portee.launch {
+                                        val err = Moteur.envoyer(brouillon, c, reponseA, mentions)
+                                        envoi = false
+                                        if (err == null) {
+                                            brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
+                                            afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
+                                        } else afficher("Échec : $err")
+                                    }
                                 }
-                            },
-                            enabled = brouillon.isNotBlank() && !envoi,
-                            colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte()),
-                        ) {
-                            if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
-                            else Icon(Icons.AutoMirrored.Outlined.Send, "Envoyer")
+                            }, contentAlignment = Alignment.Center) {
+                            if (envoi) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                            else Icon(if (micro) Icons.Outlined.Mic else Icons.AutoMirrored.Outlined.Send, if (micro) "Enregistrer un vocal" else "Envoyer", tint = Color.White)
                         }
                     }
                     }

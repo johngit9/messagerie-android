@@ -255,15 +255,26 @@ private fun Entete(
         }
         // Pastilles de vue
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val nNonLus = e.nombreMessagesNonLus(source, espace.pro)
+            val nATraiter = e.nombreATraiter(source, espace.pro)
+            var menuVue by remember { mutableStateOf(false) }
             Vue.entries.forEach { v ->
                 if (v == Vue.Spam && e.nombreSpams == 0 && vue != Vue.Spam) return@forEach   // pastille Spam seulement s'il y en a
-                val n = when (v) {
-                    Vue.ATraiter -> e.nombreATraiter(source, espace.pro)
-                    Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro)
-                    Vue.Spam -> e.nombreSpams
-                    else -> 0
+                when (v) {
+                    Vue.ATraiter -> {}   // regroupée avec « Non lues »
+                    Vue.NonLus -> Box {
+                        PastilleVue((if (vue == Vue.ATraiter) "À traiter" else "Non lues") + " ▾",
+                            if (vue == Vue.ATraiter) nATraiter else nNonLus, vue == Vue.NonLus || vue == Vue.ATraiter) { menuVue = true }
+                        androidx.compose.material3.DropdownMenu(expanded = menuVue, onDismissRequest = { menuVue = false }) {
+                            listOf(Vue.NonLus to nNonLus, Vue.ATraiter to nATraiter).forEach { (vv, n) ->
+                                androidx.compose.material3.DropdownMenuItem(text = { Text(vv.libelle + if (n > 0) "  ($n)" else "") },
+                                    onClick = { menuVue = false; choisirVue(vv) },
+                                    trailingIcon = { if (vv == vue) Icon(Icons.Outlined.TaskAlt, null) })
+                            }
+                        }
+                    }
+                    else -> PastilleVue(v.libelle, if (v == Vue.Spam) e.nombreSpams else 0, v == vue) { choisirVue(v) }
                 }
-                PastilleVue(v.libelle, n, v == vue) { choisirVue(v) }
             }
             Box(Modifier.padding(horizontal = 2.dp).size(1.dp, 26.dp).align(Alignment.CenterVertically).background(MaterialTheme.colorScheme.outlineVariant))
             PastilleVue(Genre.Discussions.libelle, 0, genre == Genre.Discussions) { choisirGenre(Genre.Discussions) }
@@ -276,13 +287,13 @@ private fun Entete(
 private fun PastilleVue(libelle: String, n: Int, choisie: Boolean, clic: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.height(38.dp)
-            .background(if (choisie) cs.onSurface else cs.surfaceContainerLow, RoundedCornerShape(19.dp))
-            .then(if (choisie) Modifier else Modifier.border(1.dp, cs.outline.copy(alpha = 0.35f), RoundedCornerShape(19.dp)))
-            .clickable(onClick = clic).padding(horizontal = 14.dp),
+        Modifier.height(32.dp)
+            .background(if (choisie) cs.onSurface else cs.surfaceContainerLow, RoundedCornerShape(16.dp))
+            .then(if (choisie) Modifier else Modifier.border(1.dp, cs.outline.copy(alpha = 0.35f), RoundedCornerShape(16.dp)))
+            .clip(RoundedCornerShape(16.dp)).clickable(onClick = clic).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(libelle, fontSize = 14.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium,
+        Text(libelle, fontSize = 13.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium,
             color = if (choisie) cs.surface else cs.onSurface)
         if (n > 0) {
             Spacer(Modifier.width(8.dp))
@@ -677,6 +688,7 @@ private fun EnteteCompact(
         onDispose { if (avant != null) ctrl.isAppearanceLightStatusBars = avant }
     }
     var menuEspace by remember { mutableStateOf(false) }
+    var menuVue by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().background(fondHaut).statusBarsPadding()
             .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = if (bandeau) 24.dp else 0.dp),
@@ -714,11 +726,8 @@ private fun EnteteCompact(
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(if (bandeau) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
             if (source != null) PuceCompacte(bandeau, source.libelle + " ✕", 0, false, true) { choisirSource(null) }
-            Vue.entries.forEach { v ->
-                if (v == Vue.Spam && e.nombreSpams == 0 && vue != Vue.Spam) return@forEach
-                val n = when (v) { Vue.ATraiter -> e.nombreATraiter(source, espace.pro); Vue.NonLus -> e.nombreMessagesNonLus(source, espace.pro); Vue.Spam -> e.nombreSpams; else -> 0 }
-                PuceCompacte(bandeau, v.libelle, n, v == Vue.ATraiter, v == vue) { choisirVue(v) }
-            }
+            // Ordre : Toutes, Perso · Pro, Non lues · À traiter (regroupés), Archivées, Spam
+            PuceCompacte(bandeau, Vue.Toutes.libelle, 0, false, vue == Vue.Toutes) { choisirVue(Vue.Toutes) }
             Box {
                 PuceCompacte(bandeau, (if (espace == Espace.Tout) "Perso · Pro" else espace.libelle) + " ▾", 0, false, espace != Espace.Tout) { menuEspace = true }
                 androidx.compose.material3.DropdownMenu(expanded = menuEspace, onDismissRequest = { menuEspace = false }) {
@@ -729,6 +738,23 @@ private fun EnteteCompact(
                     }
                 }
             }
+            val nNonLus = e.nombreMessagesNonLus(source, espace.pro)
+            val nATraiter = e.nombreATraiter(source, espace.pro)
+            Box {
+                val choisie = vue == Vue.NonLus || vue == Vue.ATraiter
+                PuceCompacte(bandeau, (if (vue == Vue.ATraiter) "À traiter" else "Non lues") + " ▾",
+                    if (vue == Vue.ATraiter) nATraiter else nNonLus, vue == Vue.ATraiter, choisie,
+                    n2 = if (vue == Vue.ATraiter) 0 else nATraiter) { menuVue = true }
+                androidx.compose.material3.DropdownMenu(expanded = menuVue, onDismissRequest = { menuVue = false }) {
+                    listOf(Vue.NonLus to nNonLus, Vue.ATraiter to nATraiter).forEach { (v, n) ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(v.libelle + if (n > 0) "  ($n)" else "") },
+                            onClick = { menuVue = false; choisirVue(v) },
+                            trailingIcon = { if (v == vue) Icon(Icons.Outlined.TaskAlt, null) })
+                    }
+                }
+            }
+            PuceCompacte(bandeau, Vue.Archivees.libelle, 0, false, vue == Vue.Archivees) { choisirVue(Vue.Archivees) }
+            if (e.nombreSpams > 0 || vue == Vue.Spam) PuceCompacte(bandeau, Vue.Spam.libelle, e.nombreSpams, false, vue == Vue.Spam) { choisirVue(Vue.Spam) }
             PuceCompacte(bandeau, Genre.Discussions.libelle, 0, false, genre == Genre.Discussions) { choisirGenre(Genre.Discussions) }
             PuceCompacte(bandeau, Genre.Groupes.libelle, 0, false, genre == Genre.Groupes) { choisirGenre(Genre.Groupes) }
         }
@@ -746,24 +772,29 @@ private fun EnteteCompact(
 }
 
 @Composable
-private fun PuceCompacte(bandeau: Boolean, libelle: String, n: Int, attente: Boolean, choisie: Boolean, clic: () -> Unit) {
+private fun PuceCompacte(bandeau: Boolean, libelle: String, n: Int, attente: Boolean, choisie: Boolean, n2: Int = 0, clic: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     if (bandeau) {
         val nuit = couleurBandeau()
         Row(
-            Modifier.height(36.dp)
-                .background(if (choisie) Color.White else Color.White.copy(alpha = 0.10f), RoundedCornerShape(18.dp))
-                .then(if (choisie) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)))
-                .clip(RoundedCornerShape(18.dp)).clickable(onClick = clic).padding(horizontal = 14.dp),
+            Modifier.height(30.dp)
+                .background(if (choisie) Color.White else Color.White.copy(alpha = 0.10f), RoundedCornerShape(15.dp))
+                .then(if (choisie) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(15.dp)))
+                .clip(RoundedCornerShape(15.dp)).clickable(onClick = clic).padding(horizontal = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(libelle, fontSize = 14.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium, color = if (choisie) nuit else Color.White)
+            Text(libelle, fontSize = 13.sp, fontWeight = if (choisie) FontWeight.SemiBold else FontWeight.Medium, color = if (choisie) nuit else Color.White)
             if (n > 0) {
-                Spacer(Modifier.width(7.dp))
-                Text(compte(n), fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                Spacer(Modifier.width(6.dp))
+                Text(compte(n), fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     color = when { attente -> Color(0xFF3B1F06); choisie -> Color.White; else -> Color.White },
-                    modifier = Modifier.background(when { attente -> Color(0xFFF7B267); choisie -> Color(0xFF3B5BDB); else -> Color.White.copy(alpha = 0.18f) }, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 7.dp, vertical = 1.dp))
+                    modifier = Modifier.background(when { attente -> Color(0xFFF7B267); choisie -> Color(0xFF3B5BDB); else -> Color.White.copy(alpha = 0.18f) }, RoundedCornerShape(9.dp))
+                        .padding(horizontal = 6.dp, vertical = 0.dp))
+            }
+            if (n2 > 0) {
+                Spacer(Modifier.width(4.dp))
+                Text(compte(n2), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3B1F06),
+                    modifier = Modifier.background(Color(0xFFF7B267), RoundedCornerShape(9.dp)).padding(horizontal = 6.dp, vertical = 0.dp))
             }
         }
     } else {
@@ -775,6 +806,10 @@ private fun PuceCompacte(bandeau: Boolean, libelle: String, n: Int, attente: Boo
                 if (n > 0) {
                     Spacer(Modifier.width(5.dp))
                     Text(compte(n), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (attente) Color(0xFFA04A0B) else cs.primary)
+                }
+                if (n2 > 0) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(compte(n2), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA04A0B))
                 }
             }
             Box(Modifier.height(2.5.dp).width(28.dp).background(if (choisie) cs.onSurface else Color.Transparent, RoundedCornerShape(2.dp)))
