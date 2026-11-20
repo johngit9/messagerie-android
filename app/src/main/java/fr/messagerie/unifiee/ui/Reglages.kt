@@ -92,6 +92,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.BeachAccess
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -268,6 +269,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
             Modifier.padding(pad).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            CarteVacances(e)
             ChampRecherche(recherche) { recherche = it }
 
             val q = sansAccents(recherche.trim())
@@ -346,6 +348,36 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
 
 private fun sansAccents(t: String) =
     java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+/** Mode vacances, tout en haut des Réglages : coupe les notifications de tout ce qui est rangé en Pro. */
+@Composable
+private fun CarteVacances(e: Etat) {
+    var actif by remember { mutableStateOf(Moteur.cfg.vacances) }
+    val cs = MaterialTheme.colorScheme
+    val fond = if (actif) Color(0xFFFDEEDC) else cs.surfaceContainerLow
+    val texte = if (actif) Color(0xFF7A3A08) else cs.onSurface
+    val pro = Source.entries.filter { it in e.pro && (e.statistiques[it] != null || e.sources[it] != null) }
+    fun basculer(v: Boolean) { actif = v; Moteur.definirVacances(v) }
+    Surface(shape = RoundedCornerShape(20.dp), color = fond,
+        border = if (actif) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFE8590C)) else null,
+        modifier = Modifier.fillMaxWidth().clickable { basculer(!actif) }) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFE8590C)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.BeachAccess, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Mode vacances", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = texte)
+                Text(if (actif) "Activé : aucune notification Pro" + (if (pro.isNotEmpty()) " (" + pro.joinToString(", ") { it.id } + ")" else "")
+                    else "Coupe les notifications des messageries et conversations rangées en Pro",
+                    fontSize = 13.sp, color = if (actif) texte else cs.onSurfaceVariant, maxLines = 2)
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = actif, onCheckedChange = { basculer(it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = Color(0xFFE8590C)))
+        }
+    }
+}
 
 @Composable
 private fun ChampRecherche(valeur: String, maj: (String) -> Unit) {

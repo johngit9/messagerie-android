@@ -1211,6 +1211,7 @@ object Moteur {
         if (auPremierPlan) return
         nouveaux.filter { maintenant - it.second.date < 3_600_000 }.groupBy { it.first }.forEach { (c, l) ->
             if (cfg.notif(c.source) != "tous" || e.etat(c).sourdine || c.cle == convOuverte) return@forEach
+            if (cfg.vacances && e.estPro(c)) return@forEach   // mode vacances : rien pour le Pro
             notifierMessages(c, l.map { it.second })
         }
     }
@@ -1244,6 +1245,14 @@ object Moteur {
             }
         }
         return canal
+    }
+
+    /** Mode vacances : active ou coupe les notifications Pro ; à l'activation, retire celles déjà affichées. */
+    fun definirVacances(actif: Boolean) {
+        cfg.vacances = actif
+        if (!actif) return
+        val e = _etat.value
+        e.conversations.filter { e.estPro(it) }.forEach { runCatching { NotificationManagerCompat.from(app).cancel(it.cle.hashCode()) } }
     }
 
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
@@ -1290,6 +1299,7 @@ object Moteur {
         val e = _etat.value
         val ec = e.etat(c)
         if (!cfg.notifications || cfg.notif(c.source) == "aucun" || ec.sourdine || !e.aTraiter(c) || ec.notifiee == c.derniere) return
+        if (cfg.vacances && e.estPro(c)) return   // mode vacances : rien pour le Pro
         val s = e.synthese(c) ?: return
         majEtat(c.cle) { it.copy(notifiee = c.derniere) }
         if (Build.VERSION.SDK_INT >= 33 &&

@@ -58,6 +58,8 @@ class Config(context: Context) {
     fun definirNotif(s: Source, v: String) = p.edit().putString("notif.${s.id}", v).apply()
 
     /** Messagerie rangée en « Pro » par défaut (Element et LinkedIn). */
+    /** Mode vacances : aucune notification pour les messageries et conversations rangées en Pro. */
+    var vacances: Boolean get() = p.getBoolean("vacances", false); set(v) = p.edit().putBoolean("vacances", v).apply()
     fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN || s == Source.TEAMS)
     fun definirPro(s: Source, v: Boolean) = p.edit().putBoolean("pro.${s.id}", v).apply()
 
