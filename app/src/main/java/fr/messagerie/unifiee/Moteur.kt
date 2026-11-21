@@ -1002,8 +1002,9 @@ object Moteur {
         if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) return null
         return runCatching {
-            val P = android.provider.ContactsContract.CommonDataKinds.Phone
-            app.contentResolver.query(P.CONTENT_URI, arrayOf(P.NUMBER), "${P.DISPLAY_NAME} = ?", arrayOf(c.nom.trim()), null)?.use { cur ->
+            app.contentResolver.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
+                "${android.provider.ContactsContract.Contacts.DISPLAY_NAME} = ?", arrayOf(c.nom.trim()), null)?.use { cur ->
                 if (cur.moveToFirst()) cur.getString(0) else null
             }
         }.getOrNull()
