@@ -564,6 +564,11 @@ class SyncPont(
             if (i >= 0) lot[i] = remplace else maj.add(remplace)
         }
         archive.enregistrerMessages(maj)
+        // Réactions iPhone arrivées en texte (« 😂 à "…" ») : collées au message visé, sans bulle
+        if (lot.any { Tapback.lire(it.texte) != null }) {
+            val (vrais, tapbacks) = Tapback.separer(lot, archive.messages(conv, null, 300))
+            lot.clear(); lot.addAll(vrais); reactions.addAll(tapbacks)
+        }
         val deja = archive.existantes(lot.map { it.cle })
         val nouveaux = lot.filter { it.cle !in deja }
         archive.enregistrerMessages(nouveaux)

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.MarkEmailRead
@@ -119,7 +120,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
         drawerState = tiroir,
         drawerContent = {
             Tiroir(e, sources, fermer = { portee.launch { tiroir.close() } }, ouvrirReglages = ouvrirReglages,
-                choisirSource = { vm.source.value = it; vm.vue.value = Vue.Toutes })
+                choisirSource = { vm.source.value = it; vm.vue.value = Vue.Toutes },
+                choisirVue = { vm.source.value = null; vm.vue.value = it })
         },
     ) {
         Scaffold(
@@ -351,7 +353,8 @@ private fun OngletSource(nom: String, source: Source?, choisi: Boolean, n: Int, 
 }
 
 @Composable
-private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReglages: () -> Unit, choisirSource: (Source) -> Unit) {
+private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReglages: () -> Unit, choisirSource: (Source) -> Unit,
+                   choisirVue: (Vue) -> Unit) {
     ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
             Row(Modifier.padding(start = 16.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -385,6 +388,19 @@ private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReg
                         }
                     },
                     selected = false, onClick = { choisirSource(s); fermer() },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                )
+            }
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+            Text("Dossiers", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
+            // Toujours accessibles, même vides
+            listOf(Triple(Vue.Archivees, Icons.Outlined.Inbox, e.conversations.count { e.estArchivee(it) }),
+                Triple(Vue.Spam, Icons.Outlined.Report, e.nombreSpams)).forEach { (v, icone, n) ->
+                NavigationDrawerItem(
+                    label = { Text(v.libelle) }, icon = { Icon(icone, null) },
+                    badge = { if (n > 0) Text("$n", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    selected = false, onClick = { choisirVue(v); fermer() },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
                 )
             }

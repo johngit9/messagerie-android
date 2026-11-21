@@ -149,6 +149,22 @@ object Moteur {
                 }
             }
             recharger()
+            // Une fois : les réactions iPhone déjà archivées en texte (« 😂 à "…" ») deviennent des réactions
+            if (archive.curseur("tapbacks.v1") == null) runCatching {
+                var change = false
+                _etat.value.conversations.forEach { c ->
+                    val hist = archive.messages(c.cle, null, 1000)
+                    if (hist.none { Tapback.lire(it.texte) != null }) return@forEach
+                    val (vrais, reactions) = Tapback.separer(hist, emptyList())
+                    val convertis = hist.map { it.cle }.toSet() - vrais.map { it.cle }.toSet()
+                    if (convertis.isEmpty()) return@forEach
+                    archive.supprimerMessages(convertis.toList())
+                    archive.enregistrerReactions(reactions)
+                    change = true
+                }
+                archive.definirCurseur("tapbacks.v1", "1")
+                if (change) recharger()
+            }
         }
         // Non-lus par messagerie dans les raccourcis de l'icône (appui long)
         portee.launch {
