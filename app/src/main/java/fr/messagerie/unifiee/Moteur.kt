@@ -1325,8 +1325,14 @@ object Moteur {
         val e = _etat.value
         val recents = e.conversations.flatMap { c -> c.messages.filter { !it.deMoi && it.date > maintenant - 6 * 3_600_000L }.map { c to it } }
         archive.definirCurseur("vu.cles", recents.map { it.second.cle }.takeLast(3000).joinToString("\n"))
+        // Vos messages envoyés depuis une autre appli (téléphone, ordinateur) : la conversation est lue jusque-là, ici aussi
+        e.conversations.forEach { c ->
+            val monDernier = c.messages.lastOrNull { it.deMoi }?.date ?: return@forEach
+            if (monDernier > e.etat(c).lue) majEtat(c.cle, partager = false) { it.copy(lue = maxOf(it.lue, monDernier)) }
+        }
         if (depuis == null) return   // premier passage : rien à signaler
-        val nouveaux = recents.filter { (_, m) -> m.cle !in vus && (m.date > depuis || vus.isNotEmpty()) }
+        // Pas de « nouveau message » pour ce qui précède votre propre réponse (déjà lu ailleurs)
+        val nouveaux = recents.filter { (c, m) -> m.cle !in vus && (m.date > depuis || vus.isNotEmpty()) && m.date > e.luJusqua(c) }
         if (nouveaux.isEmpty()) return
         // Délai : seulement pour des messages arrivés « en direct » (moins de 10 min).
         nouveaux.groupBy { it.first.source }.forEach { (s, l) ->
@@ -1461,7 +1467,7 @@ object Moteur {
             val e = _etat.value
             val actuelle = e.conversations.firstOrNull { it.cle == c.cle } ?: c
             val depuis = e.luJusqua(actuelle)
-            (actuelle.messages.filter { !it.deMoi && it.date > depuis } + msgs).distinctBy { it.cle }.sortedBy { it.date }
+            (actuelle.messages + msgs).filter { !it.deMoi && it.date > depuis }.distinctBy { it.cle }.sortedBy { it.date }
         }
         nonLus.takeLast(8).forEach { m ->
             style.addMessage(if (cfg.notifApercu == 1) "Nouveau message" else m.texteUtile, m.date, if (c.estGroupe) membre(c, m.auteur) else contact)
