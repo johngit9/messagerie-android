@@ -1202,10 +1202,12 @@ internal fun ouvrirTeams(ctx: android.content.Context, conversation: String, der
 private fun moyensAppel(c: Conversation): List<Pair<String, String>> {
     val l = ArrayList<Pair<String, String>>()
     // Numéro : identifiant WhatsApp (numéro@s.whatsapp.net) ou nom de la conversation s'il ressemble à un numéro
-    val numero = when {
-        c.source == Source.WHATSAPP && c.jid.endsWith("@s.whatsapp.net") -> c.jid.substringBefore('@').substringBefore(':')
-        else -> c.nom.filter { it.isDigit() || it == '+' }.takeIf { it.count(Char::isDigit) >= 8 && c.nom.none { ch -> ch.isLetter() } }
-    }?.trimStart('+')
+    val tel = Moteur.numeroTelephone(c)?.filter { it.isDigit() || it == '+' }?.takeIf { it.count(Char::isDigit) >= 6 }
+    // wa.me demande le numéro international : seulement l'identifiant WhatsApp ou un numéro en +
+    val numero = c.jid.substringBefore('@').substringBefore(':').takeIf { c.source == Source.WHATSAPP && c.jid.endsWith("@s.whatsapp.net") }
+        ?: tel?.takeIf { it.startsWith("+") }?.trimStart('+')
+    // Appel par le téléphone en premier : ouvre le composeur, rien n'est composé automatiquement
+    if (tel != null) l += "Appel téléphonique ($tel)" to "tel:$tel"
     when (c.source) {
         Source.WHATSAPP -> if (numero != null) l += "Appel WhatsApp (vidéo ou audio)" to "https://wa.me/$numero" else l += "Ouvrir WhatsApp" to "appli:com.whatsapp"
         Source.TELEGRAM -> l += "Appel Telegram (ouvrir l'appli)" to "appli:org.telegram.messenger"
@@ -1215,7 +1217,6 @@ private fun moyensAppel(c: Conversation): List<Pair<String, String>> {
         Source.ELEMENT -> l += "Appel Element (ouvrir l'appli)" to "appli:im.vector.app"
         else -> {}
     }
-    if (numero != null) l += "Appel téléphonique" to "tel:+$numero"
     l += "Nouvelle visio Google Meet" to "https://meet.google.com/new"
     return l
 }

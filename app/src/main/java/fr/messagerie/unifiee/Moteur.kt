@@ -383,6 +383,7 @@ object Moteur {
         val e = _etat.value
         val connus = HashSet<String>()
         val convs = archive.conversations(e.depuis, 60).map { c ->
+            if (c.source != Source.TEAMS && !c.estGroupe && estUnNumero(c.nom)) numeros[c.cle] = c.nom.trim()
             if (c.source == Source.TEAMS || !estUnNumero(c.nom)) c
             else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { connus += c.cle; c.copy(nom = it) } ?: c
         }.map { c -> nomPerso(c.cle)?.let { n -> connus += c.cle; c.copy(nom = n) } ?: c }   // nom choisi par vous
@@ -984,6 +985,29 @@ object Moteur {
 
     /** Numéro → nom du carnet d'adresses du téléphone ("" = inconnu), pour ne pas relire les contacts à chaque fois. */
     private val nomsCarnet = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** Numéro d'origine des conversations nommées par un numéro (avant le nom du carnet ou le vôtre). */
+    private val numeros = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Numéro de téléphone d'un contact, s'il est connu : numéro de la conversation (SMS), identifiant WhatsApp,
+     * même personne sur une autre messagerie, ou fiche du carnet portant ce nom. Lecture locale uniquement.
+     */
+    fun numeroTelephone(c: Conversation): String? {
+        if (c.estGroupe) return null
+        fun direct(x: Conversation): String? = numeros[x.cle]
+            ?: x.nom.trim().takeIf { estUnNumero(it) }
+            ?: x.jid.substringBefore('@').substringBefore(':').takeIf { x.source == Source.WHATSAPP && it.length >= 8 && it.all(Char::isDigit) }?.let { "+$it" }
+        direct(c)?.let { return it }
+        runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { direct(it) }?.let { return it }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return null
+        return runCatching {
+            val P = android.provider.ContactsContract.CommonDataKinds.Phone
+            app.contentResolver.query(P.CONTENT_URI, arrayOf(P.NUMBER), "${P.DISPLAY_NAME} = ?", arrayOf(c.nom.trim()), null)?.use { cur ->
+                if (cur.moveToFirst()) cur.getString(0) else null
+            }
+        }.getOrNull()
+    }
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
 
