@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.MarkChatUnread
 import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PushPin
@@ -121,7 +122,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
         drawerContent = {
             Tiroir(e, sources, fermer = { portee.launch { tiroir.close() } }, ouvrirReglages = ouvrirReglages,
                 choisirSource = { vm.source.value = it; vm.vue.value = Vue.Toutes },
-                choisirVue = { vm.source.value = null; vm.vue.value = it })
+                choisirVue = { v, s -> vm.source.value = s; vm.vue.value = v })
         },
     ) {
         Scaffold(
@@ -354,7 +355,7 @@ private fun OngletSource(nom: String, source: Source?, choisi: Boolean, n: Int, 
 
 @Composable
 private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReglages: () -> Unit, choisirSource: (Source) -> Unit,
-                   choisirVue: (Vue) -> Unit) {
+                   choisirVue: (Vue, Source?) -> Unit) {
     ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
             Row(Modifier.padding(start = 16.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -384,10 +385,15 @@ private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReg
                     badge = {
                         when {
                             st is EtatSource.Erreur -> Icon(Icons.Outlined.ErrorOutline, "Erreur", tint = MaterialTheme.colorScheme.error)
-                            else -> e.statistiques[s]?.let { Text("${it.first}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            // Nombre de messages non lus (rien si tout est lu)
+                            else -> e.nombreMessagesNonLus(s).takeIf { it > 0 }?.let { n ->
+                                Text(compte(n), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.background(s.teinte(), RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+                            }
                         }
                     },
-                    selected = false, onClick = { choisirSource(s); fermer() },
+                    // Avec des non-lus : la messagerie s'ouvre directement sur ses messages non lus
+                    selected = false, onClick = { choisirSource(s); if (e.nombreMessagesNonLus(s) > 0) choisirVue(Vue.NonLus, s); fermer() },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
                 )
             }
@@ -395,12 +401,13 @@ private fun Tiroir(e: Etat, sources: List<Source>, fermer: () -> Unit, ouvrirReg
             Text("Dossiers", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
             // Toujours accessibles, même vides
-            listOf(Triple(Vue.Archivees, Icons.Outlined.Inbox, e.conversations.count { e.estArchivee(it) }),
+            listOf(Triple(Vue.NonLus, Icons.Outlined.MarkChatUnread, e.nombreMessagesNonLus(null)),
+                Triple(Vue.Archivees, Icons.Outlined.Inbox, e.conversations.count { e.estArchivee(it) }),
                 Triple(Vue.Spam, Icons.Outlined.Report, e.nombreSpams)).forEach { (v, icone, n) ->
                 NavigationDrawerItem(
                     label = { Text(v.libelle) }, icon = { Icon(icone, null) },
                     badge = { if (n > 0) Text("$n", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    selected = false, onClick = { choisirVue(v); fermer() },
+                    selected = false, onClick = { choisirVue(v, null); fermer() },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
                 )
             }
