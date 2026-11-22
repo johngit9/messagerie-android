@@ -322,6 +322,7 @@ object Moteur {
             if (auPremierPlan) portee.launch { runCatching { Presences.actualiser(cfg, _etat.value.conversations) { salonDe(it) } } }
             // Lu / traité venant de vos autres applis Messagerie (puis envoi des nôtres)
             runCatching { echangerEtatsPartages(envoyer = true) }
+            runCatching { synchroniserVacances() }
             // Fiabilité : messageries déconnectées (alerte + notification), au plus toutes les 5 min
             portee.launch { runCatching { Surveillance.verifier() } }
             runCatching { nouveauxMessages() }.onFailure { Plantages.noter(it, fatal = false) }
@@ -1475,7 +1476,33 @@ object Moteur {
     /** Mode vacances actif (pour le bandeau de l'accueil). */
     val vacances: StateFlow<Boolean> get() = _vacances
 
-    fun definirVacances(actif: Boolean) {
+    private const val TYPE_VACANCES = "fr.messagerie.vacances"
+
+    /**
+     * Mode vacances partagé entre vos applis Messagerie (Android, Mac) : donnée privée du compte Matrix
+     * fr.messagerie.vacances = {"v":1,"actif":bool,"date":ms}. Le changement le plus récent l'emporte.
+     */
+    private suspend fun synchroniserVacances(envoyer: Boolean = false) = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure) return@withContext
+        val m = Matrix(cfg)
+        val d = runCatching { m.lireDonneesCompte(TYPE_VACANCES) }.getOrNull()
+        val dateDistante = d?.optLong("date") ?: 0L
+        when {
+            !envoyer && d != null && dateDistante > cfg.vacancesDate -> {
+                // Changé sur un autre appareil
+                cfg.vacancesDate = dateDistante
+                if (d.optBoolean("actif") != cfg.vacances) definirVacances(d.optBoolean("actif"), partager = false)
+            }
+            envoyer || cfg.vacancesDate > dateDistante ->
+                m.ecrireDonneesCompte(TYPE_VACANCES, org.json.JSONObject().put("v", 1).put("actif", cfg.vacances).put("date", cfg.vacancesDate))
+        }
+    }
+
+    fun definirVacances(actif: Boolean, partager: Boolean = true) {
+        if (partager) {
+            cfg.vacancesDate = System.currentTimeMillis()
+            portee.launch { runCatching { synchroniserVacances(envoyer = true) } }
+        }
         cfg.vacances = actif
         _vacances.value = actif
         _etat.update { it.copy(vacances = actif) }

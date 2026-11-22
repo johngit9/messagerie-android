@@ -65,6 +65,8 @@ class Config(context: Context) {
     var appelsOfficiels: Boolean get() = p.getBoolean("appelsOfficiels", true); set(v) = p.edit().putBoolean("appelsOfficiels", v).apply()
     /** Mode vacances : aucune notification pour les messageries et conversations rangées en Pro. */
     var vacances: Boolean get() = p.getBoolean("vacances", false); set(v) = p.edit().putBoolean("vacances", v).apply()
+    /** Date du dernier changement du mode vacances (ici ou sur un autre appareil), pour la synchro. */
+    var vacancesDate: Long get() = p.getLong("vacancesDate", 0L); set(v) = p.edit().putLong("vacancesDate", v).apply()
     fun pro(s: Source): Boolean = p.getBoolean("pro.${s.id}", s == Source.ELEMENT || s == Source.LINKEDIN || s == Source.TEAMS)
     fun definirPro(s: Source, v: Boolean) = p.edit().putBoolean("pro.${s.id}", v).apply()
 
