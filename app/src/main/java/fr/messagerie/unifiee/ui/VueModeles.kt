@@ -57,9 +57,11 @@ class ListeVM : ViewModel() {
             if (f.source != null) l = l.filter { it.source == f.source }
             l = when (f.genre) { Genre.Tous -> l; Genre.Discussions -> l.filter { !it.estGroupe }; Genre.Groupes -> l.filter { it.estGroupe } }
             l = when (f.espace) { Espace.Tout -> l; Espace.Perso -> l.filter { !e.estPro(it) }; Espace.Pro -> l.filter { e.estPro(it) } }
+            // Mode vacances : le Pro n'apparaît pas dans Non lues / À traiter (sauf en vue Pro)
+            val horsVacances: (Conversation) -> Boolean = { c -> !(e.vacances && f.espace != Espace.Pro && e.estPro(c)) }
             l = when (f.vue) {
-                Vue.ATraiter -> l.filter { e.aTraiter(it) && !e.estArchivee(it) && !e.estSpam(it) }
-                Vue.NonLus -> l.filter { (e.estNonLue(it) || it.cle == derniereOuverte) && !e.estArchivee(it) && !e.estSpam(it) }
+                Vue.ATraiter -> l.filter { e.aTraiter(it) && !e.estArchivee(it) && !e.estSpam(it) && horsVacances(it) }
+                Vue.NonLus -> l.filter { (e.estNonLue(it) || it.cle == derniereOuverte) && !e.estArchivee(it) && !e.estSpam(it) && horsVacances(it) }
                 Vue.Toutes -> l.filter { !e.estArchivee(it) && !e.estSpam(it) }
                 Vue.Archivees -> l.filter { e.estArchivee(it) && !e.estSpam(it) }
                 Vue.Spam -> l.filter { e.estSpam(it) }

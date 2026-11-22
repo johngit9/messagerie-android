@@ -35,6 +35,8 @@ import kotlinx.coroutines.withContext
 /** Instantané de tout ce que l'interface affiche. */
 data class Etat(
     val conversations: List<Conversation> = emptyList(),
+    /** Mode vacances : le Pro n'est ni notifié ni compté dans les non-lus (sauf dans la vue Pro elle-même). */
+    val vacances: Boolean = false,
     val etats: Map<String, EtatConv> = emptyMap(),
     val syntheses: Map<String, Synthese> = emptyMap(),
     val sources: Map<Source, EtatSource> = Source.entries.associateWith { EtatSource.Inactif },
@@ -77,8 +79,9 @@ data class Etat(
     fun estForcee(c: Conversation) = etat(c).forcee == c.derniere
     fun estNonLue(c: Conversation) = estForcee(c) || nombreNonLus(c) > 0
     /** Non-lus (messages) d'une messagerie, en option seulement Pro (true) ou Perso (false) ; archivées exclues. */
+    private fun compte(c: Conversation, pro: Boolean?) = if (vacances && pro != true && estPro(c)) false else true
     fun nombreMessagesNonLus(s: Source?, pro: Boolean? = null) =
-        conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && !estArchivee(it) && !estSpam(it) }
+        conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && compte(it, pro) && !estArchivee(it) && !estSpam(it) }
             .sumOf { maxOf(nombreNonLus(it), if (estForcee(it)) 1 else 0) }
 
     val depuis get() = System.currentTimeMillis() - jours * 86_400_000L
@@ -100,7 +103,7 @@ data class Etat(
 
     val nombreATraiter get() = conversations.count { aTraiter(it) && !estArchivee(it) && !estSpam(it) }
     fun nombreATraiter(s: Source?, pro: Boolean?) =
-        conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && aTraiter(it) && !estArchivee(it) && !estSpam(it) }
+        conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && compte(it, pro) && aTraiter(it) && !estArchivee(it) && !estSpam(it) }
     fun libelleSource(c: Conversation) = if (c.cle in rcs) "RCS" else c.source.id
 }
 
@@ -132,7 +135,7 @@ object Moteur {
         archive = Archive(app)
         Spam.init(app)
         chargerOrganisation()
-        _etat.update { it.copy(jours = cfg.jours, debutLecture = cfg.debutLecture,
+        _etat.update { it.copy(jours = cfg.jours, debutLecture = cfg.debutLecture, vacances = cfg.vacances,
             rcs = archive.curseur("sms.rcs")?.split("\n")?.filter { s -> s.isNotEmpty() }?.toSet() ?: emptySet()) }
         if (Build.VERSION.SDK_INT >= 26) {
             app.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -1475,6 +1478,7 @@ object Moteur {
     fun definirVacances(actif: Boolean) {
         cfg.vacances = actif
         _vacances.value = actif
+        _etat.update { it.copy(vacances = actif) }
         if (!actif) return
         val e = _etat.value
         e.conversations.filter { e.estPro(it) }.forEach { runCatching { NotificationManagerCompat.from(app).cancel(it.cle.hashCode()) } }
