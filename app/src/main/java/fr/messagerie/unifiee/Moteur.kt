@@ -1480,13 +1480,13 @@ object Moteur {
 
     /**
      * Mode vacances partagé entre vos applis Messagerie (Android, Mac) : donnée privée du compte Matrix
-     * fr.messagerie.vacances = {"v":1,"actif":bool,"date":ms}. Le changement le plus récent l'emporte.
+     * fr.messagerie.vacances = {"v":1,"actif":bool,"maj":ms}. Le changement le plus récent l'emporte (même format que l'app Mac).
      */
     private suspend fun synchroniserVacances(envoyer: Boolean = false) = withContext(Dispatchers.IO) {
         if (!cfg.matrixConfigure) return@withContext
         val m = Matrix(cfg)
         val d = runCatching { m.lireDonneesCompte(TYPE_VACANCES) }.getOrNull()
-        val dateDistante = d?.optLong("date") ?: 0L
+        val dateDistante = d?.optLong("maj") ?: 0L
         when {
             !envoyer && d != null && dateDistante > cfg.vacancesDate -> {
                 // Changé sur un autre appareil
@@ -1494,7 +1494,7 @@ object Moteur {
                 if (d.optBoolean("actif") != cfg.vacances) definirVacances(d.optBoolean("actif"), partager = false)
             }
             envoyer || cfg.vacancesDate > dateDistante ->
-                m.ecrireDonneesCompte(TYPE_VACANCES, org.json.JSONObject().put("v", 1).put("actif", cfg.vacances).put("date", cfg.vacancesDate))
+                m.ecrireDonneesCompte(TYPE_VACANCES, org.json.JSONObject().put("v", 1).put("actif", cfg.vacances).put("maj", cfg.vacancesDate))
         }
     }
 
