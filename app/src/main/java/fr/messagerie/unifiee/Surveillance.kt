@@ -23,6 +23,9 @@ import kotlinx.coroutines.withContext
 object Surveillance {
     data class Panne(val source: Source, val detail: String, val depuis: Long?)
 
+    /** Reconnexion demandée depuis la notification (ouvre la fenêtre de reconnexion WhatsApp). */
+    val reconnexionDemandee = MutableStateFlow(false)
+
     private val _pannes = MutableStateFlow<List<Panne>>(emptyList())
     val pannes: StateFlow<List<Panne>> = _pannes
     /** État de chaque passerelle donné par le serveur (null si le serveur ne le fournit pas). */
@@ -87,13 +90,19 @@ object Surveillance {
             Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         for (p in nouvelles) {
+            // WhatsApp : toucher la notification lance directement la reconnexion par code
+            val piP = if (p.source == Source.WHATSAPP && Moteur.cfg.relaisConfigure) PendingIntent.getActivity(app, "reco.whatsapp".hashCode(),
+                Intent(app, MainActivity::class.java).putExtra("reconnecter", Source.WHATSAPP.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) else pi
             val n = NotificationCompat.Builder(app, CANAL)
                 .setSmallIcon(R.drawable.ic_bulle)
                 .setContentTitle("${p.source.libelle} est déconnecté")
                 .setContentText(p.detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(p.detail + "\nVous ne recevez plus les messages ${p.source.libelle} tant que ce n'est pas réparé."))
                 .setColor(Moteur.cfg.couleurEffective(p.source).toInt())
-                .setContentIntent(pi)
+                .setContentIntent(piP)
+                .apply { if (piP !== pi) addAction(0, "Reconnecter", piP) }
                 .setAutoCancel(true)
                 .build()
             try { NotificationManagerCompat.from(app).notify("panne.${p.source.id}".hashCode(), n) } catch (_: SecurityException) {}

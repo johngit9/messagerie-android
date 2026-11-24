@@ -79,6 +79,7 @@ open class MainActivity : ComponentActivity() {
 
     /** Raccourci « messagerie » de l'icône : ouvre la liste filtrée sur cette messagerie. */
     private fun lireRaccourci(i: Intent?) {
+        if (i?.getStringExtra("reconnecter") == Source.WHATSAPP.name) { i.removeExtra("reconnecter"); Surveillance.reconnexionDemandee.value = true }
         val s = i?.getStringExtra("source")?.let { n -> Source.entries.firstOrNull { it.name == n } } ?: return
         Raccourcis.sourceDemandee.value = s
     }

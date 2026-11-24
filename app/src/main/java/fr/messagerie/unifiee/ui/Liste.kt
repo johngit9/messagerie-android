@@ -154,6 +154,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     rechercheAvancee = { rechercher(vm.recherche.value) })
                 val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
                 if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
+                val reconnexion by fr.messagerie.unifiee.Surveillance.reconnexionDemandee.collectAsState()
+                if (reconnexion) DialogueReconnexionWhatsApp { fr.messagerie.unifiee.Surveillance.reconnexionDemandee.value = false }
                 val vacances by Moteur.vacances.collectAsState()
                 if (choisies.isEmpty() && vacances) BandeauVacances()
 
@@ -977,6 +979,26 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
     var etape by remember { mutableStateOf("saisie") }      // saisie, demande, code, connecte, erreur
     var association by remember { mutableStateOf<fr.messagerie.unifiee.Relais.Association?>(null) }
     var detail by remember { mutableStateOf("") }
+    fun demander() {
+        val tel = numero.filter { it.isDigit() || it == '+' }
+        cfg.telephoneWhatsApp = tel
+        etape = "demande"
+        portee.launch {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.Relais(cfg).demarrerConnexionWhatsApp(tel) } }
+                .onSuccess { a ->
+                    association = a; etape = "code"
+                    // Automatique : code copié, puis WhatsApp ouvert (il affiche aussi sa propre notification « saisir le code »)
+                    ctx.getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Code WhatsApp", a.code))
+                    kotlinx.coroutines.delay(2_500)
+                    if (etape == "code") ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")
+                        ?.let { runCatching { ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                }
+                .onFailure { detail = "Impossible d'obtenir un code : " + (it.message ?: "erreur"); etape = "erreur" }
+        }
+    }
+    // Numéro déjà connu : la demande part tout de suite
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (cfg.telephoneWhatsApp.count { it.isDigit() } >= 8) demander() }
     fun quitter() {
         val a = association
         if (etape == "code" && a != null) portee.launch(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.Relais(cfg).annulerConnexionWhatsApp(a.id) }
@@ -1022,9 +1044,9 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             modifier = Modifier.fillMaxWidth().background(cs.surfaceContainerHigh, RoundedCornerShape(14.dp)).padding(vertical = 14.dp),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        Text("1. Ouvrez WhatsApp > ⋮ > Appareils connectés > Connecter un appareil.\n" +
-                            "2. Touchez « Lier avec le numéro de téléphone » (sous le lecteur de QR code).\n" +
-                            "3. Saisissez le code ci-dessus. Cette fenêtre se met à jour toute seule.", fontSize = 14.sp, lineHeight = 20.sp)
+                        Text("Code copié. WhatsApp s'ouvre : touchez sa notification « Saisir le code » si elle apparaît, " +
+                            "sinon ⋮ > Appareils connectés > Connecter un appareil > « Lier avec le numéro de téléphone », puis collez le code. " +
+                            "Revenez ici : la fenêtre se met à jour toute seule.", fontSize = 14.sp, lineHeight = 20.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp))
                             Text("En attente de WhatsApp…", fontSize = 13.sp, color = cs.onSurfaceVariant)
@@ -1037,16 +1059,7 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
         },
         confirmButton = {
             when (etape) {
-                "saisie", "demande" -> TextButton(enabled = etape == "saisie" && numero.count { it.isDigit() } >= 8, onClick = {
-                    val tel = numero.filter { it.isDigit() || it == '+' }
-                    cfg.telephoneWhatsApp = tel
-                    etape = "demande"
-                    portee.launch {
-                        runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.Relais(cfg).demarrerConnexionWhatsApp(tel) } }
-                            .onSuccess { association = it; etape = "code" }
-                            .onFailure { detail = "Impossible d'obtenir un code : " + (it.message ?: "erreur"); etape = "erreur" }
-                    }
-                }) { Text("Obtenir le code") }
+                "saisie", "demande" -> TextButton(enabled = etape == "saisie" && numero.count { it.isDigit() } >= 8, onClick = { demander() }) { Text("Obtenir le code") }
                 "code" -> TextButton(onClick = {
                     val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Code WhatsApp", association?.code.orEmpty()))
