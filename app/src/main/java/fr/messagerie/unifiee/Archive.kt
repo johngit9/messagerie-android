@@ -354,6 +354,12 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         return writableDatabase.update("messages", v, "conv = ? AND de_moi = 0 AND auteur = ?", arrayOf(conv, nomMoi))
     }
 
+    /** Auteurs des messages reçus, par conversation (sert à proposer les membres des groupes dans la recherche). */
+    fun auteursParConversation(): Map<String, List<String>> = try {
+        readableDatabase.rawQuery("SELECT conv, auteur, MAX(date) AS d FROM messages WHERE de_moi = 0 AND auteur IS NOT NULL AND auteur <> '' GROUP BY conv, auteur ORDER BY d DESC LIMIT 20000", null)
+            .lignes { it.getString(0) to it.getString(1) }.groupBy({ it.first }, { it.second })
+    } catch (e: Exception) { emptyMap() }
+
     /** Conversations contenant tous les mots cherchés (début de mot). */
     fun rechercher(texte: String): Set<String> {
         val mots = texte.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { "$it*" }

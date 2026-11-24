@@ -111,6 +111,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
     val source by vm.source.collectAsState()
     val recherche by vm.recherche.collectAsState()
     val visibles by vm.visibles.collectAsState()
+    val ailleurs by vm.ailleurs.collectAsState()
+    val suggestions by vm.suggestions.collectAsState()
     var actionsPour by remember { mutableStateOf<Conversation?>(null) }
     // Sélection de plusieurs conversations (appui long) pour des actions groupées
     var choisies by remember { mutableStateOf(setOf<String>()) }
@@ -155,7 +157,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it },
                     rechercheAvancee = { rechercher(vm.recherche.value) })
                 // Auto-complétion : contacts dont le nom correspond, dès la première lettre
-                if (choisies.isEmpty() && recherche.isNotBlank()) SuggestionsContacts(e, recherche) { c -> vm.recherche.value = ""; ouvrir(c.cle) }
+                if (choisies.isEmpty() && recherche.isNotBlank()) SuggestionsContacts(suggestions) { c -> vm.recherche.value = ""; ouvrir(c.cle) }
                 val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
                 if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
                 val reconnexion by fr.messagerie.unifiee.Surveillance.reconnexionDemandee.collectAsState()
@@ -163,7 +165,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                 val vacances by Moteur.vacances.collectAsState()
                 if (choisies.isEmpty() && vacances) BandeauVacances()
 
-                if (visibles.isEmpty()) {
+                if (visibles.isEmpty() && ailleurs.isEmpty()) {
                     val q = recherche.trim()
                     EtatVide(
                         when {
@@ -182,6 +184,16 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = if (fr.messagerie.unifiee.Affichage.haut == 1) 10.dp else 4.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(when (fr.messagerie.unifiee.Affichage.design) { 1 -> 0.dp; 3 -> 12.dp; else -> 8.dp }),
                 ) {
+                    if (visibles.isEmpty()) {
+                        item(key = "#ailleurs") {
+                            Text("Ailleurs dans Messagerie", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp))
+                        }
+                        items(ailleurs, key = { "ailleurs:" + it.cle }) { c ->
+                            CarteConversation(e, c, Modifier.animateItem(), ouvrir = { vm.derniereOuverte = c.cle; ouvrir(c.cle) },
+                                actions = { actionsPour = c }, choisie = false)
+                        }
+                    }
                     items(visibles, key = { it.cle }) { c ->
                         if (fr.messagerie.unifiee.Affichage.design == 1 && fr.messagerie.unifiee.Affichage.haut == 2 && c.cle != visibles.firstOrNull()?.cle)
                             HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
@@ -1085,42 +1097,29 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
     )
 }
 
-private fun pourRecherche(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
-
-/** Contacts (et groupes) dont le nom commence par la saisie, ou dont un mot commence par elle ; toucher ouvre la conversation. */
+/** Auto-complétion : contacts, groupes et membres de groupes dont le nom correspond ; toucher ouvre la conversation. */
 @Composable
-private fun SuggestionsContacts(e: Etat, recherche: String, ouvrir: (Conversation) -> Unit) {
-    val q = pourRecherche(recherche.trim())
-    val suggestions = remember(q, e.conversations) {
-        if (q.isEmpty()) emptyList() else e.conversations.asSequence()
-            .filter { !e.estSpam(it) }
-            .mapNotNull { c ->
-                val n = pourRecherche(c.nom)
-                val rang = when {
-                    n.startsWith(q) -> 0
-                    n.split(Regex("[^\\p{L}\\p{N}]+")).any { it.startsWith(q) } -> 1
-                    q.length >= 3 && q in n -> 2
-                    else -> return@mapNotNull null
-                }
-                Triple(c, rang, if (c.estGroupe) 1 else 0)
-            }
-            .sortedWith(compareBy<Triple<Conversation, Int, Int>> { it.second }.thenBy { it.third }.thenByDescending { it.first.derniere })
-            .map { it.first }.distinctBy { it.cle }.take(8).toList()
-    }
+private fun SuggestionsContacts(suggestions: List<Suggestion>, ouvrir: (Conversation) -> Unit) {
     if (suggestions.isEmpty()) return
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        suggestions.forEach { c ->
+        suggestions.forEach { sg ->
+            val c = sg.conv
             Row(
                 Modifier.clip(RoundedCornerShape(22.dp)).background(cs.surfaceContainerHigh).clickable { ouvrir(c) }
                     .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(c.nom, c.source, c.estGroupe, taille = 32.dp, bordure = cs.surfaceContainerHigh, cle = c.cle)
+                if (sg.groupe == null) Avatar(c.nom, c.source, c.estGroupe, taille = 32.dp, bordure = cs.surfaceContainerHigh, cle = c.cle)
+                else Avatar(sg.nom, c.source, false, taille = 32.dp, bordure = cs.surfaceContainerHigh)
                 Spacer(Modifier.width(8.dp))
-                Text(c.nom, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 160.dp))
+                Column {
+                    Text(sg.nom, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 160.dp))
+                    if (sg.groupe != null) Text("dans ${sg.groupe}", fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                }
             }
         }
     }
