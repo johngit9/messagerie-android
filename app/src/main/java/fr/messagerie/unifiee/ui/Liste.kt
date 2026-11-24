@@ -1085,17 +1085,17 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
     )
 }
 
-private fun simplifier(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+private fun pourRecherche(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
 
 /** Contacts (et groupes) dont le nom commence par la saisie, ou dont un mot commence par elle ; toucher ouvre la conversation. */
 @Composable
 private fun SuggestionsContacts(e: Etat, recherche: String, ouvrir: (Conversation) -> Unit) {
-    val q = simplifier(recherche.trim())
+    val q = pourRecherche(recherche.trim())
     val suggestions = remember(q, e.conversations) {
         if (q.isEmpty()) emptyList() else e.conversations.asSequence()
             .filter { !e.estSpam(it) }
             .mapNotNull { c ->
-                val n = simplifier(c.nom)
+                val n = pourRecherche(c.nom)
                 val rang = when {
                     n.startsWith(q) -> 0
                     n.split(Regex("[^\\p{L}\\p{N}]+")).any { it.startsWith(q) } -> 1
