@@ -8,6 +8,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -153,6 +154,8 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     ouvrirTiroir = { portee.launch { tiroir.open() } }, ouvrirReglages = ouvrirReglages,
                     chercher = { vm.recherche.value = it }, choisirVue = { vm.vue.value = it },
                     rechercheAvancee = { rechercher(vm.recherche.value) })
+                // Auto-complétion : contacts dont le nom correspond, dès la première lettre
+                if (choisies.isEmpty() && recherche.isNotBlank()) SuggestionsContacts(e, recherche) { c -> vm.recherche.value = ""; ouvrir(c.cle) }
                 val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
                 if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
                 val reconnexion by fr.messagerie.unifiee.Surveillance.reconnexionDemandee.collectAsState()
@@ -1080,4 +1083,45 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
         },
         dismissButton = { if (etape != "connecte") TextButton(onClick = { quitter() }) { Text("Annuler") } },
     )
+}
+
+private fun simplifier(t: String) = java.text.Normalizer.normalize(t.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+
+/** Contacts (et groupes) dont le nom commence par la saisie, ou dont un mot commence par elle ; toucher ouvre la conversation. */
+@Composable
+private fun SuggestionsContacts(e: Etat, recherche: String, ouvrir: (Conversation) -> Unit) {
+    val q = simplifier(recherche.trim())
+    val suggestions = remember(q, e.conversations) {
+        if (q.isEmpty()) emptyList() else e.conversations.asSequence()
+            .filter { !e.estSpam(it) }
+            .mapNotNull { c ->
+                val n = simplifier(c.nom)
+                val rang = when {
+                    n.startsWith(q) -> 0
+                    n.split(Regex("[^\\p{L}\\p{N}]+")).any { it.startsWith(q) } -> 1
+                    q.length >= 3 && q in n -> 2
+                    else -> return@mapNotNull null
+                }
+                Triple(c, rang, if (c.estGroupe) 1 else 0)
+            }
+            .sortedWith(compareBy<Triple<Conversation, Int, Int>> { it.second }.thenBy { it.third }.thenByDescending { it.first.derniere })
+            .map { it.first }.distinctBy { it.cle }.take(8).toList()
+    }
+    if (suggestions.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        suggestions.forEach { c ->
+            Row(
+                Modifier.clip(RoundedCornerShape(22.dp)).background(cs.surfaceContainerHigh).clickable { ouvrir(c) }
+                    .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(c.nom, c.source, c.estGroupe, taille = 32.dp, bordure = cs.surfaceContainerHigh, cle = c.cle)
+                Spacer(Modifier.width(8.dp))
+                Text(c.nom, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 160.dp))
+            }
+        }
+    }
 }
