@@ -26,9 +26,46 @@ data class Message(
     val type: String = "texte",   // texte, audio, image, video, fichier, autre
     val media: String? = null,
     val duree: Double? = null,
+    /** Compléments en JSON : message cité, texte mis en forme, sondage, position, modifié (voir [Extra]). */
+    val extra: String? = null,
 ) {
     val texteUtile: String
         get() = if (type == "audio") "🎤 (message vocal)" else texte
+
+    private val x: org.json.JSONObject? by lazy { extra?.let { runCatching { org.json.JSONObject(it) }.getOrNull() } }
+    /** Clé du message auquel celui-ci répond. */
+    val cite: String? get() = x?.optString("cite")?.takeIf { it.isNotEmpty() }
+    /** Texte mis en forme (HTML simple des messageries). */
+    val html: String? get() = x?.optString("html")?.takeIf { it.isNotEmpty() }
+    /** Position partagée : « geo:lat,lon ». */
+    val geo: String? get() = x?.optString("geo")?.takeIf { it.isNotEmpty() }
+    val modifie: Boolean get() = x?.optBoolean("modifie") == true
+    /** Sondage : question, réponses (id → texte), choix multiples, format (« msc3381 » ou « stable »). */
+    val sondage: Sondage? get() = x?.optJSONObject("sondage")?.let { o ->
+        val r = o.optJSONArray("reponses") ?: return@let null
+        Sondage(o.optString("question"), (0 until r.length()).mapNotNull { i -> r.optJSONObject(i)?.let { it.optString("id") to it.optString("texte") } },
+            o.optInt("max", 1), o.optString("format", "msc3381"))
+    }
+}
+
+data class Sondage(val question: String, val reponses: List<Pair<String, String>>, val max: Int, val format: String)
+
+/** Vote à un sondage (le dernier vote de chaque personne compte). */
+data class Vote(val cle: String, val sondage: String, val conv: String, val auteur: String, val deMoi: Boolean, val choix: List<String>, val date: Long)
+
+/** Fabrique le JSON « extra » d'un message (null si vide). */
+object Extra {
+    fun de(vararg paires: Pair<String, Any?>): String? {
+        val o = org.json.JSONObject()
+        for ((k, v) in paires) if (v != null && v != false && v != "") o.put(k, v)
+        return if (o.length() == 0) null else o.toString()
+    }
+    /** Ajoute ou remplace une valeur dans un extra existant. */
+    fun avec(extra: String?, cle: String, valeur: Any?): String? {
+        val o = extra?.let { runCatching { org.json.JSONObject(it) }.getOrNull() } ?: org.json.JSONObject()
+        if (valeur == null) o.remove(cle) else o.put(cle, valeur)
+        return if (o.length() == 0) null else o.toString()
+    }
 }
 
 data class Conversation(

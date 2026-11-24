@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.OpenInNew
@@ -88,6 +89,46 @@ fun PhotoMessage(m: Message, couleur: Color) {
         }
     }
     if (pleinEcran) f?.getOrNull()?.let { VisionneusePhoto(it, m) { pleinEcran = false } }
+}
+
+/** Autocollant : image seule, sans bulle, plus petite qu'une photo. */
+@Composable
+fun AutocollantMessage(m: Message, couleur: Color) {
+    if (m.media == null) { Text(m.texte.removePrefix("[autocollant]").trim().ifEmpty { "Autocollant" }, color = couleur, fontSize = 32.sp); return }
+    val fichier by produceState<Result<File>?>(null, m.cle) { value = runCatching { Moteur.fichierMedia(m) } }
+    val f = fichier
+    Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
+        when {
+            f == null -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            f.isFailure -> Text(m.texte.removePrefix("[autocollant]").trim().ifEmpty { "Autocollant" }, fontSize = 28.sp)
+            else -> AsyncImage(model = f.getOrNull(), contentDescription = "Autocollant", contentScale = ContentScale.Fit, modifier = Modifier.size(140.dp))
+        }
+    }
+}
+
+/** Position partagée : carte avec le lieu, ouverte dans l'appli de cartes au toucher. */
+@Composable
+fun PositionMessage(m: Message, couleur: Color) {
+    val ctx = LocalContext.current
+    val geo = m.geo
+    val coords = geo?.removePrefix("geo:")?.substringBefore(';')?.split(',')?.mapNotNull { it.trim().toDoubleOrNull() }
+    Row(
+        Modifier.widthIn(min = 200.dp, max = 260.dp).clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.10f))
+            .clickable(enabled = geo != null) {
+                val lieu = m.texte.removePrefix("📍").trim()
+                val uri = if (coords != null && coords.size >= 2) "geo:${coords[0]},${coords[1]}?q=${coords[0]},${coords[1]}(" + android.net.Uri.encode(lieu) + ")" else geo!!
+                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri))) }
+            }.padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Place, null, tint = couleur, modifier = Modifier.size(32.dp))
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(m.texte.removePrefix("📍").trim().ifEmpty { "Position" }, color = couleur, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            Text(if (coords != null && coords.size >= 2) "%.5f, %.5f · Ouvrir la carte".format(coords[0], coords[1]) else "Position partagée",
+                fontSize = 12.sp, color = couleur.copy(alpha = 0.75f))
+        }
+    }
 }
 
 /** Visionneuse plein écran (pincer pour zoomer). */

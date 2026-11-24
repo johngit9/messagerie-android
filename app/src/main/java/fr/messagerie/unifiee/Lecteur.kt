@@ -22,6 +22,7 @@ object Lecteur {
         val position: Int = 0,         // ms
         val duree: Int = 0,            // ms
         val erreur: String? = null,
+        val vitesse: Float = 1f,       // 1×, 1,5×, 2×
     )
 
     private val _etat = MutableStateFlow(Etat())
@@ -29,6 +30,15 @@ object Lecteur {
     private val portee = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lecteur: MediaPlayer? = null
     private var suivi: Job? = null
+    /** Vitesse choisie : gardée d'un vocal à l'autre (comme WhatsApp). */
+    private var vitesse = 1f
+
+    /** 1× → 1,5× → 2× → 1×. */
+    fun changerVitesse() {
+        vitesse = when (vitesse) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
+        lecteur?.let { p -> runCatching { val jouait = p.isPlaying; p.playbackParams = p.playbackParams.setSpeed(vitesse); if (!jouait) p.pause() } }
+        _etat.value = _etat.value.copy(vitesse = vitesse)
+    }
 
     /** Lecture / pause du vocal `m` (téléchargé au premier appui). */
     fun basculer(m: Message) {
@@ -36,11 +46,11 @@ object Lecteur {
         val mp = lecteur
         if (e.cle == m.cle && mp != null) {
             if (mp.isPlaying) { mp.pause(); _etat.value = e.copy(enLecture = false) }
-            else { mp.start(); _etat.value = e.copy(enLecture = true); suivre() }
+            else { mp.start(); runCatching { mp.playbackParams = mp.playbackParams.setSpeed(vitesse) }; _etat.value = e.copy(enLecture = true); suivre() }
             return
         }
         arreter()
-        _etat.value = Etat(cle = m.cle, chargement = true)
+        _etat.value = Etat(cle = m.cle, chargement = true, vitesse = vitesse)
         portee.launch {
             try {
                 val f = Moteur.fichierMedia(m)
@@ -54,7 +64,8 @@ object Lecteur {
                 }
                 lecteur = p
                 p.start()
-                _etat.value = Etat(cle = m.cle, enLecture = true, duree = p.duration)
+                if (vitesse != 1f) runCatching { p.playbackParams = p.playbackParams.setSpeed(vitesse) }
+                _etat.value = Etat(cle = m.cle, enLecture = true, duree = p.duration, vitesse = vitesse)
                 suivre()
             } catch (ex: Exception) {
                 _etat.value = Etat(cle = m.cle, erreur = "Lecture impossible : ${ex.message ?: ex.javaClass.simpleName}")
@@ -85,6 +96,6 @@ object Lecteur {
         suivi?.cancel()
         lecteur?.let { try { it.stop() } catch (_: Exception) {}; it.release() }
         lecteur = null
-        _etat.value = Etat()
+        _etat.value = Etat(vitesse = vitesse)
     }
 }

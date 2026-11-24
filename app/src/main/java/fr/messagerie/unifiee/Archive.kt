@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Archive permanente de tous les messages (toutes sources), avec recherche plein texte,
  * et état local (lu / non lu, à traiter, sourdine, résumés IA). Fichier privé de l'appli.
  */
-class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 3) {
+class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 4) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
@@ -20,7 +20,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         db.execSQL("""CREATE TABLE conversations (cle TEXT PRIMARY KEY, source TEXT NOT NULL, ident TEXT NOT NULL,
             nom TEXT, est_groupe INTEGER DEFAULT 0, derniere INTEGER DEFAULT 0)""")
         db.execSQL("""CREATE TABLE messages (cle TEXT PRIMARY KEY, conv TEXT NOT NULL, date INTEGER NOT NULL,
-            de_moi INTEGER, auteur TEXT, type TEXT, texte TEXT, media TEXT, duree REAL)""")
+            de_moi INTEGER, auteur TEXT, type TEXT, texte TEXT, media TEXT, duree REAL, extra TEXT)""")
         db.execSQL("CREATE INDEX messages_conv_date ON messages(conv, date)")
         try {
             db.execSQL("CREATE VIRTUAL TABLE recherche USING fts4(cle, conv, contenu, notindexed=cle, notindexed=conv, tokenize=unicode61 \"remove_diacritics=1\")")
@@ -33,6 +33,16 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         db.execSQL("""CREATE TABLE syntheses (cle TEXT PRIMARY KEY, resume TEXT, action INTEGER, reponse TEXT, pour INTEGER)""")
         creerReactions(db)
         creerAvatars(db)
+        creerComplements(db)
+    }
+
+    /** v4 : brouillons, messages favoris, votes des sondages. */
+    private fun creerComplements(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS brouillons (conv TEXT PRIMARY KEY, texte TEXT NOT NULL, date INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS favoris (cle TEXT PRIMARY KEY, conv TEXT NOT NULL, date INTEGER)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS votes (cle TEXT PRIMARY KEY, sondage TEXT NOT NULL, conv TEXT NOT NULL,
+            auteur TEXT, de_moi INTEGER DEFAULT 0, choix TEXT, date INTEGER)""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS votes_sondage ON votes(sondage)")
     }
 
     private fun creerReactions(db: SQLiteDatabase) {
@@ -46,6 +56,10 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
     override fun onUpgrade(db: SQLiteDatabase, ancienne: Int, nouvelle: Int) {
         if (ancienne < 2) creerReactions(db)
         if (ancienne < 3) creerAvatars(db)
+        if (ancienne < 4) {
+            runCatching { db.execSQL("ALTER TABLE messages ADD COLUMN extra TEXT") }
+            creerComplements(db)
+        }
     }
 
     private inline fun <T> Cursor.lignes(f: (Cursor) -> T): List<T> = use { c ->
@@ -98,6 +112,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
                     put("cle", m.cle); put("conv", m.conv); put("date", m.date); put("de_moi", if (m.deMoi) 1 else 0)
                     put("auteur", m.auteur); put("type", m.type); put("texte", m.texte); put("media", m.media)
                     if (m.duree != null) put("duree", m.duree) else putNull("duree")
+                    put("extra", m.extra)
                 }
                 db.insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_REPLACE)
                 db.delete("recherche", "cle = ?", arrayOf(m.cle))
@@ -168,6 +183,8 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
                 db.delete("messages", "cle = ?", arrayOf(c))
                 db.delete("recherche", "cle = ?", arrayOf(c))
                 db.delete("reactions", "cle = ? OR cible = ?", arrayOf(c, c))
+                db.delete("favoris", "cle = ?", arrayOf(c))
+                db.delete("votes", "cle = ? OR sondage = ?", arrayOf(c, c))
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -291,6 +308,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         cle = c.s("cle") ?: "", conv = c.s("conv") ?: "", date = c.l("date"), deMoi = c.l("de_moi") == 1L,
         auteur = c.s("auteur") ?: "", texte = c.s("texte") ?: "", type = c.s("type") ?: "texte",
         media = c.s("media"), duree = c.getColumnIndex("duree").let { if (it < 0 || c.isNull(it)) null else c.getDouble(it) },
+        extra = c.s("extra"),
     )
 
     /** Toutes les conversations : `nbRecents` derniers messages si actives depuis `depuis`, sinon le dernier seul. */
@@ -433,4 +451,61 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             put("cle", cle); put("resume", s.resume); put("action", if (s.actionRequise) 1 else 0); put("reponse", s.reponse); put("pour", s.pourLeMessageDu)
         }, SQLiteDatabase.CONFLICT_REPLACE)
     }
+
+    // MARK: Brouillons (gardés sur ce téléphone, jamais envoyés)
+
+    fun brouillon(conv: String): String? =
+        readableDatabase.rawQuery("SELECT texte FROM brouillons WHERE conv = ?", arrayOf(conv)).lignes { it.getString(0) }.firstOrNull()
+
+    fun brouillons(): Map<String, String> =
+        readableDatabase.rawQuery("SELECT conv, texte FROM brouillons", null).lignes { it.getString(0) to it.getString(1) }.toMap()
+
+    @Synchronized
+    fun definirBrouillon(conv: String, texte: String?) {
+        if (texte.isNullOrBlank()) writableDatabase.delete("brouillons", "conv = ?", arrayOf(conv))
+        else writableDatabase.insertWithOnConflict("brouillons", null, ContentValues().apply {
+            put("conv", conv); put("texte", texte); put("date", System.currentTimeMillis())
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    // MARK: Messages favoris (locaux)
+
+    fun favoris(conv: String? = null): List<Message> =
+        readableDatabase.rawQuery("SELECT m.* FROM favoris f JOIN messages m ON m.cle = f.cle" +
+            (if (conv != null) " WHERE f.conv = ?" else "") + " ORDER BY m.date DESC LIMIT 500",
+            if (conv != null) arrayOf(conv) else null).lignes { message(it) }
+
+    fun clesFavoris(conv: String): Set<String> =
+        readableDatabase.rawQuery("SELECT cle FROM favoris WHERE conv = ?", arrayOf(conv)).lignes { it.getString(0) }.toSet()
+
+    @Synchronized
+    fun definirFavori(m: Message, oui: Boolean) {
+        if (!oui) writableDatabase.delete("favoris", "cle = ?", arrayOf(m.cle))
+        else writableDatabase.insertWithOnConflict("favoris", null, ContentValues().apply {
+            put("cle", m.cle); put("conv", m.conv); put("date", System.currentTimeMillis())
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    // MARK: Votes des sondages
+
+    @Synchronized
+    fun enregistrerVotes(votes: List<Vote>) {
+        if (votes.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (v in votes) db.insertWithOnConflict("votes", null, ContentValues().apply {
+                put("cle", v.cle); put("sondage", v.sondage); put("conv", v.conv); put("auteur", v.auteur)
+                put("de_moi", if (v.deMoi) 1 else 0); put("choix", v.choix.joinToString("\u0001")); put("date", v.date)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    /** Votes d'une conversation, regroupés par sondage ; seul le dernier vote de chaque personne compte. */
+    fun votes(conv: String): Map<String, List<Vote>> =
+        readableDatabase.rawQuery("SELECT * FROM votes WHERE conv = ? ORDER BY date", arrayOf(conv)).lignes { c ->
+            Vote(c.s("cle") ?: "", c.s("sondage") ?: "", c.s("conv") ?: "", c.s("auteur") ?: "?", c.l("de_moi") == 1L,
+                (c.s("choix") ?: "").split('\u0001').filter { it.isNotEmpty() }, c.l("date"))
+        }.groupBy { it.sondage }.mapValues { (_, l) -> l.groupBy { if (it.deMoi) "Vous" else it.auteur }.map { it.value.last() } }
 }

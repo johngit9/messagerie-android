@@ -18,7 +18,7 @@ class Matrix(private val cfg: Config) {
     companion object {
         @Volatile var derniereBonne: String? = null
         @Volatile private var verifieLe = 0L
-        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
     }
 
     var base = ""
@@ -60,14 +60,18 @@ class Matrix(private val cfg: Config) {
 
     /** Envoie un message — UNIQUEMENT sur le bouton « Envoyer ». */
     /** Envoie un texte — UNIQUEMENT sur le bouton « Envoyer ». Renvoie l'identifiant de l'événement. */
-    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap()): String {
+    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap(), formater: Boolean = false): String {
         connecter()
         val txn = "messagerie-" + UUID.randomUUID()
         val contenu = JSONObject().put("msgtype", "m.text").put("body", texte)
+        // *gras*, _italique_, ~barré~, `code` : mis en forme pour la messagerie du contact
+        if (formater && MiseEnForme.aDesMarques(texte)) contenu.put("format", "org.matrix.custom.html")
+            .put("formatted_body", MiseEnForme.versHtml(android.text.TextUtils.htmlEncode(texte)).replace("\n", "<br>"))
         // Mentions « @Nom » : lien vers le membre (la passerelle en fait une vraie mention @ dans WhatsApp, Telegram…)
         val presentes = mentions.filterKeys { texte.contains("@$it") }
         if (presentes.isNotEmpty()) {
             var html = android.text.TextUtils.htmlEncode(texte)
+            if (formater) html = MiseEnForme.versHtml(html)
             for ((nom, id) in presentes.entries.sortedByDescending { it.key.length }) {
                 html = html.replace("@" + android.text.TextUtils.htmlEncode(nom),
                     "<a href=\"https://matrix.to/#/" + id + "\">" + android.text.TextUtils.htmlEncode(nom) + "</a>")
@@ -176,6 +180,48 @@ class Matrix(private val cfg: Config) {
             "PUT", jeton, contenu.toString(), 20_000)
         if (r.code != 200) throw ErreurHttp(r.code, "transfert")
         return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Envoie un événement d'un type donné (vote, modification…) — UNIQUEMENT sur un appui de l'utilisateur. */
+    fun envoyerEvenement(salon: String, type: String, contenu: JSONObject): String {
+        connecter()
+        val txn = "messagerie-" + UUID.randomUUID()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/${Http.enc(type)}/${Http.enc(txn)}",
+            "PUT", jeton, contenu.toString(), 20_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "envoi")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Modifie un de VOS messages texte (m.replace) — UNIQUEMENT sur « Enregistrer la modification ». */
+    fun modifier(salon: String, eventId: String, texte: String, formater: Boolean): String {
+        val nouveau = JSONObject().put("msgtype", "m.text").put("body", texte)
+        if (formater && MiseEnForme.aDesMarques(texte)) nouveau.put("format", "org.matrix.custom.html")
+            .put("formatted_body", MiseEnForme.versHtml(android.text.TextUtils.htmlEncode(texte)).replace("\n", "<br>"))
+        val contenu = JSONObject().put("msgtype", "m.text").put("body", "* $texte").put("m.new_content", nouveau)
+            .put("m.relates_to", JSONObject().put("rel_type", "m.replace").put("event_id", eventId))
+        return envoyerEvenement(salon, "m.room.message", contenu)
+    }
+
+    /** Vote à un sondage — UNIQUEMENT sur un appui de l'utilisateur. Même format que le sondage reçu. */
+    fun voter(salon: String, sondage: String, choix: List<String>, format: String): String {
+        val rel = JSONObject().put("rel_type", "m.reference").put("event_id", sondage)
+        return if (format == "stable") envoyerEvenement(salon, "m.poll.response",
+            JSONObject().put("m.selections", JSONArray(choix)).put("m.relates_to", rel))
+        else envoyerEvenement(salon, "org.matrix.msc3381.poll.response",
+            JSONObject().put("org.matrix.msc3381.poll.response", JSONObject().put("answers", JSONArray(choix))).put("m.relates_to", rel))
+    }
+
+    /** Un événement d'état du salon (lecture seule). null s'il n'existe pas. */
+    fun etatSalon(salon: String, type: String): JSONObject? {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/state/${Http.enc(type)}/", jeton = jeton, delaiMs = 10_000)
+        return if (r.code == 200) runCatching { JSONObject(r.texte) }.getOrNull() else null
+    }
+
+    /** Rejoint un salon où la passerelle vous a invité (nouvelle discussion demandée par vous). */
+    fun rejoindre(salon: String) {
+        connecter()
+        Http.requete("$base/_matrix/client/v3/join/${Http.enc(salon)}", "POST", jeton, "{}", 15_000)
     }
 
     /** Membres d'un salon (lecture seule) : identifiant → nom affiché. */
@@ -299,11 +345,11 @@ class SyncPont(
         /** Messages déjà archivés et encore « Waiting for attachment » : clé → dernière tentative. */
         private val essais = ConcurrentHashMap<String, Long>()
 
-        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
-        private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message","m.sticker","org.matrix.msc3381.poll.start","m.poll.start"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         /** Pages (de 100 messages) remontées par salon au premier passage : la liste s'affiche vite. */
         private const val PAGES_RAPIDES = 3
-        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction"]}"""
+        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]}"""
     }
 
     /** Lectures faites sur vos autres appareils : conversation → date. Simplement lues, jamais envoyées. */
@@ -527,8 +573,21 @@ class SyncPont(
         val supprimes = ArrayList<String>()
         val reactions = ArrayList<Reaction>()
         val modifs = HashMap<String, JSONObject>()
+        val votes = ArrayList<Vote>()
         for (e in evenements) {
             val eid = e.optString("event_id").takeIf { it.isNotEmpty() } ?: continue
+            if (e.optString("type").endsWith("poll.response")) {
+                // Vote à un sondage (contact, ou vous depuis l'appli officielle)
+                val ct = e.optJSONObject("content") ?: continue
+                val cible = ct.optJSONObject("m.relates_to")?.optString("event_id")?.takeIf { it.isNotEmpty() } ?: continue
+                val choix = (ct.optJSONObject("org.matrix.msc3381.poll.response")?.optJSONArray("answers") ?: ct.optJSONArray("m.selections"))
+                    ?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                val exp = e.optString("sender")
+                val deMoi = estMoi(exp, info.membres, moi)
+                votes.add(Vote("${pont.source.id}:$eid", "${pont.source.id}:$cible", conv,
+                    if (deMoi) "Vous" else info.membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un", deMoi, choix, e.ts("origin_server_ts") ?: 0L))
+                continue
+            }
             if (e.optString("type") == "m.reaction") {
                 val rel = e.optJSONObject("content")?.optJSONObject("m.relates_to") ?: continue
                 val cible = rel.optString("event_id"); val cle = rel.optString("key")
@@ -574,6 +633,7 @@ class SyncPont(
         archive.enregistrerMessages(nouveaux)
         archive.supprimerMessages(supprimes)
         archive.enregistrerReactions(reactions)
+        archive.enregistrerVotes(votes)
         return lot.size to nouveaux.size
     }
 
@@ -582,8 +642,11 @@ class SyncPont(
         val contenu = modif.optJSONObject("content")?.optJSONObject("m.new_content") ?: return null
         val ev = JSONObject().put("event_id", origine.cle.substringAfter(':')).put("sender", modif.optString("sender"))
             .put("origin_server_ts", origine.date).put("content", contenu)
-        return messageMatrix(ev, membres, moi, origine.cle, origine.conv)
-            ?.copy(date = origine.date, deMoi = origine.deMoi, auteur = origine.auteur)
+        val m2 = messageMatrix(ev, membres, moi, origine.cle, origine.conv) ?: return null
+        // « Waiting for attachment » remplacé par la photo (SMS) : ce n'est pas une vraie modification
+        val vraie = !origine.texte.startsWith("Waiting for attachment")
+        val extra = Extra.avec(Extra.avec(m2.extra, "cite", origine.cite), "modifie", if (vraie) true else null)
+        return m2.copy(date = origine.date, deMoi = origine.deMoi, auteur = origine.auteur, extra = extra)
     }
 
     /**
@@ -624,12 +687,34 @@ class SyncPont(
         if (brut.optJSONObject("m.relates_to")?.optString("rel_type") == "m.replace") return null
         // Synapse joint la dernière modification du message : on affiche son contenu (ex. la photo
         // qui remplace « Waiting for attachment … » côté SMS).
-        val c = e.optJSONObject("unsigned")?.optJSONObject("m.relations")?.optJSONObject("m.replace")
-            ?.optJSONObject("content")?.optJSONObject("m.new_content") ?: brut
-        val corps = c.optString("body")
+        val remplacement = e.optJSONObject("unsigned")?.optJSONObject("m.relations")?.optJSONObject("m.replace")
+            ?.optJSONObject("content")?.optJSONObject("m.new_content")
+        val c = remplacement ?: brut
+        val evType = e.optString("type")
+        // Réponse : le message cité (la passerelle peut aussi ajouter l'ancien « > <@…> » en tête du texte)
+        val cite = brut.optJSONObject("m.relates_to")?.optJSONObject("m.in_reply_to")?.optString("event_id")
+            ?.takeIf { it.isNotEmpty() }?.let { "${pont.source.id}:$it" }
+        val corps = if (cite != null) sansCitation(c.optString("body")) else c.optString("body")
         var type = "texte"; var texte = corps; var media: String? = null; var duree: Double? = null
+        var geo: String? = null; var sondage: JSONObject? = null
+        val html = if (c.optString("format") == "org.matrix.custom.html")
+            c.optString("formatted_body").replace(Regex("(?s)<mx-reply>.*?</mx-reply>"), "").takeIf { it.contains('<') } else null
+        val modifie = remplacement != null && !brut.optString("body").startsWith("Waiting for attachment")
         val info = c.optJSONObject("info")
-        when (val mt = c.optString("msgtype")) {
+        val mtype = when {
+            evType == "m.sticker" -> "m.sticker"
+            evType.endsWith("poll.start") -> "sondage"
+            else -> c.optString("msgtype")
+        }
+        when (val mt = mtype) {
+            "m.sticker" -> {
+                // Autocollant : image sans bulle
+                type = "autocollant"; texte = corps.ifEmpty { "Autocollant" }.let { if (it.startsWith("[")) it else "[autocollant] $it" }
+                c.optString("url").takeIf { it.isNotEmpty() }?.let { media = it + "#" + (info?.optString("mimetype")?.ifEmpty { null } ?: "image/webp") + "#autocollant" }
+            }
+            "sondage" -> {
+                lireSondage(c)?.let { sondage = it; type = "sondage"; texte = "📊 " + it.optString("question") } ?: return null
+            }
             "m.text", "m.notice", "m.emote" -> {
                 if (corps.isEmpty()) return null
                 // Appel reçu sur l'appli officielle : la passerelle l'annonce par un avis (« Incoming call… »)
@@ -657,7 +742,13 @@ class SyncPont(
                 info?.optString("thumbnail_url")?.takeIf { it.startsWith("mxc://") }?.let { v -> media = media?.plus("#" + v) }
                 if (type == "video") duree = info?.ts("duration")?.let { it / 1000.0 }
             }
-            "m.location" -> { type = "autre"; texte = "[position]" }
+            "m.location" -> {
+                type = "position"
+                geo = c.optString("geo_uri").takeIf { it.startsWith("geo:") }
+                    ?: c.optJSONObject("org.matrix.msc3488.location")?.optString("uri")?.takeIf { it.startsWith("geo:") }
+                texte = "📍 " + corps.lineSequence().firstOrNull { it.isNotBlank() && !it.startsWith("geo:") && !it.startsWith("http") }
+                    .let { if (it == null || it.startsWith("Location:") || it.startsWith("Shared")) "Position" else it }
+            }
             else -> if (corps.isEmpty()) return null
         }
         val deMoi = estMoi(exp, membres, moi)
@@ -670,8 +761,44 @@ class SyncPont(
                 ts > (mentionsMoi[conv] ?: 0)) mentionsMoi[conv] = ts
         }
         val auteur = if (deMoi) "Vous" else membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un"
-        return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree)
+        val extra = Extra.de("cite" to cite, "html" to html, "geo" to geo, "sondage" to sondage, "modifie" to modifie)
+        return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree, extra)
     }
+}
+
+/** Retire l'ancienne citation de repli (« > <@…> texte » puis ligne vide) en tête d'une réponse. */
+fun sansCitation(corps: String): String {
+    if (!corps.startsWith("> ")) return corps
+    val lignes = corps.lines()
+    val i = lignes.indexOfFirst { !it.startsWith(">") }
+    return if (i < 0) corps else lignes.drop(i).dropWhile { it.isBlank() }.joinToString("\n").ifEmpty { corps }
+}
+
+/**
+ * Lit un sondage (format MSC3381 des passerelles, ou format stable m.poll) :
+ * {question, reponses:[{id,texte}], max, format}. null si illisible.
+ */
+fun lireSondage(c: JSONObject): JSONObject? {
+    fun texteDe(o: JSONObject?): String {
+        if (o == null) return ""
+        o.optString("org.matrix.msc1767.text").takeIf { it.isNotEmpty() }?.let { return it }
+        o.optString("body").takeIf { it.isNotEmpty() }?.let { return it }
+        o.optJSONArray("m.text")?.optJSONObject(0)?.optString("body")?.takeIf { it.isNotEmpty() }?.let { return it }
+        o.optJSONArray("org.matrix.msc1767.text")?.optJSONObject(0)?.optString("body")?.takeIf { it.isNotEmpty() }?.let { return it }
+        return ""
+    }
+    val instable = c.optJSONObject("org.matrix.msc3381.poll.start")
+    val p = instable ?: c.optJSONObject("m.poll") ?: return null
+    val reps = p.optJSONArray("answers") ?: return null
+    val liste = JSONArray()
+    for (i in 0 until reps.length()) {
+        val r = reps.optJSONObject(i) ?: continue
+        val id = r.optString("id").ifEmpty { r.optString("m.id") }.takeIf { it.isNotEmpty() } ?: continue
+        liste.put(JSONObject().put("id", id).put("texte", texteDe(r)))
+    }
+    if (liste.length() == 0) return null
+    return JSONObject().put("question", texteDe(p.optJSONObject("question")).ifEmpty { "Sondage" }).put("reponses", liste)
+        .put("max", p.optInt("max_selections", 1)).put("format", if (instable != null) "msc3381" else "stable")
 }
 
 /** Avis d'appel des passerelles mautrix (WhatsApp, Signal, Telegram…), en anglais ou en français. */

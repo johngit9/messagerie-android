@@ -77,7 +77,7 @@ class Relais(private val cfg: Config) {
                     l.optString("nom_salon").takeIf { it.isNotEmpty() && it != "null" } ?: "Element",
                     l.optInt("est_groupe") == 1, 0, emptyList())
                 convs[conv.cle] = conv
-                val type = l.optString("type").ifEmpty { "texte" }.let { if (it == "position") "autre" else it }
+                val type = l.optString("type").ifEmpty { "texte" }
                 var duree: Double? = null
                 var media: String? = null
                 l.optString("media").takeIf { it.isNotEmpty() && it != "null" }?.let { brut ->
@@ -88,8 +88,13 @@ class Relais(private val cfg: Config) {
                     }
                 }
                 val deMoi = l.optInt("de_moi") == 1
+                // Réponse : message cité, si le relais le fournit (champ reponse_a)
+                val cite = l.optString("reponse_a").takeIf { it.startsWith("$") }?.let { "Element:$it" }
+                val geo = l.optString("geo").takeIf { it.startsWith("geo:") }
                 lot.add(Message(cle, conv.cle, l.ts("ts") ?: 0, deMoi,
-                    if (deMoi) "Vous" else l.optString("auteur").ifEmpty { "?" }, l.optString("texte"), type, media, duree))
+                    if (deMoi) "Vous" else l.optString("auteur").ifEmpty { "?" },
+                    if (cite != null) sansCitation(l.optString("texte")) else l.optString("texte"), type, media, duree,
+                    Extra.de("cite" to cite, "geo" to geo)))
             }
             archive.enregistrerConversations(convs.values.toList())
             archive.enregistrerMessages(lot)

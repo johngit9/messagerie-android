@@ -74,6 +74,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.text.withStyle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -502,8 +503,15 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
             }
             // Aperçu : le texte du dernier message (le résumé IA reste dans la conversation)
             val apercu = c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + apercuMessage(m) } ?: ""
+            // Brouillon en cours : montré à la place du dernier message, comme dans les applis officielles
+            val brouillon = Moteur.brouillons.collectAsState().value[c.cle]
             Row {
-                Text(apercu, fontSize = 14.sp, lineHeight = 19.sp, maxLines = when (design) { 1 -> 1; 3 -> 3; else -> 2 }, overflow = TextOverflow.Ellipsis,
+                Text(
+                    if (brouillon != null) androidx.compose.ui.text.buildAnnotatedString {
+                        withStyle(androidx.compose.ui.text.SpanStyle(color = cs.error, fontWeight = FontWeight.SemiBold)) { append("Brouillon : ") }
+                        append(brouillon.replace(Regex("\\s+"), " ").trim())
+                    } else androidx.compose.ui.text.AnnotatedString(apercu),
+                    fontSize = 14.sp, lineHeight = 19.sp, maxLines = when (design) { 1 -> 1; 3 -> 3; else -> 2 }, overflow = TextOverflow.Ellipsis,
                     color = if (nonLue) cs.onSurface else cs.onSurfaceVariant)
             }
             if (aTraiter || nb > 0) Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -711,6 +719,7 @@ fun apercuMessage(m: fr.messagerie.unifiee.Message): String = when (m.type) {
     "image" -> "📷 " + m.texte.takeIf { it.isNotBlank() && !Regex("""(?i)\.(jpe?g|png|webp|heic|gif)$""").containsMatchIn(it) }.orEmpty().ifEmpty { "Photo" }
     "video" -> "🎬 " + m.texte.takeIf { it.isNotBlank() && !Regex("""(?i)\.(mp4|mov|3gp|webm)$""").containsMatchIn(it) }.orEmpty().ifEmpty { "Vidéo" }
     "fichier" -> "📎 " + m.texte.ifBlank { "Fichier" }
+    "autocollant" -> "Autocollant " + m.texte.removePrefix("[autocollant]").trim()
     else -> m.texte.replace(Regex("\\s+"), " ").trim()
 }
 

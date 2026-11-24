@@ -13,6 +13,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +27,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -144,7 +151,20 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     val chargement by vm.chargement.collectAsState()
     val reactions by vm.reactions.collectAsState()
     val mesReactions by vm.mesReactions.collectAsState()
-    var brouillon by rememberSaveable(c.cle) { mutableStateOf("") }
+    // Brouillon gardé sur le téléphone : on le retrouve en revenant dans la conversation
+    var brouillon by rememberSaveable(c.cle) { mutableStateOf(Moteur.brouillon(c.cle)) }
+    // Message en cours de modification (le vôtre) : le champ contient son texte, « Enregistrer » le remplace
+    var enModification by remember(c.cle) { mutableStateOf<Message?>(null) }
+    LaunchedEffect(brouillon, enModification) {
+        if (enModification != null) return@LaunchedEffect
+        kotlinx.coroutines.delay(600)
+        Moteur.garderBrouillon(c.cle, brouillon)
+    }
+    val vote by vm.votes.collectAsState()
+    val favoris by vm.favoris.collectAsState()
+    var listeFavoris by remember { mutableStateOf(false) }
+    // Messages épinglés et messages éphémères (lus sur le serveur, rien n'est envoyé)
+    val infosSalon by androidx.compose.runtime.produceState<Moteur.InfosSalon?>(null, c.cle) { value = Moteur.infosSalon(c) }
     // Versions précédentes du texte avant chaque modification par l'IA (pour revenir en arrière)
     var versionsIA by remember(c.cle) { mutableStateOf(listOf<String>()) }
     var saisieAgrandie by rememberSaveable(c.cle) { mutableStateOf(false) }
@@ -278,6 +298,23 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
 
     fun afficher(t: String) { portee.launch { snack.showSnackbar(t) } }
+    val lignesActuelles by androidx.compose.runtime.rememberUpdatedState(lignes)
+    /** Fait défiler jusqu'à un message (cité, épinglé, favori), même ancien. */
+    fun allerAuMessage(cle: String) {
+        portee.launch {
+            val m = historique.firstOrNull { it.cle == cle }
+                ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.archive.messageParCle(cle) }
+                ?: run { afficher("Message introuvable (pas encore récupéré)"); return@launch }
+            courant = m.cle
+            vm.allerA(m) { portee.launch {
+                kotlinx.coroutines.delay(120)
+                val idx = lignesActuelles.asReversed().indexOfFirst { it is Ligne.Msg && it.m.cle == m.cle }
+                if (idx >= 0) liste.animateScrollToItem(idx + 1)
+                kotlinx.coroutines.delay(2500)
+                if (courant == m.cle && !rechercheOuverte) courant = null
+            } }
+        }
+    }
 
     // Pièces jointes : photo / vidéo, fichier, contact. Rien ne part avant l'appui sur « Envoyer » de l'aperçu.
     fun chargerFichier(uri: android.net.Uri) {
@@ -452,6 +489,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 onClick = { menuPlus = false; infos = true })
                             DropdownMenuItem(text = { Text("Sélectionner des messages") }, leadingIcon = { Icon(Icons.Outlined.Checklist, null) },
                                 onClick = { menuPlus = false; modeSelection = true })
+                            DropdownMenuItem(text = { Text("Messages favoris") }, leadingIcon = { Icon(Icons.Outlined.StarOutline, null) },
+                                onClick = { menuPlus = false; listeFavoris = true })
                             DropdownMenuItem(text = { Text("Actions de la conversation") }, leadingIcon = { Icon(Icons.Outlined.Tune, null) },
                                 onClick = { menuPlus = false; menu = true })
                         }
@@ -464,6 +503,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
             if (!rechercheOuverte && !modeSelection) AussiSur(e, c, ouvrir)
+            if (!rechercheOuverte && !modeSelection) BandeauSalon(infosSalon, historique, c) { allerAuMessage(it) }
             // Anti-spam : alerte sur une conversation suspecte (score ≥ 30), avec le pourquoi
             e.risques[c.cle]?.takeIf { !it.manuel || it.estSpam }?.let { v -> AlerteSpam(v) { spam -> Moteur.marquerSpam(c, spam) } }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = liste, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
@@ -498,7 +538,13 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             luParContact = e.lusParContacts[c.cle] ?: 0L,
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
                             basculer = { basculerSelection(l.m) },
-                            supprimer = { aSupprimer = setOf(l.m.cle) }) } } }
+                            supprimer = { aSupprimer = setOf(l.m.cle) },
+                            votes = vote[l.m.cle].orEmpty(),
+                            voter = { choix -> vm.voter(l.m, c, choix) { afficher(it) } },
+                            favori = l.m.cle in favoris,
+                            basculerFavori = { vm.basculerFavori(l.m); afficher(if (l.m.cle in favoris) "Retiré des favoris" else "Ajouté aux favoris") },
+                            allerA = { allerAuMessage(it) },
+                            modifier = if (Moteur.modifiable(l.m, c)) ({ enModification = l.m; reponseA = null; brouillon = l.m.texte }) else null) } } }
                     }
                 }
                 if (historique.size < total) item(key = "plus") {
@@ -540,6 +586,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             } else Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    enModification?.let { m ->
+                        Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.12f), RoundedCornerShape(10.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Edit, null, tint = c.source.teinte())
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Modifier le message", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
+                                Text(m.texte, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                            }
+                            IconButton(onClick = { enModification = null; brouillon = Moteur.brouillon(c.cle) }) { Icon(Icons.Outlined.Close, "Annuler la modification") }
+                        }
+                    }
                     reponseA?.let { m ->
                         Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.12f), RoundedCornerShape(10.dp)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -801,7 +859,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             }
                         }
                         // Bouton rond : micro quand le champ est vide, sinon envoyer
-                        val micro = brouillon.isBlank() && Moteur.vocalPossible(c)
+                        val micro = brouillon.isBlank() && enModification == null && Moteur.vocalPossible(c)
                         Box(Modifier.size(52.dp).clip(CircleShape).background(if (micro || brouillon.isNotBlank()) c.source.teinte() else c.source.teinte().copy(alpha = 0.4f))
                             .clickable(enabled = micro || (brouillon.isNotBlank() && !envoi)) {
                                 if (micro) {
@@ -809,6 +867,17 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                         android.content.pm.PackageManager.PERMISSION_GRANTED
                                     if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }.onFailure { afficher("Micro indisponible") }
                                     else demandeMicro.launch(android.Manifest.permission.RECORD_AUDIO)
+                                } else if (enModification != null) {
+                                    val m = enModification!!
+                                    envoi = true
+                                    portee.launch {
+                                        val err = Moteur.modifier(m, brouillon, c)
+                                        envoi = false
+                                        if (err == null) {
+                                            enModification = null; brouillon = Moteur.brouillon(c.cle); versionsIA = emptyList(); saisieAgrandie = false
+                                            afficher("Message modifié")
+                                        } else afficher("Échec : $err")
+                                    }
                                 } else {
                                     envoi = true
                                     portee.launch {
@@ -822,6 +891,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 }
                             }, contentAlignment = Alignment.Center) {
                             if (envoi) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                            else if (enModification != null && !micro) Icon(Icons.Outlined.Check, "Enregistrer la modification", tint = Color.White)
                             else Icon(if (micro) Icons.Outlined.Mic else Icons.AutoMirrored.Outlined.Send, if (micro) "Enregistrer un vocal" else "Envoyer", tint = Color.White)
                         }
                     }
@@ -831,6 +901,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         }
     }
     if (menu) FeuilleActions(e, c) { menu = false }
+    if (listeFavoris) DialogueFavoris(c, fermer = { listeFavoris = false }) { listeFavoris = false; allerAuMessage(it) }
     if (reponsesRapides) FeuilleReponsesRapides(c, fermer = { reponsesRapides = false }) { t -> brouillon = t }
     if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
         appeler = { menuAppel = true }, rechercher = { rechercheOuverte = true }, selectionner = { modeSelection = true },
@@ -939,6 +1010,12 @@ private fun Bulle(
     luParContact: Long = 0,
     modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
     supprimer: () -> Unit = {},
+    votes: List<fr.messagerie.unifiee.Vote> = emptyList(),
+    voter: (List<String>) -> Unit = {},
+    favori: Boolean = false,
+    basculerFavori: () -> Unit = {},
+    allerA: (String) -> Unit = {},
+    modifier: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -956,12 +1033,17 @@ private fun Bulle(
         val forme = if (moi) RoundedCornerShape(18.dp, haut, bas, 18.dp) else RoundedCornerShape(haut, 18.dp, 18.dp, bas)
         Column(
             Modifier.widthIn(max = 300.dp)
-                .background(if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerHigh, forme)
+                .background(if (m.type == "autocollant") Color.Transparent else if (moi) c.source.teinte() else MaterialTheme.colorScheme.surfaceContainerHigh, forme)
                 .combinedClickable(onClick = { if (modeSelection) basculer() else ouvrirLien(m.texte, ctx) }, onLongClick = { if (modeSelection) basculer() else menu = true })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            val couleur = if (moi) Color.White else MaterialTheme.colorScheme.onSurface
+            val couleur = if (moi && m.type != "autocollant") Color.White else MaterialTheme.colorScheme.onSurface
+            // Réponse : le message cité, touché = on y remonte
+            m.cite?.let { k -> Citation(k, moi, couleur, c) { allerA(k) } }
             when (m.type) {
+                "autocollant" -> AutocollantMessage(m, couleur)
+                "position" -> PositionMessage(m, couleur)
+                "sondage" -> m.sondage?.let { CarteSondage(it, votes, couleur, Moteur.votePossible(c), voter) } ?: Text(m.texte, color = couleur)
                 "audio" -> if (m.media != null) LecteurVocal(m, couleur) else
                     Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
                         color = couleur, fontStyle = FontStyle.Italic)
@@ -969,13 +1051,15 @@ private fun Bulle(
                 "video" -> VideoMessage(m, couleur, afficherMessage)
                 "fichier" -> FichierMessage(m, couleur, afficherMessage)
                 else -> {
-                    Text(avecLiens(m.texte, couleur), color = couleur)
+                    Text(m.html?.let { texteMisEnForme(it, m.texte, couleur) } ?: avecLiens(m.texte, couleur), color = couleur)
                     // Aperçu du premier lien (titre, description, image de la page)
                     // Contact connu : aperçu chargé tout de suite ; inconnu : domaine bien visible, aperçu seulement à la demande
                     LIEN.find(m.texte)?.let { ApercuLien(urlComplete(it.value), moi, couleur, LocalContactConnu.current) }
                 }
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                if (favori) { Icon(Icons.Outlined.Star, "Favori", tint = couleur.copy(alpha = 0.8f), modifier = Modifier.size(12.dp)); Spacer(Modifier.width(3.dp)) }
+                if (m.modifie) { Text("modifié · ", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = couleur.copy(alpha = 0.7f)) }
                 Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f))
                 // Statut de vos messages : ✓ envoyé, ✓✓ lu par le contact (si la messagerie le transmet)
                 if (moi && c.source != Source.TEAMS) {
@@ -1032,13 +1116,16 @@ private fun Bulle(
     }
     if (menu) FeuilleMessage(m, c, monEmoji, fermer = { menu = false },
         reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) },
-        selectionner = { menu = false; basculer() }, supprimer = { menu = false; supprimer() })
+        selectionner = { menu = false; basculer() }, supprimer = { menu = false; supprimer() },
+        favori = favori, basculerFavori = { menu = false; basculerFavori() },
+        modifier = modifier?.let { f -> { menu = false; f() } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
-                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit) {
+                           reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit,
+                           favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null) {
     var partie by remember { mutableStateOf(false) }
     if (partie) { DialogueSelectionTexte(m.texte) { partie = false; fermer() }; return }
     ModalBottomSheet(onDismissRequest = fermer) {
@@ -1064,6 +1151,9 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
+            if (modifier != null) ElementAction(Icons.Outlined.Edit, "Modifier") { modifier() }
+            ElementAction(if (favori) Icons.Outlined.Star else Icons.Outlined.StarOutline,
+                if (favori) "Retirer des favoris" else "Ajouter aux favoris") { basculerFavori() }
             if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier tout le texte") { copier() }
             if (m.type != "audio" && m.texte.isNotBlank()) ElementAction(Icons.Outlined.TextFields, "Copier une partie du texte") { partie = true }
             ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
@@ -1092,6 +1182,7 @@ private fun LecteurVocal(m: Message, couleur: Color) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 var largeur by remember { mutableIntStateOf(1) }
+                // Vitesse de lecture (1×, 1,5×, 2×), gardée d'un vocal à l'autre
                 val fraction = if (dureeMs > 0) (position.toFloat() / dureeMs).coerceIn(0f, 1f) else 0f
                 LinearProgressIndicator(
                     progress = { fraction },
@@ -1103,10 +1194,16 @@ private fun LecteurVocal(m: Message, couleur: Color) {
                     color = couleur, trackColor = couleur.copy(alpha = 0.25f),
                 )
                 Spacer(Modifier.size(4.dp))
-                Text(
-                    (if (actif && position > 0) minSec(position) + " / " else "🎤 ") + (if (dureeMs > 0) minSec(dureeMs) else "Message vocal"),
-                    fontSize = 12.sp, color = couleur.copy(alpha = 0.85f),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (if (actif && position > 0) minSec(position) + " / " else "🎤 ") + (if (dureeMs > 0) minSec(dureeMs) else "Message vocal"),
+                        fontSize = 12.sp, color = couleur.copy(alpha = 0.85f), modifier = Modifier.weight(1f),
+                    )
+                    Text(when (etat.vitesse) { 1.5f -> "1,5×"; 2f -> "2×"; else -> "1×" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = couleur,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(couleur.copy(alpha = 0.15f))
+                            .clickable { Lecteur.changerVitesse() }.padding(horizontal = 8.dp, vertical = 3.dp)
+                            .semantics { contentDescription = "Vitesse de lecture" })
+                }
             }
         }
         if (actif && etat.erreur != null) Text(etat.erreur!!, fontSize = 11.sp, color = couleur, fontStyle = FontStyle.Italic)
@@ -1394,4 +1491,171 @@ private fun DialogueSelectionTexte(texte: String, fermer: () -> Unit) {
             }
         }
     }
+}
+
+
+/** Bloc du message cité en haut d'une réponse reçue ou envoyée. */
+@Composable
+private fun Citation(cle: String, moi: Boolean, couleur: Color, c: Conversation, aller: () -> Unit) {
+    val cite by androidx.compose.runtime.produceState<Message?>(null, cle) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.archive.messageParCle(cle) }
+    }
+    val accent = if (moi) Color.White else c.source.teinte()
+    Row(
+        Modifier.padding(bottom = 6.dp).widthIn(min = 120.dp).clip(RoundedCornerShape(8.dp))
+            .background(couleur.copy(alpha = 0.10f)).clickable { aller() },
+    ) {
+        Box(Modifier.width(3.dp).height(42.dp).background(accent))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(cite?.auteur ?: "Message", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = accent, maxLines = 1)
+            Text(cite?.let { apercuMessage(it) } ?: "Message plus ancien", fontSize = 13.sp, color = couleur.copy(alpha = 0.85f),
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Texte reçu mis en forme (gras, italique, barré, code, citation), liens cliquables. */
+private fun texteMisEnForme(html: String, brut: String, couleur: Color): androidx.compose.ui.text.AnnotatedString {
+    val (texte, passages) = fr.messagerie.unifiee.MiseEnForme.lire(html) ?: return avecLiens(brut, couleur)
+    val base = avecLiens(texte, couleur)
+    return androidx.compose.ui.text.AnnotatedString.Builder(base).apply {
+        for (p in passages) {
+            val style = when (p.style) {
+                fr.messagerie.unifiee.MiseEnForme.Style.GRAS -> androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)
+                fr.messagerie.unifiee.MiseEnForme.Style.ITALIQUE -> androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic)
+                fr.messagerie.unifiee.MiseEnForme.Style.BARRE -> androidx.compose.ui.text.SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                fr.messagerie.unifiee.MiseEnForme.Style.CODE -> androidx.compose.ui.text.SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    background = couleur.copy(alpha = 0.12f))
+                fr.messagerie.unifiee.MiseEnForme.Style.CITATION -> androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic, color = couleur.copy(alpha = 0.75f))
+            }
+            if (p.fin <= texte.length) addStyle(style, p.debut, p.fin)
+        }
+    }.toAnnotatedString()
+}
+
+/** Sondage : question, réponses avec le nombre de votes ; toucher une réponse vote (seulement sur votre appui). */
+@Composable
+private fun CarteSondage(s: fr.messagerie.unifiee.Sondage, votes: List<fr.messagerie.unifiee.Vote>, couleur: Color, peutVoter: Boolean,
+                         voter: (List<String>) -> Unit) {
+    val mesChoix = votes.firstOrNull { it.deMoi }?.choix.orEmpty()
+    var aConfirmer by remember { mutableStateOf<List<String>?>(null) }
+    var voirVotants by remember { mutableStateOf(false) }
+    val total = votes.count { it.choix.isNotEmpty() }
+    Column(Modifier.widthIn(min = 220.dp, max = 280.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("📊 " + s.question, color = couleur, fontWeight = FontWeight.SemiBold)
+        Text(if (s.max > 1) "Plusieurs réponses possibles" else "Une seule réponse", fontSize = 11.sp, color = couleur.copy(alpha = 0.7f))
+        s.reponses.forEach { (id, texte) ->
+            val n = votes.count { id in it.choix }
+            val choisi = id in mesChoix
+            val part = if (total > 0) n.toFloat() / total else 0f
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(couleur.copy(alpha = 0.08f))
+                    .border(1.dp, if (choisi) couleur else couleur.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                    .clickable(enabled = peutVoter) {
+                        aConfirmer = if (s.max > 1) (if (choisi) mesChoix - id else (mesChoix + id).takeLast(s.max)) else listOf(id)
+                    },
+            ) {
+                Box(Modifier.matchParentSize()) { Box(Modifier.fillMaxHeight().fillMaxWidth(part).background(couleur.copy(alpha = 0.16f))) }
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (choisi) "✓ " else "", color = couleur, fontWeight = FontWeight.Bold)
+                    Text(texte, color = couleur, modifier = Modifier.weight(1f))
+                    Text("$n", color = couleur, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Text("$total vote" + (if (total > 1) "s" else "") + (if (total > 0) " · voir qui" else "") +
+            (if (!peutVoter) " · vote impossible d'ici" else ""), fontSize = 11.sp, color = couleur.copy(alpha = 0.75f),
+            modifier = Modifier.clickable(enabled = total > 0) { voirVotants = true })
+    }
+    aConfirmer?.let { choix ->
+        AlertDialog(
+            onDismissRequest = { aConfirmer = null },
+            title = { Text(if (choix.isEmpty()) "Retirer votre vote ?" else "Voter ?") },
+            text = { Text(if (choix.isEmpty()) "Votre vote sera retiré du sondage."
+                else "Votre vote (" + choix.mapNotNull { id -> s.reponses.firstOrNull { it.first == id }?.second }.joinToString(", ") + ") sera visible par les participants.") },
+            confirmButton = { TextButton(onClick = { aConfirmer = null; voter(choix) }) { Text(if (choix.isEmpty()) "Retirer" else "Voter") } },
+            dismissButton = { TextButton(onClick = { aConfirmer = null }) { Text("Annuler") } },
+        )
+    }
+    if (voirVotants) AlertDialog(
+        onDismissRequest = { voirVotants = false },
+        title = { Text("Votes") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                s.reponses.forEach { (id, texte) ->
+                    val qui = votes.filter { id in it.choix }.map { it.auteur }
+                    Text(texte + " (" + qui.size + ")", fontWeight = FontWeight.SemiBold)
+                    if (qui.isNotEmpty()) Text(qui.joinToString(", "), fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { voirVotants = false }) { Text("Fermer") } },
+    )
+}
+
+/** Bandeaux en haut de la conversation : message épinglé (le plus récent) et messages éphémères. */
+@Composable
+private fun BandeauSalon(infos: Moteur.InfosSalon?, historique: List<Message>, c: Conversation, aller: (String) -> Unit) {
+    if (infos == null) return
+    val cs = MaterialTheme.colorScheme
+    infos.ephemere?.let { ms ->
+        val duree = when {
+            ms >= 86_400_000L * 7 && ms % (86_400_000L * 7) == 0L -> "${ms / (86_400_000L * 7)} semaine" + if (ms / (86_400_000L * 7) > 1) "s" else ""
+            ms >= 86_400_000L -> "${ms / 86_400_000L} jour" + if (ms / 86_400_000L > 1) "s" else ""
+            ms >= 3_600_000L -> "${ms / 3_600_000L} h"
+            ms >= 60_000L -> "${ms / 60_000L} min"
+            else -> "${ms / 1000} s"
+        }
+        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerLow).padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Timer, null, tint = c.source.teinte(), modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Messages éphémères : effacés après $duree" + (if (infos.apresLecture) " (après lecture)" else ""),
+                fontSize = 12.sp, color = cs.onSurfaceVariant)
+        }
+    }
+    val cle = infos.epingles.lastOrNull() ?: return
+    val m by androidx.compose.runtime.produceState(historique.firstOrNull { it.cle == cle }, cle) {
+        if (value == null) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.archive.messageParCle(cle) }
+    }
+    Row(Modifier.fillMaxWidth().background(cs.surfaceContainerLow).clickable { aller(cle) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.PushPin, null, tint = c.source.teinte(), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(if (infos.epingles.size > 1) "${infos.epingles.size} messages épinglés" else "Message épinglé",
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
+            Text(m?.let { (if (it.deMoi) "Vous : " else if (c.estGroupe) it.auteur + " : " else "") + apercuMessage(it) } ?: "Message plus ancien",
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Messages favoris de la conversation (gardés sur ce téléphone). */
+@Composable
+private fun DialogueFavoris(c: Conversation, fermer: () -> Unit, aller: (String) -> Unit) {
+    val liste by androidx.compose.runtime.produceState<List<Message>?>(null, c.cle) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.archive.favoris(c.cle) }
+    }
+    AlertDialog(
+        onDismissRequest = fermer,
+        title = { Text("Messages favoris") },
+        text = {
+            val l = liste
+            when {
+                l == null -> CircularProgressIndicator(Modifier.size(24.dp))
+                l.isEmpty() -> Text("Aucun favori. Appui long sur un message > Ajouter aux favoris.")
+                else -> Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    l.forEach { m ->
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clickable { aller(m.cle) }.padding(10.dp)) {
+                            Text(m.auteur + " · " + jourComplet(m.date), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
+                            Text(apercuMessage(m), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = fermer) { Text("Fermer") } },
+    )
 }
