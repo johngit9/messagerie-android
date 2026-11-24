@@ -57,6 +57,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -674,8 +675,11 @@ private fun BandeauVacances() {
 }
 
 @Composable
-private fun BandeauPannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, ouvrir: () -> Unit) {
+private fun BandeauPannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, ouvrirReglages: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    var fiche by remember { mutableStateOf(false) }
+    if (fiche) FichePannes(pannes, fermer = { fiche = false }, ouvrirReglages = { fiche = false; ouvrirReglages() })
+    val ouvrir = { fiche = true }
     Row(
         Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp).fillMaxWidth()
             .clip(RoundedCornerShape(14.dp)).background(cs.errorContainer).clickable(onClick = ouvrir)
@@ -873,6 +877,80 @@ private fun PuceCompacte(bandeau: Boolean, libelle: String, n: Int, attente: Boo
                 }
             }
             Box(Modifier.height(2.5.dp).width(28.dp).background(if (choisie) cs.onSurface else Color.Transparent, RoundedCornerShape(2.dp)))
+        }
+    }
+}
+
+/** Explication en français d'une déconnexion, et ce qu'il faut faire. */
+private fun expliquerPanne(p: fr.messagerie.unifiee.Surveillance.Panne): Pair<String, List<String>> {
+    val d = p.detail.lowercase()
+    val nom = p.source.libelle
+    val panneau = "Sur le serveur, ouvrez le panneau de gestion > Comptes > $nom"
+    return when {
+        p.source == Source.WHATSAPP && ("main-device-gone" in d || "logged out" in d || "bad_credentials" in d || "logged_out" in d) ->
+            "Votre téléphone a retiré la connexion du serveur de la liste des appareils liés de WhatsApp " +
+                "(WhatsApp > Appareils connectés), ou WhatsApp l'a déconnectée. Les messages WhatsApp n'arrivent plus dans Messagerie." to listOf(
+                "$panneau : un QR code s'affiche.",
+                "Sur le téléphone : WhatsApp > ⋮ > Appareils connectés > Connecter un appareil, puis scannez le QR code.",
+                "Les messages reviennent en une minute environ, sans rien redémarrer.",
+            )
+        p.source == Source.LINKEDIN ->
+            "La session LinkedIn du serveur a expiré ou a été fermée. Les messages LinkedIn n'arrivent plus." to listOf(
+                "$panneau, et suivez la reconnexion (copie cURL).",
+                "Faites-le depuis une fenêtre de navigateur normale (pas privée), et ne vous déconnectez pas de LinkedIn dans ce navigateur.",
+            )
+        "timeout" in d || "injoignable" in d || "connexion" in d && "refus" in d ->
+            "Le serveur ne répond pas : il est peut-être éteint, en veille ou hors réseau." to listOf(
+                "Vérifiez que le serveur est allumé et connecté.",
+                "Messagerie réessaie toute seule ; l'alerte disparaît quand la connexion revient.",
+            )
+        else -> "La passerelle $nom du serveur a perdu sa connexion à $nom. Les messages $nom n'arrivent plus dans Messagerie." to listOf(
+            "$panneau pour voir son état et la reconnecter.",
+            "L'alerte disparaît d'elle-même une fois $nom reconnecté.",
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun FichePannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, fermer: () -> Unit, ouvrirReglages: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = fermer,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            pannes.forEach { p ->
+                val (explication, etapes) = expliquerPanne(p)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LogoSource(p.source, 40.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("${p.source.libelle} est déconnecté", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        p.depuis?.let { Text("Depuis le " + dateCourte(it) + " à " + heure(it), fontSize = 13.sp, color = cs.onSurfaceVariant) }
+                    }
+                }
+                Text(explication, fontSize = 15.sp, lineHeight = 21.sp)
+                Column(Modifier.fillMaxWidth().background(cs.surfaceContainerLow, RoundedCornerShape(16.dp)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Pour réparer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    etapes.forEachIndexed { i, t ->
+                        Row {
+                            Text("${i + 1}.", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = cs.primary, modifier = Modifier.width(22.dp))
+                            Text(t, fontSize = 14.sp, lineHeight = 20.sp)
+                        }
+                    }
+                }
+                Text("Message du serveur", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(p.detail, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.fillMaxWidth().background(cs.surfaceContainerHigh, RoundedCornerShape(10.dp)).padding(10.dp))
+                }
+                if (pannes.size > 1) HorizontalDivider()
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = ouvrirReglages) { Text("État des messageries") }
+                TextButton(onClick = fermer) { Text("Fermer") }
+            }
         }
     }
 }
