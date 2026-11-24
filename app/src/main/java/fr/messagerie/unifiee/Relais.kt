@@ -254,6 +254,21 @@ class Relais(private val cfg: Config) {
         runCatching { Http.requete("$base/whatsapp/connexion/annuler", "POST", jeton, JSONObject().put("id", id).toString(), 10_000) }
     }
 
+    /** Lu Element PUBLIC (m.read + m.fully_read) : choix d'Alain du 24/11, le contact voit que c'est lu. */
+    fun luPublic(salon: String, eventId: String) {
+        connecter()
+        val d = JSONObject().put("salon", salon).put("event_id", eventId)
+        val r = Http.requete("$base/lu", "POST", jeton, d.toString(), 10_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "lu")
+    }
+
+    /** Accusés de lecture des contacts dans un salon Element : (identifiant, date de lecture). */
+    fun accuses(salon: String): List<Pair<String, Long>> {
+        connecter()
+        val a = get("/accuses?salon=" + Http.enc(salon), 10_000).optJSONArray("lecteurs") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { it.optString("id") to it.optLong("ts") }?.takeIf { it.second > 0 } }
+    }
+
     fun luPrive(salon: String, eventId: String) {
         connecter()
         val d = JSONObject().put("salon", salon).put("event_id", eventId)

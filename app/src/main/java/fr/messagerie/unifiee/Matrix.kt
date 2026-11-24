@@ -18,7 +18,7 @@ class Matrix(private val cfg: Config) {
     companion object {
         @Volatile var derniereBonne: String? = null
         @Volatile private var verifieLe = 0L
-        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private val filtreVeille = """{"room":{"timeline":{"limit":1,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response","com.beeper.message_send_status"]},"state":{"types":[]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
     }
 
     var base = ""
@@ -345,17 +345,19 @@ class SyncPont(
         /** Messages déjà archivés et encore « Waiting for attachment » : clé → dernière tentative. */
         private val essais = ConcurrentHashMap<String, Long>()
 
-        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
+        private const val FILTRE_SYNC = """{"room":{"timeline":{"limit":100,"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response","com.beeper.message_send_status"]},"state":{"types":["m.room.name"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         private const val FILTRE_DEPART = """{"room":{"timeline":{"limit":20,"types":["m.room.message","m.sticker","org.matrix.msc3381.poll.start","m.poll.start"]},"state":{"types":["m.bridge"]},"ephemeral":{"types":["m.receipt"]},"account_data":{"not_types":["*"]}},"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]}}"""
         /** Pages (de 100 messages) remontées par salon au premier passage : la liste s'affiche vite. */
         private const val PAGES_RAPIDES = 3
-        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response"]}"""
+        private const val FILTRE_MESSAGES = """{"types":["m.room.message","m.room.redaction","m.reaction","m.sticker","org.matrix.msc3381.poll.start","m.poll.start","org.matrix.msc3381.poll.response","m.poll.response","com.beeper.message_send_status"]}"""
     }
 
     /** Lectures faites sur vos autres appareils : conversation → date. Simplement lues, jamais envoyées. */
     val lectures = HashMap<String, Long>()
     /** Jusqu'où vos contacts ont lu (accusés de lecture reçus, jamais envoyés) : conversation → date. */
     val lusParContacts = HashMap<String, Long>()
+    /** Remise au contact (« distribué ») : statut de la passerelle avec delivered_to_users, par conversation. */
+    val recusParContacts = HashMap<String, Long>()
     /** Dernière mention de vous (date du message) par conversation. */
     val mentionsMoi = HashMap<String, Long>()
     /** Conversations SMS passant par RCS. */
@@ -596,6 +598,13 @@ class SyncPont(
                 val deMoi = estMoi(exp, info.membres, moi)
                 reactions.add(Reaction("${pont.source.id}:$eid", "${pont.source.id}:$cible", conv, cle,
                     if (deMoi) "Vous" else info.membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un", deMoi))
+                continue
+            }
+            if (e.optString("type") == "com.beeper.message_send_status") {
+                // Statut d'envoi de la passerelle : « distribué » quand le téléphone du contact a reçu le message
+                val livre = e.optJSONObject("content")?.optJSONArray("delivered_to_users")
+                val ts = e.ts("origin_server_ts") ?: 0L
+                if (livre != null && livre.length() > 0 && ts > (recusParContacts[conv] ?: 0)) recusParContacts[conv] = ts
                 continue
             }
             if (e.optString("type") == "m.room.redaction") {

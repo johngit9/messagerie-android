@@ -263,6 +263,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
 
     LaunchedEffect(c.cle) { Moteur.marquerLue(c) }
+    // Element : accusés de lecture des contacts, relus à chaque actualisation
+    LaunchedEffect(c.cle, e.derniereActualisation) { Moteur.actualiserAccusesElement(c) }
     androidx.compose.runtime.DisposableEffect(c.cle) {
         Moteur.convOuverte = c.cle
         // Une notification affichée en bulle reste : la retirer fermerait la bulle
@@ -536,6 +538,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } },
                             afficherMessage = { afficher(it) },
                             luParContact = e.lusParContacts[c.cle] ?: 0L,
+                            recuParContact = e.recusParContacts[c.cle] ?: 0L,
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
                             basculer = { basculerSelection(l.m) },
                             supprimer = { aSupprimer = setOf(l.m.cle) },
@@ -879,14 +882,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                         } else afficher("Échec : $err")
                                     }
                                 } else {
-                                    envoi = true
-                                    portee.launch {
-                                        val err = Moteur.envoyer(brouillon, c, reponseA, mentions)
-                                        envoi = false
-                                        if (err == null) {
-                                            brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
-                                            afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
-                                        } else afficher("Échec : $err")
+                                    // Envoi immédiat : le champ se vide tout de suite ; texte remis seulement en cas d'échec
+                                    val texte = brouillon; val cite = reponseA; val ments = mentions
+                                    brouillon = ""; champ = androidx.compose.ui.text.input.TextFieldValue("")
+                                    versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
+                                    Moteur.envoyerEnFond(texte, c, cite, ments) { err ->
+                                        if (err != null && brouillon.isBlank()) { brouillon = texte; reponseA = cite; mentions = ments }
                                     }
                                 }
                             }, contentAlignment = Alignment.Center) {
@@ -1008,6 +1009,7 @@ private fun Bulle(
     repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
     afficherMessage: (String) -> Unit = {},
     luParContact: Long = 0,
+    recuParContact: Long = 0,
     modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
     supprimer: () -> Unit = {},
     votes: List<fr.messagerie.unifiee.Vote> = emptyList(),
@@ -1061,13 +1063,14 @@ private fun Bulle(
                 if (favori) { Icon(Icons.Outlined.Star, "Favori", tint = couleur.copy(alpha = 0.8f), modifier = Modifier.size(12.dp)); Spacer(Modifier.width(3.dp)) }
                 if (m.modifie) { Text("modifié · ", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = couleur.copy(alpha = 0.7f)) }
                 Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f))
-                // Statut de vos messages : ✓ envoyé, ✓✓ lu par le contact (si la messagerie le transmet)
+                // Statut de vos messages : ✓ envoyé, ✓✓ gris distribué, ✓✓ bleu lu (si la messagerie le transmet)
                 if (moi && c.source != Source.TEAMS) {
                     val lu = luParContact >= m.date && luParContact > 0
+                    val recu = lu || (recuParContact >= m.date && recuParContact > 0)
                     Spacer(Modifier.width(3.dp))
-                    Text(if (lu) "✓✓" else "✓", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    Text(if (recu) "✓✓" else "✓", fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         color = if (lu) Color(0xFF7FD4FF) else couleur.copy(alpha = 0.7f),
-                        modifier = Modifier.semantics { contentDescription = if (lu) "Lu" else "Envoyé" })
+                        modifier = Modifier.semantics { contentDescription = when { lu -> "Lu"; recu -> "Distribué"; else -> "Envoyé" } })
                 }
             }
         }

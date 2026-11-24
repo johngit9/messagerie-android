@@ -44,6 +44,8 @@ data class Etat(
     val rcs: Set<String> = emptySet(),
     /** Conversation → date jusqu'à laquelle le contact a lu vos messages (si la messagerie le transmet). */
     val lusParContacts: Map<String, Long> = emptyMap(),
+    /** Date du dernier « distribué » (reçu sur le téléphone du contact) par conversation, si la passerelle le transmet. */
+    val recusParContacts: Map<String, Long> = emptyMap(),
     /** Date de la dernière mention de vous (@) par conversation. */
     val mentions: Map<String, Long> = emptyMap(),
     val salonsWhatsApp: Map<String, String> = emptyMap(),   // jid WhatsApp → salon Matrix
@@ -358,6 +360,10 @@ object Moteur {
                 val avant = archive.curseur("luPar.$conv")?.toLongOrNull() ?: 0
                 if (ts > avant) archive.definirCurseur("luPar.$conv", ts.toString())
             }
+            for ((conv, ts) in s.recusParContacts) {
+                val avant = archive.curseur("recuPar.$conv")?.toLongOrNull() ?: 0
+                if (ts > avant) archive.definirCurseur("recuPar.$conv", ts.toString())
+            }
             runCatching { s.completerHistorique() }
             runCatching { s.reparerPiecesJointes() }
             if (avecRcs) s.rcs?.let { r ->
@@ -400,6 +406,7 @@ object Moteur {
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources, risques = risques,
             etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
+            recusParContacts = archive.curseurs("recuPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
             mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 
@@ -552,11 +559,26 @@ object Moteur {
     /** Date du dernier message (parfois plus récente que la date enregistrée de la conversation). */
     private fun finDe(c: Conversation) = maxOf(c.derniere, c.messages.maxOfOrNull { it.date } ?: 0)
 
-    /** Element : le message lu dans Messagerie apparaît lu dans Element (accusé PRIVÉ, invisible des contacts). */
+    /** Element : le message lu dans Messagerie est lu aussi pour l'extérieur (accusé PUBLIC, choix d'Alain du 24/11). */
     private fun luDansElement(c: Conversation) {
         if (c.source != Source.ELEMENT || !cfg.relaisConfigure) return
         val eid = c.messages.lastOrNull()?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") } ?: return
-        portee.launch(Dispatchers.IO) { runCatching { Relais(cfg).luPrive(c.jid, eid) } }
+        portee.launch(Dispatchers.IO) { runCatching { Relais(cfg).luPublic(c.jid, eid) } }
+    }
+
+    /** Element : qui a lu vos messages (✓✓ bleu). Discussion : le contact ; groupe : quand tous ont lu. Lecture seule. */
+    fun actualiserAccusesElement(c: Conversation) {
+        if (c.source != Source.ELEMENT || !cfg.relaisConfigure) return
+        portee.launch(Dispatchers.IO) {
+            val lecteurs = runCatching { Relais(cfg).accuses(c.jid) }.getOrNull()?.filter { it.first != cfg.matrixUtilisateur } ?: return@launch
+            if (lecteurs.isEmpty()) return@launch
+            val ts = if (c.estGroupe) lecteurs.minOf { it.second } else lecteurs.maxOf { it.second }
+            val avant = archive.curseur("luPar.${c.cle}")?.toLongOrNull() ?: 0
+            if (ts > avant) {
+                archive.definirCurseur("luPar.${c.cle}", ts.toString())
+                _etat.update { it.copy(lusParContacts = it.lusParContacts + (c.cle to ts)) }
+            }
+        }
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
@@ -656,9 +678,22 @@ object Moteur {
                 else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS)
             }
             afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle))
-            garderBrouillon(c.cle, null)
             null
         } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /**
+     * Envoi sans attendre (appui sur « Envoyer ») : l'écran vide le champ tout de suite, l'envoi continue même si
+     * vous quittez la conversation. En cas d'échec, apres(erreur) est appelé sur le fil d'affichage et un message s'affiche.
+     */
+    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, apres: (String?) -> Unit) {
+        portee.launch {
+            val err = envoyer(texte, c, cite, mentions)
+            withContext(Dispatchers.Main) {
+                if (err != null) android.widget.Toast.makeText(app, "Message non envoyé : $err", android.widget.Toast.LENGTH_LONG).show()
+                runCatching { apres(err) }
+            }
+        }
     }
 
     /** Salon Matrix d'une conversation (WhatsApp : via la correspondance du relais). */
