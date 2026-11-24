@@ -243,6 +243,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     val luAvant = remember(c.cle) { if (e.estNonLue(c)) e.luJusqua(c) else null }
 
     LaunchedEffect(c.cle) { Moteur.marquerLue(c) }
+    // Element : accusés de lecture des contacts, relus à chaque actualisation
+    LaunchedEffect(c.cle, e.derniereActualisation) { Moteur.actualiserAccusesElement(c) }
     androidx.compose.runtime.DisposableEffect(c.cle) {
         Moteur.convOuverte = c.cle
         // Une notification affichée en bulle reste : la retirer fermerait la bulle

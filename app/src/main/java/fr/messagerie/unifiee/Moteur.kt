@@ -558,11 +558,26 @@ object Moteur {
     /** Date du dernier message (parfois plus récente que la date enregistrée de la conversation). */
     private fun finDe(c: Conversation) = maxOf(c.derniere, c.messages.maxOfOrNull { it.date } ?: 0)
 
-    /** Element : le message lu dans Messagerie apparaît lu dans Element (accusé PRIVÉ, invisible des contacts). */
+    /** Element : le message lu dans Messagerie est lu aussi pour l'extérieur (accusé PUBLIC, choix d'Alain du 24/11). */
     private fun luDansElement(c: Conversation) {
         if (c.source != Source.ELEMENT || !cfg.relaisConfigure) return
         val eid = c.messages.lastOrNull()?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") } ?: return
-        portee.launch(Dispatchers.IO) { runCatching { Relais(cfg).luPrive(c.jid, eid) } }
+        portee.launch(Dispatchers.IO) { runCatching { Relais(cfg).luPublic(c.jid, eid) } }
+    }
+
+    /** Element : qui a lu vos messages (✓✓ bleu). Discussion : le contact ; groupe : quand tous ont lu. Lecture seule. */
+    fun actualiserAccusesElement(c: Conversation) {
+        if (c.source != Source.ELEMENT || !cfg.relaisConfigure) return
+        portee.launch(Dispatchers.IO) {
+            val lecteurs = runCatching { Relais(cfg).accuses(c.jid) }.getOrNull()?.filter { it.first != cfg.matrixUtilisateur } ?: return@launch
+            if (lecteurs.isEmpty()) return@launch
+            val ts = if (c.estGroupe) lecteurs.minOf { it.second } else lecteurs.maxOf { it.second }
+            val avant = archive.curseur("luPar.${c.cle}")?.toLongOrNull() ?: 0
+            if (ts > avant) {
+                archive.definirCurseur("luPar.${c.cle}", ts.toString())
+                _etat.update { it.copy(lusParContacts = it.lusParContacts + (c.cle to ts)) }
+            }
+        }
     }
     fun marquerNonLue(c: Conversation) = majEtat(c.cle) { it.copy(forcee = c.derniere) }
     fun toutMarquerLu() = _etat.value.let { e ->
