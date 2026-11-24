@@ -9,6 +9,7 @@ import fr.messagerie.unifiee.Message
 import fr.messagerie.unifiee.Moteur
 import fr.messagerie.unifiee.Reaction
 import fr.messagerie.unifiee.Source
+import fr.messagerie.unifiee.Vote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -86,6 +87,11 @@ class ConversationVM(private val cle: String) : ViewModel() {
     val reactions = _reactions.asStateFlow()
     private val _mesReactions = MutableStateFlow<Map<String, MaReaction>>(emptyMap())
     val mesReactions = _mesReactions.asStateFlow()
+    private val _votes = MutableStateFlow<Map<String, List<Vote>>>(emptyMap())
+    /** Votes des sondages : clé du sondage → dernier vote de chaque personne. */
+    val votes = _votes.asStateFlow()
+    private val _favoris = MutableStateFlow<Set<String>>(emptySet())
+    val favoris = _favoris.asStateFlow()
 
     init {
         // Réactions arrivées sans nouveau message (posées depuis l'appli officielle) : relues à chaque actualisation
@@ -147,6 +153,24 @@ class ConversationVM(private val cle: String) : ViewModel() {
     private fun chargerReactions() {
         _reactions.value = Moteur.archive.reactions(cle)
         _mesReactions.value = Moteur.archive.mesReactions(cle)
+        _votes.value = Moteur.archive.votes(cle)
+        _favoris.value = Moteur.archive.clesFavoris(cle)
+    }
+
+    /** Ajoute ou retire un message des favoris (sur ce téléphone seulement). */
+    fun basculerFavori(m: Message) {
+        val oui = m.cle !in _favoris.value
+        _favoris.value = if (oui) _favoris.value + m.cle else _favoris.value - m.cle
+        viewModelScope.launch(Dispatchers.IO) { Moteur.archive.definirFavori(m, oui) }
+    }
+
+    /** Vote à un sondage (seulement sur votre appui). */
+    fun voter(m: Message, c: Conversation, choix: List<String>, afficher: (String) -> Unit) {
+        viewModelScope.launch {
+            val err = Moteur.voter(m, c, choix)
+            withContext(Dispatchers.IO) { chargerReactions() }
+            afficher(if (err == null) "Vote envoyé" else "Échec : $err")
+        }
     }
 
     /** Pose ou retire votre réaction (seulement sur votre appui). Renvoie le texte à afficher. */

@@ -135,6 +135,7 @@ object Moteur {
         app = context.applicationContext
         cfg = Config(app)
         archive = Archive(app)
+        runCatching { _brouillons.value = archive.brouillons() }
         Spam.init(app)
         chargerOrganisation()
         _etat.update { it.copy(jours = cfg.jours, debutLecture = cfg.debutLecture, vacances = cfg.vacances,
@@ -663,7 +664,7 @@ object Moteur {
         try {
             val eid: String = when (c.source) {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
-                Source.ELEMENT -> { Relais(cfg).envoyer(c.jid, t, idCite); "" }
+                Source.ELEMENT -> Relais(cfg).envoyer(c.jid, t, idCite)
                 Source.WHATSAPP -> {
                     // Correspondance discussion → salon : en mémoire, sinon redemandée au relais tout de suite
                     val salon = _etat.value.salonsWhatsApp[c.jid]
@@ -672,11 +673,11 @@ object Moteur {
                         ?: return@withContext if (_etat.value.salonsWhatsApp.isEmpty())
                             "relais injoignable : impossible de trouver la discussion WhatsApp sur le serveur"
                         else "cette discussion WhatsApp n'est pas reliée au serveur (passerelle)"
-                    Matrix(cfg).envoyer(salon, t, idCite, mentions)
+                    Matrix(cfg).envoyer(salon, t, idCite, mentions, formater = true)
                 }
-                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions)
+                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS)
             }
-            afficherEnvoye(c, eid, t)
+            afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle))
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
@@ -705,12 +706,21 @@ object Moteur {
     }
 
     /** Peut-on envoyer un vocal dans cette conversation ? (passerelles Matrix seulement) */
-    fun vocalPossible(c: Conversation) = cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
+    fun vocalPossible(c: Conversation) = when (c.source) {
+        Source.TEAMS -> false
+        Source.ELEMENT -> cfg.relaisConfigure   // par le relais (POST /envoyer-media)
+        else -> cfg.matrixConfigure
+    }
 
     /** Envoie un message vocal enregistré — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. */
     suspend fun envoyerVocal(f: java.io.File, typeMime: String, dureeMs: Long, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!vocalPossible(c)) return@withContext "envoi de vocaux impossible pour ${c.source.libelle}"
+            if (c.source == Source.ELEMENT) {
+                val eid = Relais(cfg).envoyerMedia(c.jid, f.readBytes(), f.name, typeMime, "audio", dureeMs = dureeMs)
+                afficherEnvoye(c, eid, "", type = "audio", media = "element:$eid#$typeMime#${f.name}", duree = dureeMs / 1000.0)
+                return@withContext null
+            }
             val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
             val (eid, mxc) = Matrix(cfg).envoyerVocal(salon, f.readBytes(), typeMime, f.name, dureeMs)
             afficherEnvoye(c, eid, "", type = "audio", media = "$mxc#$typeMime", duree = dureeMs / 1000.0)
@@ -725,11 +735,16 @@ object Moteur {
     suspend fun envoyerImage(octets: ByteArray, typeMime: String, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!imagePossible(c)) return@withContext "envoi d'images impossible pour ${c.source.libelle}"
-            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val salon = (if (c.source == Source.ELEMENT) c.jid else salonPourEnvoi(c)) ?: return@withContext "discussion introuvable sur le serveur"
             val ext = when (typeMime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
             val nom = "image-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.FRANCE).format(java.util.Date()) + "." + ext
             val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size, bornes)
+            if (c.source == Source.ELEMENT) {
+                val eid = Relais(cfg).envoyerMedia(c.jid, octets, nom, typeMime, "image", largeur = bornes.outWidth, hauteur = bornes.outHeight)
+                afficherEnvoye(c, eid, "[photo]", type = "image", media = "element:$eid#$typeMime#$nom")
+                return@withContext null
+            }
             val m = Matrix(cfg)
             val mxc = m.televerser(octets, typeMime, nom)
             val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
@@ -747,6 +762,12 @@ object Moteur {
     suspend fun envoyerFichier(octets: ByteArray, typeMime: String, nom: String, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!imagePossible(c)) return@withContext "envoi de fichiers impossible pour ${c.source.libelle}"
+            if (c.source == Source.ELEMENT) {
+                val type = if (typeMime.startsWith("video/")) "video" else "fichier"
+                val eid = Relais(cfg).envoyerMedia(c.jid, octets, nom, typeMime, type)
+                afficherEnvoye(c, eid, if (type == "video") "[vidéo]" else nom, type = type, media = "element:$eid#$typeMime#$nom")
+                return@withContext null
+            }
             val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
             val m = Matrix(cfg)
             val mxc = m.televerser(octets, typeMime, nom)
@@ -763,14 +784,159 @@ object Moteur {
     }
 
     /** Le message envoyé s'affiche tout de suite (même clé que l'écho du serveur : pas de doublon). */
-    private fun afficherEnvoye(c: Conversation, eid: String, texte: String, type: String = "texte", media: String? = null, duree: Double? = null) {
+    private fun afficherEnvoye(c: Conversation, eid: String, texte: String, type: String = "texte", media: String? = null, duree: Double? = null, extra: String? = null) {
         if (eid.isNotEmpty()) runCatching {
-            archive.enregistrerMessages(listOf(Message("${c.source.id}:$eid", c.cle, System.currentTimeMillis(), true, "Vous", texte, type, media, duree)))
+            archive.enregistrerMessages(listOf(Message("${c.source.id}:$eid", c.cle, System.currentTimeMillis(), true, "Vous", texte, type, media, duree, extra)))
             recharger()
         }
         val n = _etat.value.conversations.firstOrNull { it.cle == c.cle } ?: c
         majEtat(c.cle) { it.copy(traitee = maxOf(n.derniere, c.derniere), manuel = false, lue = maxOf(n.derniere, c.derniere), forcee = 0) }
         portee.launch { delay(1500); actualiser(relancerSiOccupe = true) }
+    }
+
+    // MARK: Brouillons (gardés sur ce téléphone)
+
+    private val _brouillons = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Brouillon en cours par conversation (affiché dans la liste). */
+    val brouillons: StateFlow<Map<String, String>> get() = _brouillons
+
+    fun brouillon(conv: String): String = _brouillons.value[conv].orEmpty()
+
+    fun garderBrouillon(conv: String, texte: String?) {
+        val t = texte?.takeIf { it.isNotBlank() }
+        if (_brouillons.value[conv] == t) return
+        _brouillons.update { if (t == null) it - conv else it + (conv to t) }
+        portee.launch(Dispatchers.IO) { runCatching { archive.definirBrouillon(conv, t) } }
+    }
+
+    // MARK: Modifier un message envoyé — uniquement sur « Enregistrer la modification »
+
+    /** Délai de modification permis par chaque messagerie (ms). null = modification impossible. */
+    private fun delaiModification(s: Source): Long? = when (s) {
+        Source.ELEMENT -> Long.MAX_VALUE / 2   // Matrix : pas de limite
+        Source.WHATSAPP -> 15 * 60_000L
+        Source.SIGNAL -> 24 * 3_600_000L
+        Source.TELEGRAM -> 48 * 3_600_000L
+        else -> null
+    }
+
+    /** Peut-on modifier ce message ? (le vôtre, texte, déjà sur le serveur, dans le délai de la messagerie) */
+    fun modifiable(m: Message, c: Conversation): Boolean {
+        val delai = delaiModification(c.source) ?: return false
+        return m.deMoi && m.type == "texte" && (if (c.source == Source.ELEMENT) cfg.relaisConfigure else cfg.matrixConfigure) &&
+            m.cle.substringAfter(':').startsWith("$") &&
+            System.currentTimeMillis() - m.date < delai
+    }
+
+    /** Remplace le texte d'un de vos messages, chez vous et chez le contact. Renvoie null si c'est fait, sinon l'erreur. */
+    suspend fun modifier(m: Message, texte: String, c: Conversation): String? = withContext(Dispatchers.IO) {
+        val t = texte.trim()
+        if (t.isEmpty()) return@withContext "message vide"
+        if (t == m.texte) return@withContext null
+        if (!modifiable(m, c)) return@withContext "ce message ne peut plus être modifié"
+        try {
+            if (c.source == Source.ELEMENT) Relais(cfg).modifier(c.jid, m.cle.substringAfter(':'), t)
+            else {
+                val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+                Matrix(cfg).modifier(salon, m.cle.substringAfter(':'), t, formater = true)
+            }
+            archive.enregistrerMessages(listOf(m.copy(texte = t, extra = Extra.avec(Extra.avec(m.extra, "html", null), "modifie", true))))
+            recharger()
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    // MARK: Sondages — un vote part seulement sur votre appui
+
+    fun votePossible(c: Conversation) = cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS && c.source != Source.SMS
+
+    suspend fun voter(m: Message, c: Conversation, choix: List<String>): String? = withContext(Dispatchers.IO) {
+        val s = m.sondage ?: return@withContext "sondage illisible"
+        if (!votePossible(c)) return@withContext "vote impossible pour ${c.source.libelle}"
+        try {
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val eid = Matrix(cfg).voter(salon, m.cle.substringAfter(':'), choix, s.format)
+            archive.enregistrerVotes(listOf(Vote("${c.source.id}:${eid.ifEmpty { "local-" + System.currentTimeMillis() }}", m.cle, c.cle,
+                "Vous", true, choix, System.currentTimeMillis())))
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    // MARK: Informations du salon (lecture seule) : messages épinglés, messages éphémères
+
+    /** epingles : clés des messages épinglés (le plus récent en dernier) ; ephemere : durée en ms, apresLecture : minuterie au moment de la lecture. */
+    data class InfosSalon(val epingles: List<String>, val ephemere: Long?, val apresLecture: Boolean)
+
+    suspend fun infosSalon(c: Conversation): InfosSalon? = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || c.source == Source.ELEMENT || c.source == Source.TEAMS) return@withContext null
+        runCatching {
+            val salon = salonPourEnvoi(c) ?: return@runCatching null
+            val m = Matrix(cfg)
+            val ep = m.etatSalon(salon, "m.room.pinned_events")?.optJSONArray("pinned")
+                ?.let { a -> (0 until a.length()).map { "${c.source.id}:" + a.optString(it) } }.orEmpty()
+            val minuterie = m.etatSalon(salon, "com.beeper.disappearing_timer")
+            val duree = minuterie?.optLong("timer", 0L)?.takeIf { it > 0 }
+            InfosSalon(ep, duree, minuterie?.optString("type") == "after_read")
+        }.getOrNull()
+    }
+
+    // MARK: Nouvelle discussion par la passerelle (commande « start-chat » envoyée au robot, sur votre appui)
+
+    /** Messageries où l'on peut démarrer une discussion avec un numéro (ou un @nom Telegram). */
+    val sourcesNouvelleDiscussion = listOf(Source.WHATSAPP, Source.SIGNAL, Source.SMS, Source.TELEGRAM)
+
+    /** Salon de gestion du robot d'une passerelle (trouvé par m.direct) : (robot, salon). */
+    private fun salonRobot(m: Matrix, s: Source): Pair<String, String>? {
+        val nom = Pont.pour(s).prefixe.trim('@', '_')
+        val direct = m.get("/_matrix/client/v3/user/${Http.enc(cfg.matrixUtilisateur)}/account_data/m.direct")
+        val robot = direct.keys().asSequence().firstOrNull { k ->
+            val local = k.substringAfter('@').substringBefore(':').lowercase()
+            local.startsWith(nom) && local.endsWith("bot")
+        } ?: return null
+        val salon = direct.optJSONArray(robot)?.optString(0)?.takeIf { it.isNotEmpty() } ?: return null
+        return robot to salon
+    }
+
+    /**
+     * Demande à la passerelle d'ouvrir une discussion avec `ident` (numéro +33…, ou @nom pour Telegram).
+     * Envoie seulement la commande au robot de VOTRE serveur ; rien n'est envoyé au contact.
+     * Renvoie (clé de la conversation si elle est déjà visible, message à afficher).
+     */
+    suspend fun nouvelleDiscussion(s: Source, ident: String): Pair<String?, String> = withContext(Dispatchers.IO) {
+        if (!cfg.matrixConfigure || s !in sourcesNouvelleDiscussion) return@withContext null to "impossible pour ${s.libelle}"
+        try {
+            val m = Matrix(cfg); m.connecter()
+            val (robot, gestion) = salonRobot(m, s) ?: return@withContext null to "robot de la passerelle ${s.libelle} introuvable"
+            val depuis = System.currentTimeMillis()
+            m.envoyerContenu(gestion, org.json.JSONObject().put("msgtype", "m.text").put("body", "start-chat ${ident.trim()}"))
+            // Réponse du robot : un lien vers le salon créé (ou une erreur)
+            var salon: String? = null; var reponse: String? = null
+            repeat(15) {
+                if (salon != null || reponse != null) return@repeat
+                delay(1500)
+                val r = runCatching { m.get("/_matrix/client/v3/rooms/${Http.enc(gestion)}/messages?dir=b&limit=10") }.getOrNull() ?: return@repeat
+                val ev = r.optJSONArray("chunk")?.objets()?.firstOrNull {
+                    it.optString("sender") == robot && it.optString("type") == "m.room.message" && (it.ts("origin_server_ts") ?: 0) >= depuis - 5_000
+                } ?: return@repeat
+                val ct = ev.optJSONObject("content")
+                val tout = ct?.optString("body").orEmpty() + " " + ct?.optString("formatted_body").orEmpty()
+                salon = Regex("""![A-Za-z0-9._=\-]+:[A-Za-z0-9.\-]+(:\d+)?""").find(runCatching { java.net.URLDecoder.decode(tout, "UTF-8") }.getOrDefault(tout))?.value
+                reponse = ct?.optString("body")?.lines()?.firstOrNull { it.isNotBlank() }?.take(200)
+            }
+            val id = salon ?: return@withContext null to (reponse?.let { "Réponse de la passerelle : $it" } ?: "pas de réponse de la passerelle ${s.libelle}")
+            runCatching { m.rejoindre(id) }
+            actualiser(relancerSiOccupe = true)
+            // Conversation correspondante (WhatsApp : via la correspondance du relais)
+            repeat(6) {
+                val e = _etat.value
+                val jid = if (s == Source.WHATSAPP) e.salonsWhatsApp.entries.firstOrNull { it.value == id }?.key else id
+                e.conversations.firstOrNull { it.source == s && it.jid == jid }?.let { return@withContext it.cle to "Discussion ouverte" }
+                delay(2500)
+                if (s == Source.WHATSAPP) runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { memoriserSalonsWhatsApp(it) }
+                actualiser(relancerSiOccupe = true)
+            }
+            null to "Discussion créée : elle apparaîtra dans la liste après votre premier message ou à la prochaine synchronisation"
+        } catch (e: Exception) { null to (e.message ?: e.toString()) }
     }
 
     /** Garde la correspondance salon Matrix → discussion WhatsApp (aussi dans l'archive, pour envoyer dès l'ouverture). */

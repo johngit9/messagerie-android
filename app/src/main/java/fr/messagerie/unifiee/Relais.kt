@@ -77,7 +77,7 @@ class Relais(private val cfg: Config) {
                     l.optString("nom_salon").takeIf { it.isNotEmpty() && it != "null" } ?: "Element",
                     l.optInt("est_groupe") == 1, 0, emptyList())
                 convs[conv.cle] = conv
-                val type = l.optString("type").ifEmpty { "texte" }.let { if (it == "position") "autre" else it }
+                val type = l.optString("type").ifEmpty { "texte" }
                 var duree: Double? = null
                 var media: String? = null
                 l.optString("media").takeIf { it.isNotEmpty() && it != "null" }?.let { brut ->
@@ -88,8 +88,13 @@ class Relais(private val cfg: Config) {
                     }
                 }
                 val deMoi = l.optInt("de_moi") == 1
+                // Réponse : message cité, si le relais le fournit (champ reponse_a)
+                val cite = l.optString("reponse_a").takeIf { it.startsWith("$") }?.let { "Element:$it" }
+                val geo = l.optString("geo").takeIf { it.startsWith("geo:") }
                 lot.add(Message(cle, conv.cle, l.ts("ts") ?: 0, deMoi,
-                    if (deMoi) "Vous" else l.optString("auteur").ifEmpty { "?" }, l.optString("texte"), type, media, duree))
+                    if (deMoi) "Vous" else l.optString("auteur").ifEmpty { "?" },
+                    if (cite != null) sansCitation(l.optString("texte")) else l.optString("texte"), type, media, duree,
+                    Extra.de("cite" to cite, "geo" to geo)))
             }
             archive.enregistrerConversations(convs.values.toList())
             archive.enregistrerMessages(lot)
@@ -147,12 +152,45 @@ class Relais(private val cfg: Config) {
     }
 
     /** Envoie une réponse Element — UNIQUEMENT sur le bouton « Envoyer ». */
-    fun envoyer(salon: String, texte: String, reponseA: String?) {
+    fun envoyer(salon: String, texte: String, reponseA: String?): String {
         connecter()
         val d = JSONObject().put("salon", salon).put("texte", texte)
         if (reponseA != null) d.put("reponse_a", reponseA)
         val r = Http.requete("$base/envoyer", "POST", jeton, d.toString(), 20_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /**
+     * Envoie une photo, une vidéo, un vocal ou un fichier dans Element — UNIQUEMENT sur « Envoyer » de l'aperçu.
+     * type : image, video, audio, fichier. Renvoie l'identifiant du message.
+     */
+    fun envoyerMedia(salon: String, octets: ByteArray, nom: String, mimetype: String, type: String,
+                     dureeMs: Long? = null, largeur: Int? = null, hauteur: Int? = null): String {
+        connecter()
+        val d = JSONObject().put("salon", salon).put("nom", nom).put("mimetype", mimetype).put("type", type)
+            .put("donnees", android.util.Base64.encodeToString(octets, android.util.Base64.NO_WRAP))
+        if (dureeMs != null) d.put("duree", dureeMs)
+        if (largeur != null && largeur > 0) d.put("largeur", largeur)
+        if (hauteur != null && hauteur > 0) d.put("hauteur", hauteur)
+        val r = Http.requete("$base/envoyer-media", "POST", jeton, d.toString(), 120_000)
+        if (r.code == 413) throw Exception("fichier trop lourd pour le relais (50 Mo au plus)")
+        if (r.code == 404) throw Exception("le relais Element ne sait pas encore envoyer de fichiers")
+        if (r.code != 200) throw ErreurHttp(r.code, "envoi du fichier")
+        return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
+    }
+
+    /** Modifie un de VOS messages texte Element (m.replace) — UNIQUEMENT sur « Enregistrer la modification ». */
+    fun modifier(salon: String, eventId: String, texte: String) {
+        connecter()
+        val d = JSONObject().put("salon", salon).put("event_id", eventId).put("texte", texte)
+        val r = Http.requete("$base/modifier", "POST", jeton, d.toString(), 20_000)
+        when (r.code) {
+            200 -> {}
+            403 -> throw Exception("seuls vos propres messages peuvent être modifiés")
+            404 -> throw Exception("message introuvable (ou relais pas encore à jour)")
+            else -> throw ErreurHttp(r.code, "modification")
+        }
     }
 
     /**

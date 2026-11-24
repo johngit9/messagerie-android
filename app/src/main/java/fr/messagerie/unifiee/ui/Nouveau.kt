@@ -59,6 +59,8 @@ import androidx.compose.ui.unit.sp
 import fr.messagerie.unifiee.Conversation
 import fr.messagerie.unifiee.Etat
 import fr.messagerie.unifiee.Source
+import fr.messagerie.unifiee.Moteur
+import kotlinx.coroutines.launch
 import java.text.Normalizer
 
 /** Un contact = ses discussions à deux, toutes messageries confondues. */
@@ -100,6 +102,20 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
         base.filter { it.estGroupe && (r.isEmpty() || normaliser(it.nom).contains(r)) }.sortedByDescending { it.derniere }.take(60)
     }
     val tel = numero(q)
+    // Pseudo Telegram (@nom) : discussion ouverte par la passerelle Telegram
+    val pseudoTelegram = Regex("^@[A-Za-z][A-Za-z0-9_]{4,31}$").matches(q.trim()) && Moteur.cfg.matrixConfigure
+    val portee = androidx.compose.runtime.rememberCoroutineScope()
+    var demande by remember { mutableStateOf<Pair<Source, String>?>(null) }
+    var enCours by remember { mutableStateOf(false) }
+    var resultat by remember { mutableStateOf<String?>(null) }
+    fun demarrer(s: Source, ident: String) {
+        enCours = true; resultat = null
+        portee.launch {
+            val (cle, texte) = Moteur.nouvelleDiscussion(s, ident)
+            enCours = false
+            if (cle != null) ouvrir(cle) else resultat = texte
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -146,14 +162,38 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                             Text("+$tel", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$tel"))) }
-                            }) { LogoSource(Source.WHATSAPP, 20.dp); Spacer(Modifier.width(8.dp)); Text("WhatsApp") }
-                            OutlinedButton(onClick = {
-                                runCatching { ctx.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("sms:+$tel"))) }
-                            }) { LogoSource(Source.SMS, 20.dp); Spacer(Modifier.width(8.dp)); Text("SMS") }
+                        if (Moteur.cfg.matrixConfigure) {
+                            Text("Écrire dans Messagerie avec :", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(Source.WHATSAPP, Source.SIGNAL, Source.SMS, Source.TELEGRAM).forEach { s ->
+                                    OutlinedButton(onClick = { demande = s to "+$tel" }, enabled = !enCours) {
+                                        LogoSource(s, 20.dp); Spacer(Modifier.width(8.dp)); Text(s.id)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
                         }
+                        Text("Ou ouvrir l'appli officielle :", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            androidx.compose.material3.TextButton(onClick = {
+                                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$tel"))) }
+                            }) { Text("WhatsApp") }
+                            androidx.compose.material3.TextButton(onClick = {
+                                runCatching { ctx.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("sms:+$tel"))) }
+                            }) { Text("Messages") }
+                        }
+                    }
+                }
+                if (pseudoTelegram) item(key = "pseudo") {
+                    OutlinedButton(onClick = { demande = Source.TELEGRAM to q.trim() }, enabled = !enCours, modifier = Modifier.fillMaxWidth()) {
+                        LogoSource(Source.TELEGRAM, 20.dp); Spacer(Modifier.width(8.dp)); Text("Écrire à ${q.trim()} sur Telegram")
+                    }
+                }
+                if (enCours || resultat != null) item(key = "resultat") {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (enCours) { androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)) }
+                        Text(if (enCours) "La passerelle ouvre la discussion…" else resultat.orEmpty(), fontSize = 13.sp)
                     }
                 }
                 if (contacts.isNotEmpty()) item(key = "t-contacts") { Titre("Contacts") }
@@ -188,6 +228,16 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+    demande?.let { (src, ident) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { demande = null },
+            title = { Text("Nouvelle discussion ${src.libelle}") },
+            text = { Text("Votre serveur demande à la passerelle ${src.libelle} d'ouvrir une discussion avec $ident. " +
+                "Aucun message n'est envoyé au contact : vous écrirez ensuite le premier message.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { demande = null; demarrer(src, ident) }) { Text("Ouvrir la discussion") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { demande = null }) { Text("Annuler") } },
+        )
     }
 }
 
