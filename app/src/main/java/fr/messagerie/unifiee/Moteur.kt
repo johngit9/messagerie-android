@@ -642,7 +642,7 @@ object Moteur {
         try {
             val eid: String = when (c.source) {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
-                Source.ELEMENT -> { Relais(cfg).envoyer(c.jid, t, idCite); "" }
+                Source.ELEMENT -> Relais(cfg).envoyer(c.jid, t, idCite)
                 Source.WHATSAPP -> {
                     // Correspondance discussion → salon : en mémoire, sinon redemandée au relais tout de suite
                     val salon = _etat.value.salonsWhatsApp[c.jid]
@@ -671,12 +671,21 @@ object Moteur {
     }
 
     /** Peut-on envoyer un vocal dans cette conversation ? (passerelles Matrix seulement) */
-    fun vocalPossible(c: Conversation) = cfg.matrixConfigure && c.source != Source.ELEMENT && c.source != Source.TEAMS
+    fun vocalPossible(c: Conversation) = when (c.source) {
+        Source.TEAMS -> false
+        Source.ELEMENT -> cfg.relaisConfigure   // par le relais (POST /envoyer-media)
+        else -> cfg.matrixConfigure
+    }
 
     /** Envoie un message vocal enregistré — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu. */
     suspend fun envoyerVocal(f: java.io.File, typeMime: String, dureeMs: Long, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!vocalPossible(c)) return@withContext "envoi de vocaux impossible pour ${c.source.libelle}"
+            if (c.source == Source.ELEMENT) {
+                val eid = Relais(cfg).envoyerMedia(c.jid, f.readBytes(), f.name, typeMime, "audio", dureeMs = dureeMs)
+                afficherEnvoye(c, eid, "", type = "audio", media = "element:$eid#$typeMime#${f.name}", duree = dureeMs / 1000.0)
+                return@withContext null
+            }
             val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
             val (eid, mxc) = Matrix(cfg).envoyerVocal(salon, f.readBytes(), typeMime, f.name, dureeMs)
             afficherEnvoye(c, eid, "", type = "audio", media = "$mxc#$typeMime", duree = dureeMs / 1000.0)
@@ -691,11 +700,16 @@ object Moteur {
     suspend fun envoyerImage(octets: ByteArray, typeMime: String, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!imagePossible(c)) return@withContext "envoi d'images impossible pour ${c.source.libelle}"
-            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val salon = (if (c.source == Source.ELEMENT) c.jid else salonPourEnvoi(c)) ?: return@withContext "discussion introuvable sur le serveur"
             val ext = when (typeMime) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
             val nom = "image-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.FRANCE).format(java.util.Date()) + "." + ext
             val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size, bornes)
+            if (c.source == Source.ELEMENT) {
+                val eid = Relais(cfg).envoyerMedia(c.jid, octets, nom, typeMime, "image", largeur = bornes.outWidth, hauteur = bornes.outHeight)
+                afficherEnvoye(c, eid, "[photo]", type = "image", media = "element:$eid#$typeMime#$nom")
+                return@withContext null
+            }
             val m = Matrix(cfg)
             val mxc = m.televerser(octets, typeMime, nom)
             val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
@@ -713,6 +727,12 @@ object Moteur {
     suspend fun envoyerFichier(octets: ByteArray, typeMime: String, nom: String, c: Conversation): String? = withContext(Dispatchers.IO) {
         try {
             if (!imagePossible(c)) return@withContext "envoi de fichiers impossible pour ${c.source.libelle}"
+            if (c.source == Source.ELEMENT) {
+                val type = if (typeMime.startsWith("video/")) "video" else "fichier"
+                val eid = Relais(cfg).envoyerMedia(c.jid, octets, nom, typeMime, type)
+                afficherEnvoye(c, eid, if (type == "video") "[vidéo]" else nom, type = type, media = "element:$eid#$typeMime#$nom")
+                return@withContext null
+            }
             val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
             val m = Matrix(cfg)
             val mxc = m.televerser(octets, typeMime, nom)
@@ -758,6 +778,7 @@ object Moteur {
 
     /** Délai de modification permis par chaque messagerie (ms). null = modification impossible. */
     private fun delaiModification(s: Source): Long? = when (s) {
+        Source.ELEMENT -> Long.MAX_VALUE / 2   // Matrix : pas de limite
         Source.WHATSAPP -> 15 * 60_000L
         Source.SIGNAL -> 24 * 3_600_000L
         Source.TELEGRAM -> 48 * 3_600_000L
@@ -767,7 +788,8 @@ object Moteur {
     /** Peut-on modifier ce message ? (le vôtre, texte, déjà sur le serveur, dans le délai de la messagerie) */
     fun modifiable(m: Message, c: Conversation): Boolean {
         val delai = delaiModification(c.source) ?: return false
-        return m.deMoi && m.type == "texte" && cfg.matrixConfigure && m.cle.substringAfter(':').startsWith("$") &&
+        return m.deMoi && m.type == "texte" && (if (c.source == Source.ELEMENT) cfg.relaisConfigure else cfg.matrixConfigure) &&
+            m.cle.substringAfter(':').startsWith("$") &&
             System.currentTimeMillis() - m.date < delai
     }
 
@@ -778,8 +800,11 @@ object Moteur {
         if (t == m.texte) return@withContext null
         if (!modifiable(m, c)) return@withContext "ce message ne peut plus être modifié"
         try {
-            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
-            Matrix(cfg).modifier(salon, m.cle.substringAfter(':'), t, formater = true)
+            if (c.source == Source.ELEMENT) Relais(cfg).modifier(c.jid, m.cle.substringAfter(':'), t)
+            else {
+                val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+                Matrix(cfg).modifier(salon, m.cle.substringAfter(':'), t, formater = true)
+            }
             archive.enregistrerMessages(listOf(m.copy(texte = t, extra = Extra.avec(Extra.avec(m.extra, "html", null), "modifie", true))))
             recharger()
             null
