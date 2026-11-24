@@ -915,6 +915,8 @@ private fun expliquerPanne(p: fr.messagerie.unifiee.Surveillance.Panne): Pair<St
 @Composable
 private fun FichePannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, fermer: () -> Unit, ouvrirReglages: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    var reconnexion by remember { mutableStateOf(false) }
+    if (reconnexion) DialogueReconnexionWhatsApp { reconnexion = false }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = fermer,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
@@ -947,10 +949,113 @@ private fun FichePannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, 
                 }
                 if (pannes.size > 1) HorizontalDivider()
             }
+            if (pannes.any { it.source == Source.WHATSAPP } && Moteur.cfg.relaisConfigure) {
+                androidx.compose.material3.Button(onClick = { reconnexion = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                    Text("Reconnecter WhatsApp depuis ce téléphone")
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = ouvrirReglages) { Text("État des messageries") }
                 TextButton(onClick = fermer) { Text("Fermer") }
             }
         }
     }
+}
+
+/**
+ * Reconnexion WhatsApp par code d'association : le serveur demande un code pour votre numéro,
+ * vous le saisissez dans WhatsApp > Appareils connectés > Connecter un appareil > « Lier avec le numéro de téléphone ».
+ * Rien n'est envoyé à vos contacts.
+ */
+@Composable
+private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
+    val cfg = Moteur.cfg
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val portee = rememberCoroutineScope()
+    val cs = MaterialTheme.colorScheme
+    var numero by remember { mutableStateOf(cfg.telephoneWhatsApp.ifEmpty { "+33" }) }
+    var etape by remember { mutableStateOf("saisie") }      // saisie, demande, code, connecte, erreur
+    var association by remember { mutableStateOf<fr.messagerie.unifiee.Relais.Association?>(null) }
+    var detail by remember { mutableStateOf("") }
+    fun quitter() {
+        val a = association
+        if (etape == "code" && a != null) portee.launch(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.Relais(cfg).annulerConnexionWhatsApp(a.id) }
+        fermer()
+    }
+    // Attente de la saisie du code dans WhatsApp
+    androidx.compose.runtime.LaunchedEffect(association) {
+        val a = association ?: return@LaunchedEffect
+        val fin = System.currentTimeMillis() + 5 * 60_000L
+        while (etape == "code" && System.currentTimeMillis() < fin) {
+            val (e, d) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { fr.messagerie.unifiee.Relais(cfg).etatConnexionWhatsApp(a.id) }.getOrElse { "attente" to "" }
+            }
+            when (e) {
+                "connecte" -> { etape = "connecte"; Moteur.actualiserMaintenant(); runCatching { fr.messagerie.unifiee.Surveillance.verifier(force = true) } }
+                "erreur" -> { etape = "erreur"; detail = d.ifBlank { "La liaison a échoué." } }
+                else -> kotlinx.coroutines.delay(2_000)
+            }
+        }
+        if (etape == "code") { etape = "erreur"; detail = "Le code a expiré. Demandez-en un nouveau." }
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { quitter() },
+        icon = { LogoSource(Source.WHATSAPP, 36.dp) },
+        title = { Text(when (etape) { "connecte" -> "WhatsApp est reconnecté"; "code" -> "Saisissez ce code dans WhatsApp"; else -> "Reconnecter WhatsApp" }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when (etape) {
+                    "saisie", "demande" -> {
+                        Text("Votre numéro WhatsApp, au format international. Le serveur demande un code à WhatsApp ; " +
+                            "vous le saisirez ensuite dans l'appli WhatsApp de ce téléphone.", fontSize = 14.sp)
+                        androidx.compose.material3.OutlinedTextField(value = numero, onValueChange = { numero = it.filter { c -> c.isDigit() || c == '+' || c == ' ' } },
+                            label = { Text("Numéro") }, singleLine = true, enabled = etape == "saisie",
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
+                            modifier = Modifier.fillMaxWidth())
+                        if (etape == "demande") Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text("Demande du code…", fontSize = 14.sp)
+                        }
+                    }
+                    "code" -> {
+                        val code = association?.code.orEmpty()
+                        Text(code, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.fillMaxWidth().background(cs.surfaceContainerHigh, RoundedCornerShape(14.dp)).padding(vertical = 14.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text("1. Ouvrez WhatsApp > ⋮ > Appareils connectés > Connecter un appareil.\n" +
+                            "2. Touchez « Lier avec le numéro de téléphone » (sous le lecteur de QR code).\n" +
+                            "3. Saisissez le code ci-dessus. Cette fenêtre se met à jour toute seule.", fontSize = 14.sp, lineHeight = 20.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp))
+                            Text("En attente de WhatsApp…", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        }
+                    }
+                    "connecte" -> Text("Les messages WhatsApp arrivent de nouveau dans Messagerie (rattrapage en cours).", fontSize = 14.sp)
+                    else -> Text(detail, fontSize = 14.sp, color = cs.error)
+                }
+            }
+        },
+        confirmButton = {
+            when (etape) {
+                "saisie", "demande" -> TextButton(enabled = etape == "saisie" && numero.count { it.isDigit() } >= 8, onClick = {
+                    val tel = numero.filter { it.isDigit() || it == '+' }
+                    cfg.telephoneWhatsApp = tel
+                    etape = "demande"
+                    portee.launch {
+                        runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fr.messagerie.unifiee.Relais(cfg).demarrerConnexionWhatsApp(tel) } }
+                            .onSuccess { association = it; etape = "code" }
+                            .onFailure { detail = "Impossible d'obtenir un code : " + (it.message ?: "erreur"); etape = "erreur" }
+                    }
+                }) { Text("Obtenir le code") }
+                "code" -> TextButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Code WhatsApp", association?.code.orEmpty()))
+                    ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")?.let { runCatching { ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                }) { Text("Copier et ouvrir WhatsApp") }
+                "erreur" -> TextButton(onClick = { association = null; etape = "saisie" }) { Text("Réessayer") }
+                else -> TextButton(onClick = fermer) { Text("Terminé") }
+            }
+        },
+        dismissButton = { if (etape != "connecte") TextButton(onClick = { quitter() }) { Text("Annuler") } },
+    )
 }

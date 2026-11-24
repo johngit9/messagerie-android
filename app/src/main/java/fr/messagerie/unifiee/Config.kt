@@ -64,6 +64,8 @@ class Config(context: Context) {
     /** Appel reçu sur une messagerie : ouvrir l'appli officielle pour décrocher (Messagerie ne gère pas les appels). */
     var appelsOfficiels: Boolean get() = p.getBoolean("appelsOfficiels", true); set(v) = p.edit().putBoolean("appelsOfficiels", v).apply()
     /** Mode vacances : aucune notification pour les messageries et conversations rangées en Pro. */
+    /** Votre numéro WhatsApp (saisi à la reconnexion, gardé sur ce téléphone pour la prochaine fois). */
+    var telephoneWhatsApp: String get() = s("telephoneWhatsApp"); set(v) = set("telephoneWhatsApp", v)
     var vacances: Boolean get() = p.getBoolean("vacances", false); set(v) = p.edit().putBoolean("vacances", v).apply()
     /** Date du dernier changement du mode vacances (ici ou sur un autre appareil), pour la synchro. */
     var vacancesDate: Long get() = p.getLong("vacancesDate", 0L); set(v) = p.edit().putLong("vacancesDate", v).apply()

@@ -159,6 +159,36 @@ class Relais(private val cfg: Config) {
      * Marque lu dans Element, en PRIVÉ seulement (m.read.private / m.fully_read) :
      * vos contacts ne voient pas que vous avez lu. Appelé quand vous lisez dans Messagerie.
      */
+    // MARK: Reconnexion WhatsApp par code d'association (le relais parle à la passerelle du serveur)
+
+    data class Association(val id: String, val code: String)
+
+    /** Demande un code d'association pour ce numéro (à saisir dans WhatsApp > Appareils connectés > Lier avec le numéro). */
+    fun demarrerConnexionWhatsApp(telephone: String): Association {
+        connecter()
+        val r = Http.requete("$base/whatsapp/connexion/demarrer", "POST", jeton, JSONObject().put("telephone", telephone).toString(), 100_000)   // jusqu'à ~60 s côté WhatsApp
+        val j = runCatching { JSONObject(r.texte) }.getOrNull()
+        if (r.code != 200 || j == null) throw Exception(listOfNotNull(j?.optString("erreur")?.ifBlank { null }, j?.optString("detail")?.ifBlank { null }).joinToString(" : ").ifBlank { null }
+            ?: if (r.code == 404) "le relais du serveur ne gère pas encore la reconnexion" else "erreur ${r.code}")
+        val code = j.optString("code")
+        if (code.isBlank()) throw Exception(j.optString("detail").ifBlank { "aucun code reçu" })
+        return Association(j.optString("id"), code)
+    }
+
+    /** « attente », « connecte » ou « erreur », avec un détail. Attend au plus ~25 s côté serveur. */
+    fun etatConnexionWhatsApp(id: String): Pair<String, String> {
+        connecter()
+        val r = Http.requete("$base/whatsapp/connexion/etat?attendre=20&id=" + Http.enc(id), jeton = jeton, delaiMs = 40_000)
+        if (r.code == 404) return "erreur" to "Demande expirée sur le serveur. Demandez un nouveau code."
+        val j = runCatching { JSONObject(r.texte) }.getOrNull() ?: return "erreur" to "réponse illisible (${r.code})"
+        return j.optString("etat", "erreur") to j.optString("detail")
+    }
+
+    fun annulerConnexionWhatsApp(id: String) {
+        connecter()
+        runCatching { Http.requete("$base/whatsapp/connexion/annuler", "POST", jeton, JSONObject().put("id", id).toString(), 10_000) }
+    }
+
     fun luPrive(salon: String, eventId: String) {
         connecter()
         val d = JSONObject().put("salon", salon).put("event_id", eventId)
