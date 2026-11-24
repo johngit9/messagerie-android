@@ -813,14 +813,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                     if (ok) runCatching { enregistreur.demarrer(); vocal = 1 }.onFailure { afficher("Micro indisponible") }
                                     else demandeMicro.launch(android.Manifest.permission.RECORD_AUDIO)
                                 } else {
-                                    envoi = true
-                                    portee.launch {
-                                        val err = Moteur.envoyer(brouillon, c, reponseA, mentions)
-                                        envoi = false
-                                        if (err == null) {
-                                            brouillon = ""; versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
-                                            afficher(if (c.source == Source.SMS) "SMS envoyé" else "Message envoyé")
-                                        } else afficher("Échec : $err")
+                                    // Envoi immédiat : le champ se vide tout de suite ; texte remis seulement en cas d'échec
+                                    val texte = brouillon; val cite = reponseA; val ments = mentions
+                                    brouillon = ""; champ = androidx.compose.ui.text.input.TextFieldValue("")
+                                    versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
+                                    Moteur.envoyerEnFond(texte, c, cite, ments) { err ->
+                                        if (err != null && brouillon.isBlank()) { brouillon = texte; reponseA = cite; mentions = ments }
                                     }
                                 }
                             }, contentAlignment = Alignment.Center) {

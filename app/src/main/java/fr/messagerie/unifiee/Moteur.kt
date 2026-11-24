@@ -681,6 +681,20 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    /**
+     * Envoi sans attendre (appui sur « Envoyer ») : l'écran vide le champ tout de suite, l'envoi continue même si
+     * vous quittez la conversation. En cas d'échec, apres(erreur) est appelé sur le fil d'affichage et un message s'affiche.
+     */
+    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, apres: (String?) -> Unit) {
+        portee.launch {
+            val err = envoyer(texte, c, cite, mentions)
+            withContext(Dispatchers.Main) {
+                if (err != null) android.widget.Toast.makeText(app, "Message non envoyé : $err", android.widget.Toast.LENGTH_LONG).show()
+                runCatching { apres(err) }
+            }
+        }
+    }
+
     /** Salon Matrix d'une conversation (WhatsApp : via la correspondance du relais). */
     private fun salonPourEnvoi(c: Conversation): String? = when (c.source) {
         Source.WHATSAPP -> _etat.value.salonsWhatsApp[c.jid]
