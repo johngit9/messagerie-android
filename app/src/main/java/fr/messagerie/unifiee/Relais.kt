@@ -197,6 +197,33 @@ class Relais(private val cfg: Config) {
      * Marque lu dans Element, en PRIVÉ seulement (m.read.private / m.fully_read) :
      * vos contacts ne voient pas que vous avez lu. Appelé quand vous lisez dans Messagerie.
      */
+    // MARK: Mon profil (nom affiché sur chaque réseau)
+
+    data class Profil(val reseau: String, val nom: String, val identifiant: String, val connecte: Boolean, val modifiable: Boolean, val raison: String)
+
+    fun profils(): Pair<List<Profil>, Int> {
+        connecter()
+        val j = get("/profil", 15_000)
+        val o = j.optJSONObject("profils") ?: JSONObject()
+        val l = o.keys().asSequence().map { k ->
+            val p = o.optJSONObject(k) ?: JSONObject()
+            Profil(k, p.optString("nom"), p.optString("identifiant"), p.optBoolean("connecte"), p.optBoolean("modifiable"), p.optString("raison"))
+        }.toList()
+        return l to j.optInt("nom_max", 64)
+    }
+
+    /** Change VOTRE nom affiché sur ce réseau — uniquement sur appui explicite. */
+    fun changerNomProfil(reseau: String, nom: String) {
+        connecter()
+        val r = Http.requete("$base/profil", "POST", jeton, JSONObject().put("reseau", reseau).put("nom", nom).toString(), 30_000)
+        if (r.code != 200) {
+            val j = runCatching { JSONObject(r.texte) }.getOrNull()
+            throw Exception(j?.optString("erreur")?.ifBlank { null } ?: j?.optString("detail")?.ifBlank { null } ?: when (r.code) {
+                409 -> "réseau non connecté"; 501 -> "non pris en charge"; 502 -> "refusé par la passerelle"; else -> "erreur ${r.code}"
+            })
+        }
+    }
+
     // MARK: Reconnexion WhatsApp par code d'association (le relais parle à la passerelle du serveur)
 
     data class Association(val id: String, val code: String)

@@ -123,6 +123,7 @@ import java.util.Locale
 
 private enum class Page(val titre: String, val icone: ImageVector, val couleur: Long, val motsCles: String) {
     Connexions("Serveur et relais", Icons.Outlined.Dns, 0xFF0C8599, "matrix synapse passerelle whatsapp sms telegram signal linkedin element relais teams adresse jeton connexion"),
+    Profil("Mon profil", Icons.Outlined.Person, 0xFF0DBD8C, "nom profil pseudo affiché element whatsapp telegram signal linkedin"),
     IA("Intelligence artificielle", Icons.Outlined.AutoAwesome, 0xFFE67700, "ollama ia résumé suggestion modèle"),
     Messageries("Messageries, Pro et Perso", Icons.Outlined.Forum, 0xFF3B5BDB, "pro perso espace source whatsapp sms telegram signal linkedin element teams notification couleur silence"),
     Affichage("Apparence et couleurs", Icons.Outlined.Palette, 0xFF9C36B5, "thème sombre clair couleur taille texte zoom bandeau material you design police typo caractères icône fond"),
@@ -184,6 +185,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
                 when (p) {
                     Page.Connexions -> PageConnexions(e, version) { connexionsModifiees = true }
                     Page.IA -> PageIA(version)
+                    Page.Profil -> PageProfil()
                     Page.Messageries -> PageMessageries(e) { aller(it) }
                     Page.Affichage -> PageAffichage()
                     Page.Notifications -> PageNotifications(version)
@@ -254,6 +256,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
             },
             "Element " + if (!cfg.relaisConfigure) "non configuré" else (resume(Source.ELEMENT)?.lowercase() ?: "configuré"),
         ).joinToString(" · ")),
+        Page.Profil to Entree(Page.Profil, "Votre nom affiché sur chaque messagerie"),
         Page.IA to Entree(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée"),
         Page.Statistiques to Entree(Page.Statistiques, "${e.statistiques.values.sumOf { it.second }} messages archivés · délai de réception"),
         Page.Fichier to Entree(Page.Fichier, "Importer, exporter" + if (n > 0) " · $n import(s) mémorisé(s)" else ""),
@@ -329,6 +332,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                 Rubrique(entrees.getValue(Page.Messageries), ouvrir)
                 Rubrique(entrees.getValue(Page.Notifications), ouvrir, separateur = true)
                 Rubrique(entrees.getValue(Page.Confidentialite), ouvrir, separateur = true)
+                Rubrique(entrees.getValue(Page.Profil), ouvrir, separateur = true)
             }
             Groupe("Apparence") {
                 Rubrique(entrees.getValue(Page.Affichage), ouvrir)
