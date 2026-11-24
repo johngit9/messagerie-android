@@ -44,6 +44,8 @@ data class Etat(
     val rcs: Set<String> = emptySet(),
     /** Conversation → date jusqu'à laquelle le contact a lu vos messages (si la messagerie le transmet). */
     val lusParContacts: Map<String, Long> = emptyMap(),
+    /** Date du dernier « distribué » (reçu sur le téléphone du contact) par conversation, si la passerelle le transmet. */
+    val recusParContacts: Map<String, Long> = emptyMap(),
     /** Date de la dernière mention de vous (@) par conversation. */
     val mentions: Map<String, Long> = emptyMap(),
     val salonsWhatsApp: Map<String, String> = emptyMap(),   // jid WhatsApp → salon Matrix
@@ -357,6 +359,10 @@ object Moteur {
                 val avant = archive.curseur("luPar.$conv")?.toLongOrNull() ?: 0
                 if (ts > avant) archive.definirCurseur("luPar.$conv", ts.toString())
             }
+            for ((conv, ts) in s.recusParContacts) {
+                val avant = archive.curseur("recuPar.$conv")?.toLongOrNull() ?: 0
+                if (ts > avant) archive.definirCurseur("recuPar.$conv", ts.toString())
+            }
             runCatching { s.completerHistorique() }
             runCatching { s.reparerPiecesJointes() }
             if (avecRcs) s.rcs?.let { r ->
@@ -399,6 +405,7 @@ object Moteur {
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources, risques = risques,
             etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
+            recusParContacts = archive.curseurs("recuPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
             mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
     }
 

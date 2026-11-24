@@ -496,6 +496,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             reagir = { emoji -> vm.reagir(l.m, c, emoji) { afficher(it) } },
                             afficherMessage = { afficher(it) },
                             luParContact = e.lusParContacts[c.cle] ?: 0L,
+                            recuParContact = e.recusParContacts[c.cle] ?: 0L,
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
                             basculer = { basculerSelection(l.m) },
                             supprimer = { aSupprimer = setOf(l.m.cle) }) } } }
@@ -937,6 +938,7 @@ private fun Bulle(
     repondre: () -> Unit, copier: (Context) -> Unit, reagir: (String?) -> Unit,
     afficherMessage: (String) -> Unit = {},
     luParContact: Long = 0,
+    recuParContact: Long = 0,
     modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
     supprimer: () -> Unit = {},
 ) {
@@ -977,13 +979,14 @@ private fun Bulle(
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                 Text(heure(m.date), fontSize = 10.sp, color = couleur.copy(alpha = 0.7f))
-                // Statut de vos messages : ✓ envoyé, ✓✓ lu par le contact (si la messagerie le transmet)
+                // Statut de vos messages : ✓ envoyé, ✓✓ gris distribué, ✓✓ bleu lu (si la messagerie le transmet)
                 if (moi && c.source != Source.TEAMS) {
                     val lu = luParContact >= m.date && luParContact > 0
+                    val recu = lu || (recuParContact >= m.date && recuParContact > 0)
                     Spacer(Modifier.width(3.dp))
-                    Text(if (lu) "✓✓" else "✓", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    Text(if (recu) "✓✓" else "✓", fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         color = if (lu) Color(0xFF7FD4FF) else couleur.copy(alpha = 0.7f),
-                        modifier = Modifier.semantics { contentDescription = if (lu) "Lu" else "Envoyé" })
+                        modifier = Modifier.semantics { contentDescription = when { lu -> "Lu"; recu -> "Distribué"; else -> "Envoyé" } })
                 }
             }
         }
