@@ -183,7 +183,9 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     val demande = cleDemandee.value
     androidx.compose.runtime.LaunchedEffect(demande) {
         if (demande != null && Moteur.cfg.configure) {
-            nav.navigate("conversation/" + Uri.encode(demande)) { launchSingleTop = true }
+            // Pas de launchSingleTop : depuis une autre conversation, il garderait l'ancienne (même destination)
+            if (nav.currentBackStackEntry?.arguments?.getString("cle") != demande)
+                nav.navigate("conversation/" + Uri.encode(demande)) { popUpTo("liste") }
             cleDemandee.value = null
         }
     }

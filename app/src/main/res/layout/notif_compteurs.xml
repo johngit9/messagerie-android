@@ -4,7 +4,6 @@
     android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
     <TextView android:id="@+id/notif_titre" android:layout_width="match_parent" android:layout_height="wrap_content"
         style="@style/TextAppearance.Compat.Notification.Title" android:maxLines="1" android:ellipsize="end" />
-    <ImageView android:id="@+id/notif_bande" android:layout_width="wrap_content" android:layout_height="26dp"
-        android:layout_marginTop="6dp" android:adjustViewBounds="true" android:scaleType="fitStart"
-        android:importantForAccessibility="no" />
+    <LinearLayout android:id="@+id/notif_bande" android:layout_width="wrap_content" android:layout_height="26dp"
+        android:layout_marginTop="6dp" android:orientation="horizontal" />
 </LinearLayout>

@@ -88,8 +88,19 @@ object Pastille {
         val vue = if (liste.isEmpty()) null else runCatching {
             RemoteViews(ctx.packageName, R.layout.notif_compteurs).apply {
                 setTextViewText(R.id.notif_titre, titre)
-                setImageViewBitmap(R.id.notif_bande, bande(ctx, liste))
-                setContentDescription(R.id.notif_bande, resume)
+                // Une pastille par messagerie, chacune ouvre la liste filtrée sur sa messagerie
+                removeAllViews(R.id.notif_bande)
+                liste.forEach { (s, nb) ->
+                    val bulle = RemoteViews(ctx.packageName, R.layout.notif_bulle).apply {
+                        setImageViewBitmap(R.id.notif_bulle, bande(ctx, listOf(s to nb)))
+                        setContentDescription(R.id.notif_bulle, "${s.libelle} : $nb non lus")
+                        setOnClickPendingIntent(R.id.notif_bulle, PendingIntent.getActivity(ctx, ("source." + s.name).hashCode(),
+                            Intent(ctx, MainActivity::class.java).putExtra("source", s.name)
+                                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                    }
+                    addView(R.id.notif_bande, bulle)
+                }
             }
         }.getOrNull()
         return NotificationCompat.Builder(ctx, if (n > 0) CANAL else CANAL_SANS_POINT)
