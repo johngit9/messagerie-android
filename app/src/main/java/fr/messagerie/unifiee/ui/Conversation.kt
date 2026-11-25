@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
@@ -319,6 +320,14 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
 
     // Pièces jointes : photo / vidéo, fichier, contact. Rien ne part avant l'appui sur « Envoyer » de l'aperçu.
+    /** Photo prise : lue depuis le cache, montrée dans l'aperçu (rien ne part avant « Envoyer »). */
+    fun chargerPhoto(uri: android.net.Uri) {
+        runCatching {
+            val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("photo illisible")
+            if (octets.isEmpty()) error("photo vide")
+            imageCollee = octets to "image/jpeg"
+        }.onFailure { afficher("Impossible de joindre la photo : ${it.message}") }
+    }
     fun chargerFichier(uri: android.net.Uri) {
         runCatching {
             val cr = ctxVocal.contentResolver
@@ -354,6 +363,28 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
             val texte = (listOf(nom) + numeros).joinToString("\n")
             pieceJointe = PieceJointe(octets, "text/vcard", nom.replace(Regex("""[\\/:*?"<>|]"""), "") + ".vcf", texte)
         }.onFailure { afficher("Impossible de joindre le contact : ${it.message}") }
+    }
+    // Appareil photo : la photo va dans le cache puis passe par le même aperçu que les images choisies
+    var photoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val prendrePhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { ok -> photoUri?.let { u -> if (ok) chargerPhoto(u) } }
+    fun lancerAppareil() {
+        runCatching {
+            val dossier = java.io.File(ctxVocal.cacheDir, "medias").apply { mkdirs() }
+            dossier.listFiles { f -> f.name.startsWith("photo-") }?.forEach { it.delete() }
+            val f = java.io.File(dossier, "photo-${System.currentTimeMillis()}.jpg")
+            val u = androidx.core.content.FileProvider.getUriForFile(ctxVocal, ctxVocal.packageName + ".fichiers", f)
+            photoUri = u; prendrePhoto.launch(u)
+        }.onFailure { afficher("Appareil photo indisponible : ${it.message}") }
+    }
+    val permissionAppareil = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) lancerAppareil() else afficher("Autorisez l'appareil photo pour prendre une photo")
+    }
+    fun prendreUnePhoto() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctxVocal, android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED) lancerAppareil()
+        else permissionAppareil.launch(android.Manifest.permission.CAMERA)
     }
     val choisirMedia = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { it?.let { u -> chargerFichier(u) } }
@@ -787,6 +818,9 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 if (Moteur.imagePossible(c)) Box {
                                     IconButton(onClick = { menuJoindre = true }) { Icon(Icons.Outlined.AddCircleOutline, "Joindre", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                                     DropdownMenu(expanded = menuJoindre, onDismissRequest = { menuJoindre = false }) {
+                                        DropdownMenuItem(text = { Text("Prendre une photo") }, leadingIcon = { Icon(Icons.Outlined.PhotoCamera, null) }, onClick = {
+                                            menuJoindre = false; prendreUnePhoto()
+                                        })
                                         DropdownMenuItem(text = { Text("Photo ou vidéo") }, leadingIcon = { Icon(Icons.Outlined.Image, null) }, onClick = {
                                             menuJoindre = false
                                             choisirMedia.launch(androidx.activity.result.PickVisualMediaRequest(
