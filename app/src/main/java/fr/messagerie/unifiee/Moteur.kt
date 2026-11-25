@@ -92,7 +92,7 @@ data class Etat(
     fun aTraiter(c: Conversation): Boolean {
         val e = etat(c)
         if (e.manuel) return true
-        if (c.dernierDeMoi || c.derniere < depuis) return false
+        if (c.dernierDeMoi || c.derniere < depuis || c.estStatuts) return false
         // Groupe : « À traiter » seulement si vous y êtes mentionné depuis votre dernier message
         if (c.estGroupe) {
             val mention = mentions[c.cle] ?: return false
@@ -657,10 +657,14 @@ object Moteur {
     // MARK: Envoi — uniquement sur le bouton « Envoyer »
 
     /** Renvoie null si envoyé, sinon le message d'erreur. */
-    suspend fun envoyer(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String> = emptyMap()): String? = withContext(Dispatchers.IO) {
+    suspend fun envoyer(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String> = emptyMap(),
+                        fil: String? = null, dernierDuFil: String? = null): String? = withContext(Dispatchers.IO) {
         val t = texte.trim()
         if (t.isEmpty()) return@withContext "message vide"
         val idCite = cite?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") }
+        // Réponse dans un fil (sujet Telegram, fil Element…) : passerelles Matrix seulement
+        val idFil = fil?.substringAfter(':')?.takeIf { it.startsWith("$") && c.source != Source.ELEMENT }
+        val idDernier = dernierDuFil?.substringAfter(':')?.takeIf { it.startsWith("$") }
         try {
             val eid: String = when (c.source) {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
@@ -673,11 +677,11 @@ object Moteur {
                         ?: return@withContext if (_etat.value.salonsWhatsApp.isEmpty())
                             "relais injoignable : impossible de trouver la discussion WhatsApp sur le serveur"
                         else "cette discussion WhatsApp n'est pas reliée au serveur (passerelle)"
-                    Matrix(cfg).envoyer(salon, t, idCite, mentions, formater = true)
+                    Matrix(cfg).envoyer(salon, t, idCite, mentions, formater = true, fil = idFil, dernierDuFil = idDernier)
                 }
-                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS)
+                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS, fil = idFil, dernierDuFil = idDernier)
             }
-            afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle))
+            afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle, "fil" to fil?.takeIf { idFil != null }))
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
@@ -686,9 +690,10 @@ object Moteur {
      * Envoi sans attendre (appui sur « Envoyer ») : l'écran vide le champ tout de suite, l'envoi continue même si
      * vous quittez la conversation. En cas d'échec, apres(erreur) est appelé sur le fil d'affichage et un message s'affiche.
      */
-    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, apres: (String?) -> Unit) {
+    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, fil: String? = null,
+                      dernierDuFil: String? = null, apres: (String?) -> Unit) {
         portee.launch {
-            val err = envoyer(texte, c, cite, mentions)
+            val err = envoyer(texte, c, cite, mentions, fil, dernierDuFil)
             withContext(Dispatchers.Main) {
                 if (err != null) android.widget.Toast.makeText(app, "Message non envoyé : $err", android.widget.Toast.LENGTH_LONG).show()
                 runCatching { apres(err) }
@@ -751,6 +756,27 @@ object Moteur {
             if (bornes.outWidth > 0) info.put("w", bornes.outWidth).put("h", bornes.outHeight)
             val eid = m.envoyerContenu(salon, org.json.JSONObject().put("msgtype", "m.image").put("body", nom).put("url", mxc).put("info", info))
             afficherEnvoye(c, eid, "[photo]", type = "image", media = "$mxc#$typeMime#$nom")
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /** Autocollant possible ? (passerelles qui transmettent m.sticker) */
+    fun autocollantPossible(c: Conversation) = cfg.matrixConfigure && c.source in listOf(Source.WHATSAPP, Source.TELEGRAM, Source.SIGNAL)
+
+    /** Envoie un autocollant (image .webp du clavier) — UNIQUEMENT sur « Envoyer » de l'aperçu. */
+    suspend fun envoyerAutocollant(octets: ByteArray, typeMime: String, c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!autocollantPossible(c)) return@withContext "autocollants impossibles pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size, bornes)
+            val nom = "autocollant." + if (typeMime == "image/png") "png" else "webp"
+            val m = Matrix(cfg)
+            val mxc = m.televerser(octets, typeMime, nom)
+            val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
+            if (bornes.outWidth > 0) info.put("w", bornes.outWidth).put("h", bornes.outHeight)
+            val eid = m.envoyerEvenement(salon, "m.sticker", org.json.JSONObject().put("body", "Autocollant").put("url", mxc).put("info", info))
+            afficherEnvoye(c, eid, "[autocollant]", type = "autocollant", media = "$mxc#$typeMime#autocollant")
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
@@ -1345,6 +1371,137 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    // MARK: Export d'une conversation (fichier texte, partagé seulement si vous le choisissez)
+
+    suspend fun exporter(c: Conversation): java.io.File = withContext(Dispatchers.IO) {
+        val msgs = archive.messages(c.cle, null, 1_000_000)
+        val fmt = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRANCE)
+        val dossier = java.io.File(app.cacheDir, "medias").apply { mkdirs() }
+        val nom = c.nom.replace(Regex("[\\\\/:*?\"<>|]"), "").take(60).ifBlank { "conversation" }
+        val f = java.io.File(dossier, "Discussion $nom.txt")
+        f.bufferedWriter().use { w ->
+            w.write("Discussion ${c.source.libelle} : ${c.nom}\n")
+            w.write("Exportée le ${fmt.format(java.util.Date())} · ${msgs.size} messages\n\n")
+            for (m in msgs) {
+                val texte = when (m.type) {
+                    "audio" -> transcriptionConnue(m)?.let { "[vocal] « $it »" } ?: "[vocal]"
+                    "image" -> "[photo]"; "video" -> "[vidéo]"; "autocollant" -> "[autocollant]"
+                    else -> m.texte
+                }
+                w.write("[${fmt.format(java.util.Date(m.date))}] ${m.auteur} : $texte\n")
+            }
+        }
+        f
+    }
+
+    // MARK: Messages programmés (écrits par vous, envoyés par l'appli à l'heure choisie)
+
+    private val _versionProgrammes = MutableStateFlow(0)
+    val versionProgrammes: StateFlow<Int> get() = _versionProgrammes
+    fun programmesChanges() { _versionProgrammes.update { it + 1 } }
+
+    fun programmer(c: Conversation, texte: String, quand: Long, cite: Message?) {
+        val id = java.util.UUID.randomUUID().toString()
+        archive.ajouterProgramme(Archive.Programme(id, c.cle, texte.trim(), quand, cite?.cle))
+        EnvoiProgramme.programmer(app, id, quand)
+        programmesChanges()
+    }
+
+    fun annulerProgramme(id: String) {
+        EnvoiProgramme.annuler(app, id)
+        archive.retirerProgramme(id)
+        programmesChanges()
+    }
+
+    // MARK: Traduction (Ollama, sur votre serveur ; gardée en mémoire)
+
+    private val _traductions = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Message → « traduction (langue) ». */
+    val traductions: StateFlow<Map<String, String>> get() = _traductions
+
+    suspend fun traduire(m: Message): String? = withContext(Dispatchers.IO) {
+        if (!cfg.ollamaConfigure) return@withContext "IA (Ollama) non configurée dans les Réglages"
+        val (t, langue) = Ollama(cfg).traduire(m.texte) ?: return@withContext "l'IA n'a pas répondu"
+        _traductions.update { it + (m.cle to (if (langue.isNotEmpty() && !langue.startsWith("fran", true)) "$t\u0000$langue" else "$t\u0000")) }
+        null
+    }
+
+    fun oublierTraduction(m: Message) = _traductions.update { it - m.cle }
+
+    // MARK: Gestion des groupes — uniquement après confirmation de l'utilisateur
+
+    /** Messageries où les groupes se gèrent depuis Messagerie (par la passerelle). */
+    fun groupesGerables(s: Source) = cfg.matrixConfigure && s in listOf(Source.WHATSAPP, Source.SIGNAL, Source.TELEGRAM)
+
+    fun peutGererGroupe(c: Conversation) = c.estGroupe && groupesGerables(c.source)
+
+    /** Fantôme (identifiant Matrix) du contact d'une discussion à deux. */
+    private fun fantomeDe(m: Matrix, dm: Conversation): String? {
+        val salon = salonPourEnvoi(dm) ?: return null
+        val moi = setOfNotNull(cfg.matrixUtilisateur, cfg.moiFantome.takeIf { it.isNotEmpty() }, SyncPont.moiDetecte(Pont.pour(dm.source)))
+        return m.membres(salon).keys.firstOrNull { it.startsWith(Pont.pour(dm.source).prefixe) && it !in moi && !it.contains("bot:") }
+    }
+
+    suspend fun renommerGroupe(c: Conversation, nom: String): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c)) return@withContext "impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            Matrix(cfg).renommer(salon, nom.trim())
+            archive.enregistrerConversations(listOf(c.copy(nom = nom.trim())))
+            recharger()
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    suspend fun ajouterMembre(c: Conversation, contact: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c)) return@withContext "impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            val m = Matrix(cfg); m.connecter()
+            val fantome = fantomeDe(m, contact) ?: return@withContext "contact introuvable sur la passerelle"
+            m.inviter(salon, fantome)
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    suspend fun retirerMembre(c: Conversation, membre: Membre): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c) || membre.moi || membre.id.isEmpty()) return@withContext "impossible de retirer ce membre"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            Matrix(cfg).retirer(salon, membre.id)
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /**
+     * Crée un groupe sur la messagerie (WhatsApp, Signal, Telegram) avec ces contacts — UNIQUEMENT après confirmation.
+     * Comme l'app Mac : salon Matrix avec les contacts et le robot, puis commande « create » de la passerelle.
+     * Renvoie (clé de la conversation si déjà visible, message à afficher).
+     */
+    suspend fun creerGroupe(s: Source, nom: String, contacts: List<Conversation>): Pair<String?, String> = withContext(Dispatchers.IO) {
+        try {
+            if (!groupesGerables(s)) return@withContext null to "impossible pour ${s.libelle}"
+            val m = Matrix(cfg); m.connecter()
+            val fantomes = contacts.mapNotNull { fantomeDe(m, it) }
+            if (fantomes.isEmpty()) return@withContext null to "aucun contact trouvé sur la passerelle"
+            val (robot, _) = salonRobot(m, s) ?: return@withContext null to "robot de la passerelle ${s.libelle} introuvable"
+            val salon = m.creerSalon(nom.trim(), fantomes + robot)
+            delay(4000)   // le temps que le robot et les contacts rejoignent le salon
+            val prefixe = when (s) { Source.WHATSAPP -> "!wa"; Source.SIGNAL -> "!signal"; else -> "!tg" }
+            m.envoyerContenu(salon, org.json.JSONObject().put("msgtype", "m.text").put("body", "$prefixe create"))
+            runCatching { m.rejoindre(salon) }
+            repeat(6) {
+                actualiser(relancerSiOccupe = true)
+                val e = _etat.value
+                val jid = if (s == Source.WHATSAPP) e.salonsWhatsApp.entries.firstOrNull { it.value == salon }?.key else salon
+                e.conversations.firstOrNull { it.source == s && it.jid == jid }?.let { return@withContext it.cle to "Groupe créé" }
+                if (s == Source.WHATSAPP) runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { memoriserSalonsWhatsApp(it) }
+                delay(2500)
+            }
+            null to "Groupe créé : il apparaîtra dans la liste après le premier message"
+        } catch (e: Exception) { null to (e.message ?: e.toString()) }
+    }
+
     // MARK: Transfert — uniquement après confirmation de l'utilisateur
 
     /** Peut-on transférer vers cette conversation ? */
@@ -1723,6 +1880,7 @@ object Moteur {
     }
 
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
+        if (c.estStatuts) return   // statuts WhatsApp : pas de notification, comme l'appli officielle
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val canal = canalMessages(c.source)

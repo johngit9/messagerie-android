@@ -91,10 +91,11 @@ class Relais(private val cfg: Config) {
                 // Réponse : message cité, si le relais le fournit (champ reponse_a)
                 val cite = l.optString("reponse_a").takeIf { it.startsWith("$") }?.let { "Element:$it" }
                 val geo = l.optString("geo").takeIf { it.startsWith("geo:") }
+                val fil = l.optString("fil").takeIf { it.startsWith("$") }?.let { "Element:$it" }
                 lot.add(Message(cle, conv.cle, l.ts("ts") ?: 0, deMoi,
                     if (deMoi) "Vous" else l.optString("auteur").ifEmpty { "?" },
                     if (cite != null) sansCitation(l.optString("texte")) else l.optString("texte"), type, media, duree,
-                    Extra.de("cite" to cite, "geo" to geo)))
+                    Extra.de("cite" to cite, "geo" to geo, "fil" to fil)))
             }
             archive.enregistrerConversations(convs.values.toList())
             archive.enregistrerMessages(lot)
@@ -136,10 +137,13 @@ class Relais(private val cfg: Config) {
     fun salonsWhatsApp(): Map<String, String> {
         connecter()
         val r = HashMap<String, String>()
-        for (s in get("/whatsapp/salons").optJSONArray("salons")?.objets() ?: emptyList()) {
+        val j = get("/whatsapp/salons")
+        for (s in j.optJSONArray("salons")?.objets() ?: emptyList()) {
             val salon = s.optString("salon"); val jid = s.optString("jid")
             if (salon.isNotEmpty() && jid.isNotEmpty()) r[salon] = jid
         }
+        // Salon des statuts (absent tant qu'aucun statut n'est arrivé) : conversation en lecture seule
+        j.optString("statuts").takeIf { it.startsWith("!") }?.let { r[it] = "status@broadcast" }
         return r
     }
 

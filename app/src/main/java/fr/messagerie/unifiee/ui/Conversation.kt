@@ -14,6 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.IosShare
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.PushPin
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,7 +145,7 @@ private sealed class Ligne(val cle: String) {
     class Msg(val m: Message, val auteur: Boolean, val dernier: Boolean = true) : Ligne(m.cle)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -> Unit,
     rechercheInitiale: String? = null, messageCible: String? = null, ouvrir: (String) -> Unit = {}) {
@@ -188,6 +192,14 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
     // Image collée depuis le presse-papiers (copie d'écran…) : envoyée seulement sur « Envoyer »
     var imageCollee by remember(c.cle) { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    // Image venue du clavier en .webp : envoyée comme autocollant (sans bulle chez le contact)
+    var commeAutocollant by remember(c.cle) { mutableStateOf(false) }
+    // Messages programmés de cette conversation (envoyés par l'appli à l'heure choisie)
+    var choixHeure by remember { mutableStateOf(false) }
+    val versionProg by Moteur.versionProgrammes.collectAsState()
+    val programmes by androidx.compose.runtime.produceState(emptyList<fr.messagerie.unifiee.Archive.Programme>(), c.cle, versionProg) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.archive.programmes(c.cle) }
+    }
     var pieceJointe by remember(c.cle) { mutableStateOf<PieceJointe?>(null) }
     var menuJoindre by remember { mutableStateOf(false) }
     var imageDispo by remember { mutableStateOf(false) }
@@ -279,11 +291,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
 
     // Contact connu = conversation où vous avez déjà écrit : aperçu automatique des liens seulement là
     val contactConnu = remember(historique, c.messages) { historique.any { it.deMoi } || c.messages.any { it.deMoi } }
-    val lignes = remember(historique, luAvant) {
+    // Fils de discussion (sujets Telegram, fils Element) : repliés sous leur premier message, ouverts à part
+    var filOuvert by remember(c.cle) { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = filOuvert != null && !modeSelection) { filOuvert = null }
+    val reponsesFils = remember(historique) { historique.mapNotNull { it.fil }.groupingBy { it }.eachCount() }
+    val lignes = remember(historique, luAvant, filOuvert) {
         val l = ArrayList<Ligne>()
         var nonLusPlace = false
-        historique.forEachIndexed { i, m ->
-            val prec = historique.getOrNull(i - 1)
+        val visibles = historique.filter { m -> if (filOuvert == null) m.fil == null || historique.none { it.cle == m.fil } else m.cle == filOuvert || m.fil == filOuvert }
+        visibles.forEachIndexed { i, m ->
+            val prec = visibles.getOrNull(i - 1)
             if (prec == null || jourComplet(prec.date) != jourComplet(m.date)) l.add(Ligne.Jour(m.date))
             val nouveauJour = prec == null || jourComplet(prec.date) != jourComplet(m.date)
             var marque = false
@@ -524,6 +541,20 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 onClick = { menuPlus = false; modeSelection = true })
                             DropdownMenuItem(text = { Text("Messages favoris") }, leadingIcon = { Icon(Icons.Outlined.StarOutline, null) },
                                 onClick = { menuPlus = false; listeFavoris = true })
+                            DropdownMenuItem(text = { Text("Exporter la discussion") }, leadingIcon = { Icon(Icons.Outlined.IosShare, null) },
+                                onClick = {
+                                    menuPlus = false
+                                    portee.launch {
+                                        runCatching {
+                                            val f = Moteur.exporter(c)
+                                            val u = androidx.core.content.FileProvider.getUriForFile(ctxVocal, ctxVocal.packageName + ".fichiers", f)
+                                            val envoi = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                                .putExtra(android.content.Intent.EXTRA_STREAM, u).putExtra(android.content.Intent.EXTRA_SUBJECT, f.nameWithoutExtension)
+                                                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            ctxVocal.startActivity(android.content.Intent.createChooser(envoi, "Exporter la discussion"))
+                                        }.onFailure { afficher("Export impossible : ${it.message}") }
+                                    }
+                                })
                             DropdownMenuItem(text = { Text("Actions de la conversation") }, leadingIcon = { Icon(Icons.Outlined.Tune, null) },
                                 onClick = { menuPlus = false; menu = true })
                         }
@@ -537,6 +568,17 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
             if (!rechercheOuverte && !modeSelection) AussiSur(e, c, ouvrir)
             if (!rechercheOuverte && !modeSelection) BandeauSalon(infosSalon, historique, c) { allerAuMessage(it) }
+            filOuvert?.let { f ->
+                val racine = historique.firstOrNull { it.cle == f }
+                Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.12f)).padding(start = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (c.source == Source.TELEGRAM) "Sujet" else "Fil de discussion", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
+                        Text(racine?.let { apercuMessage(it) } ?: "", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(onClick = { filOuvert = null }) { Text("Fermer le fil") }
+                }
+            }
             // Anti-spam : alerte sur une conversation suspecte (score ≥ 30), avec le pourquoi
             e.risques[c.cle]?.takeIf { !it.manuel || it.estSpam }?.let { v -> AlerteSpam(v) { spam -> Moteur.marquerSpam(c, spam) } }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = liste, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
@@ -558,7 +600,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             verticalAlignment = Alignment.Bottom) {
                             if (modeSelection) { Spacer(Modifier.width(4.dp)); PastilleSelection(l.m.cle in selection, c.source.teinte()); Spacer(Modifier.width(6.dp)) }
                             // Groupe : pastille de l'expéditeur au bas de son bloc de messages
-                            if (c.estGroupe && !l.m.deMoi) {
+                            if ((c.estGroupe || c.estStatuts) && !l.m.deMoi) {
                                 Box(Modifier.padding(bottom = 2.dp).size(30.dp)) { if (l.dernier) PastilleAuteur(l.m.auteur) }
                                 Spacer(Modifier.width(6.dp))
                             }
@@ -578,6 +620,9 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             favori = l.m.cle in favoris,
                             basculerFavori = { vm.basculerFavori(l.m); afficher(if (l.m.cle in favoris) "Retiré des favoris" else "Ajouté aux favoris") },
                             allerA = { allerAuMessage(it) },
+                            reponsesFil = if (filOuvert == null) reponsesFils[l.m.cle] ?: 0 else 0,
+                            ouvrirFil = { filOuvert = l.m.cle },
+                            traduire = { afficher("Traduction…"); portee.launch { Moteur.traduire(l.m)?.let { afficher("Échec : $it") } } },
                             modifier = if (Moteur.modifiable(l.m, c)) ({ enModification = l.m; reponseA = null; brouillon = l.m.texte }) else null) } } }
                     }
                 }
@@ -588,6 +633,15 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             }
 
+            // --- Statuts WhatsApp : lecture seule
+            if (c.estStatuts) Surface(tonalElevation = 3.dp) {
+                val ctx = LocalContext.current
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Statuts de vos contacts, en lecture seule. Pour répondre à un statut, ouvrez WhatsApp.", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { runCatching { ctx.startActivity(ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")) } }) { Text("Ouvrir WhatsApp") }
+                }
+            } else
             // --- Compositeur (Teams : lecture seule, on répond depuis l'appli Teams)
             if (c.source == Source.TEAMS) Surface(tonalElevation = 3.dp) {
                 val ctx = LocalContext.current
@@ -620,6 +674,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             } else Surface(tonalElevation = 3.dp) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    programmes.forEach { p ->
+                        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                            .padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Schedule, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Programmé : " + jourComplet(p.quand) + " à " + heure(p.quand), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(p.texte, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            TextButton(onClick = { Moteur.annulerProgramme(p.id); if (brouillon.isBlank()) brouillon = p.texte; afficher("Envoi programmé annulé") }) { Text("Annuler") }
+                        }
+                    }
                     enModification?.let { m ->
                         Row(Modifier.fillMaxWidth().background(c.source.teinte().copy(alpha = 0.12f), RoundedCornerShape(10.dp)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -667,16 +733,21 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 modifier = Modifier.size(72.dp).background(Color.White, RoundedCornerShape(10.dp))
                                     .then(Modifier.padding(0.dp)))
                             Column(Modifier.weight(1f)) {
-                                Text("Image à envoyer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text(if (commeAutocollant) "Autocollant à envoyer" else if (mime == "image/gif") "GIF à envoyer" else "Image à envoyer",
+                                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                 Text("${octets.size / 1024} Ko", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if ((mime == "image/webp" || mime == "image/png") && Moteur.autocollantPossible(c)) Text(
+                                    if (commeAutocollant) "☑ Comme autocollant" else "☐ Comme autocollant", fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
+                                    modifier = Modifier.clickable { commeAutocollant = !commeAutocollant }.padding(vertical = 4.dp))
                             }
-                            IconButton(onClick = { imageCollee = null }) { Icon(Icons.Outlined.Close, "Retirer l'image") }
+                            IconButton(onClick = { imageCollee = null; commeAutocollant = false }) { Icon(Icons.Outlined.Close, "Retirer l'image") }
                             Button(onClick = {
                                 envoi = true
                                 portee.launch {
-                                    val err = Moteur.envoyerImage(octets, mime, c)
+                                    val err = if (commeAutocollant) Moteur.envoyerAutocollant(octets, mime, c) else Moteur.envoyerImage(octets, mime, c)
                                     envoi = false
-                                    if (err == null) { imageCollee = null; afficher("Image envoyée") } else afficher("Échec : $err")
+                                    if (err == null) { imageCollee = null; commeAutocollant = false; afficher(if (mime == "image/gif") "GIF envoyé" else "Image envoyée") } else afficher("Échec : $err")
                                 }
                             }, enabled = !envoi, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
                                 if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
@@ -832,6 +903,10 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                         DropdownMenuItem(text = { Text("Contact") }, leadingIcon = { Icon(Icons.Outlined.Person, null) }, onClick = {
                                             menuJoindre = false; joindreContact()
                                         })
+                                        if (c.source != Source.TEAMS) DropdownMenuItem(text = { Text("Programmer l'envoi") }, leadingIcon = { Icon(Icons.Outlined.Schedule, null) }, onClick = {
+                                            menuJoindre = false
+                                            if (brouillon.isBlank()) afficher("Écrivez d'abord le message, puis choisissez l'heure") else choixHeure = true
+                                        })
                                     }
                                 } else Spacer(Modifier.width(14.dp))
                                 androidx.compose.foundation.text.BasicTextField(
@@ -853,7 +928,21 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                             androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
                                         },
                                     minLines = if (saisieAgrandie) 8 else 1, maxLines = if (saisieAgrandie) 16 else 6,
-                                    modifier = Modifier.weight(1f).padding(vertical = 13.dp),
+                                    // GIF et autocollants du clavier (Gboard…) : aperçu, envoyés seulement sur « Envoyer »
+                                    modifier = Modifier.weight(1f).padding(vertical = 13.dp).contentReceiver { contenu ->
+                                        val clip = contenu.clipEntry.clipData
+                                        val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri }
+                                        if (uri == null || !Moteur.imagePossible(c)) contenu
+                                        else {
+                                            runCatching {
+                                                val mime = ctxVocal.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/gif"
+                                                val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("illisible")
+                                                imageCollee = octets to mime
+                                                commeAutocollant = mime == "image/webp" && Moteur.autocollantPossible(c)
+                                            }.onFailure { afficher("Impossible d'ajouter l'image du clavier") }
+                                            null
+                                        }
+                                    },
                                     decorationBox = { champTexte ->
                                         Box {
                                             if (brouillon.isEmpty()) Text(if (c.source == Source.SMS) "Message SMS" else "Message ${c.source.id}",
@@ -920,7 +1009,9 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                     val texte = brouillon; val cite = reponseA; val ments = mentions
                                     brouillon = ""; champ = androidx.compose.ui.text.input.TextFieldValue("")
                                     versionsIA = emptyList(); reponseA = null; saisieAgrandie = false; mentions = emptyMap()
-                                    Moteur.envoyerEnFond(texte, c, cite, ments) { err ->
+                                    val fil = filOuvert
+                                    val dernier = fil?.let { f -> historique.lastOrNull { it.fil == f }?.cle ?: f }
+                                    Moteur.envoyerEnFond(texte, c, cite, ments, fil, dernier) { err ->
                                         if (err != null && brouillon.isBlank()) { brouillon = texte; reponseA = cite; mentions = ments }
                                     }
                                 }
@@ -936,6 +1027,12 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         }
     }
     if (menu) FeuilleActions(e, c) { menu = false }
+    if (choixHeure) DialogueHeure(fermer = { choixHeure = false }) { quand ->
+        choixHeure = false
+        Moteur.programmer(c, brouillon, quand, reponseA)
+        brouillon = ""; champ = androidx.compose.ui.text.input.TextFieldValue(""); reponseA = null; mentions = emptyMap()
+        afficher("Message programmé pour " + jourComplet(quand) + " à " + heure(quand))
+    }
     if (listeFavoris) DialogueFavoris(c, fermer = { listeFavoris = false }) { listeFavoris = false; allerAuMessage(it) }
     if (reponsesRapides) FeuilleReponsesRapides(c, fermer = { reponsesRapides = false }) { t -> brouillon = t }
     if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
@@ -1052,6 +1149,9 @@ private fun Bulle(
     basculerFavori: () -> Unit = {},
     allerA: (String) -> Unit = {},
     modifier: (() -> Unit)? = null,
+    traduire: () -> Unit = {},
+    reponsesFil: Int = 0,
+    ouvrirFil: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -1060,7 +1160,7 @@ private fun Bulle(
     val monEmoji = maReaction?.emoji ?: reactions.firstOrNull { it.deMoi }?.emoji
     Column(Modifier.fillMaxWidth().padding(top = 2.dp),
         horizontalAlignment = if (moi) Alignment.End else Alignment.Start) {
-        if (c.estGroupe && !moi && afficherAuteur) {
+        if ((c.estGroupe || c.estStatuts) && !moi && afficherAuteur) {
             Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = couleurAuteur(m.auteur), modifier = Modifier.padding(start = 12.dp, bottom = 3.dp))
         }
         // Bloc de messages : coins resserrés du côté de l'expéditeur entre deux bulles du même bloc
@@ -1091,6 +1191,14 @@ private fun Bulle(
                     // Aperçu du premier lien (titre, description, image de la page)
                     // Contact connu : aperçu chargé tout de suite ; inconnu : domaine bien visible, aperçu seulement à la demande
                     LIEN.find(m.texte)?.let { ApercuLien(urlComplete(it.value), moi, couleur, LocalContactConnu.current) }
+                    // Traduction (IA sur votre serveur), sous le texte d'origine
+                    Moteur.traductions.collectAsState().value[m.cle]?.let { tr ->
+                        val (texteTraduit, langue) = tr.substringBefore('\u0000') to tr.substringAfter('\u0000', "")
+                        HorizontalDivider(Modifier.padding(vertical = 6.dp), color = couleur.copy(alpha = 0.25f))
+                        Text("🌐 Traduit" + (if (langue.isNotEmpty()) (if (langue.first().lowercaseChar() in "aeiouyhéè") " de l'" else " du ") + langue.lowercase() else "") + " · masquer", fontSize = 11.sp,
+                            color = couleur.copy(alpha = 0.7f), modifier = Modifier.clickable { Moteur.oublierTraduction(m) })
+                        Text(texteTraduit, color = couleur, fontStyle = FontStyle.Italic)
+                    }
                 }
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -1108,6 +1216,11 @@ private fun Bulle(
                 }
             }
         }
+        // Fil de discussion : nombre de réponses, ouvert au toucher
+        if (reponsesFil > 0) Text("💬 $reponsesFil réponse" + (if (reponsesFil > 1) "s" else "") + " dans le fil ›", fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
+            modifier = Modifier.padding(top = 2.dp, start = 6.dp, end = 6.dp).clip(RoundedCornerShape(10.dp))
+                .clickable { ouvrirFil() }.padding(horizontal = 8.dp, vertical = 4.dp))
         // Réactions sous la bulle
         // Réactions de tous (contacts et vous, y compris depuis les applis officielles) : emoji → auteurs
         val autres = reactions.filter { !it.deMoi }.distinctBy { it.auteur + it.emoji }
@@ -1155,14 +1268,14 @@ private fun Bulle(
         reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) },
         selectionner = { menu = false; basculer() }, supprimer = { menu = false; supprimer() },
         favori = favori, basculerFavori = { menu = false; basculerFavori() },
-        modifier = modifier?.let { f -> { menu = false; f() } })
+        modifier = modifier?.let { f -> { menu = false; f() } }, traduire = { menu = false; traduire() })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
                            reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit,
-                           favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null) {
+                           favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null, traduire: () -> Unit = {}) {
     var partie by remember { mutableStateOf(false) }
     if (partie) { DialogueSelectionTexte(m.texte) { partie = false; fermer() }; return }
     ModalBottomSheet(onDismissRequest = fermer) {
@@ -1189,6 +1302,7 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
             if (modifier != null) ElementAction(Icons.Outlined.Edit, "Modifier") { modifier() }
+            if (m.type == "texte" && m.texte.isNotBlank() && !m.deMoi) ElementAction(Icons.Outlined.Translate, "Traduire en français") { traduire() }
             ElementAction(if (favori) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                 if (favori) "Retirer des favoris" else "Ajouter aux favoris") { basculerFavori() }
             if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier tout le texte") { copier() }
@@ -1662,7 +1776,7 @@ private fun BandeauSalon(infos: Moteur.InfosSalon?, historique: List<Message>, c
         Column(Modifier.weight(1f)) {
             Text(if (infos.epingles.size > 1) "${infos.epingles.size} messages épinglés" else "Message épinglé",
                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
-            Text(m?.let { (if (it.deMoi) "Vous : " else if (c.estGroupe) it.auteur + " : " else "") + apercuMessage(it) } ?: "Message plus ancien",
+            Text(m?.let { (if (it.deMoi) "Vous : " else if (c.estGroupe || c.estStatuts) it.auteur + " : " else "") + apercuMessage(it) } ?: "Message plus ancien",
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -1694,5 +1808,54 @@ private fun DialogueFavoris(c: Conversation, fermer: () -> Unit, aller: (String)
             }
         },
         confirmButton = { TextButton(onClick = fermer) { Text("Fermer") } },
+    )
+}
+
+
+/** Choix de l'heure d'un envoi programmé : raccourcis, ou date et heure au choix. */
+@Composable
+private fun DialogueHeure(fermer: () -> Unit, choisir: (Long) -> Unit) {
+    val ctx = LocalContext.current
+    fun a(jours: Int, h: Int, m: Int = 0): Long = java.util.Calendar.getInstance().apply {
+        add(java.util.Calendar.DAY_OF_YEAR, jours); set(java.util.Calendar.HOUR_OF_DAY, h); set(java.util.Calendar.MINUTE, m)
+        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val maintenant = System.currentTimeMillis()
+    val choix = listOfNotNull(
+        "Dans 1 heure" to maintenant + 3_600_000L,
+        ("Ce soir à 19 h" to a(0, 19)).takeIf { it.second > maintenant + 600_000 },
+        "Demain à 8 h" to a(1, 8),
+        "Demain à 9 h" to a(1, 9),
+        "Lundi à 9 h" to java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 9); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            do add(java.util.Calendar.DAY_OF_YEAR, 1) while (get(java.util.Calendar.DAY_OF_WEEK) != java.util.Calendar.MONDAY)
+        }.timeInMillis,
+    )
+    AlertDialog(
+        onDismissRequest = fermer,
+        title = { Text("Envoyer plus tard") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("L'appli enverra le message elle-même à l'heure choisie (téléphone allumé et connecté). Annulable jusque-là.",
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                choix.forEach { (libelle, quand) ->
+                    TextButton(onClick = { choisir(quand) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(libelle, modifier = Modifier.weight(1f)); Text(jourComplet(quand).take(20) + " " + heure(quand), fontSize = 12.sp)
+                    }
+                }
+                TextButton(onClick = {
+                    val cal = java.util.Calendar.getInstance()
+                    android.app.DatePickerDialog(ctx, { _, an, mois, jour ->
+                        android.app.TimePickerDialog(ctx, { _, h, mn ->
+                            val q = java.util.Calendar.getInstance().apply { set(an, mois, jour, h, mn, 0); set(java.util.Calendar.MILLISECOND, 0) }.timeInMillis
+                            if (q > System.currentTimeMillis() + 60_000) choisir(q) else fermer()
+                        }, cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE), true).show()
+                    }, cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH), cal.get(java.util.Calendar.DAY_OF_MONTH)).apply {
+                        datePicker.minDate = System.currentTimeMillis() - 1000
+                    }.show()
+                }, modifier = Modifier.fillMaxWidth()) { Text("Choisir la date et l'heure…") }
+            }
+        },
+        confirmButton = { TextButton(onClick = fermer) { Text("Annuler") } },
     )
 }

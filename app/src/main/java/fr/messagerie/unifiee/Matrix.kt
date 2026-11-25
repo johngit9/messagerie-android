@@ -60,7 +60,8 @@ class Matrix(private val cfg: Config) {
 
     /** Envoie un message — UNIQUEMENT sur le bouton « Envoyer ». */
     /** Envoie un texte — UNIQUEMENT sur le bouton « Envoyer ». Renvoie l'identifiant de l'événement. */
-    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap(), formater: Boolean = false): String {
+    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap(), formater: Boolean = false,
+                fil: String? = null, dernierDuFil: String? = null): String {
         connecter()
         val txn = "messagerie-" + UUID.randomUUID()
         val contenu = JSONObject().put("msgtype", "m.text").put("body", texte)
@@ -79,7 +80,10 @@ class Matrix(private val cfg: Config) {
             contenu.put("format", "org.matrix.custom.html").put("formatted_body", html.replace("\n", "<br>"))
             contenu.put("m.mentions", JSONObject().put("user_ids", org.json.JSONArray(presentes.values.distinct())))
         }
-        if (reponseA != null) contenu.put("m.relates_to", JSONObject().put("m.in_reply_to", JSONObject().put("event_id", reponseA)))
+        if (fil != null) contenu.put("m.relates_to", JSONObject().put("rel_type", "m.thread").put("event_id", fil)
+            .put("is_falling_back", reponseA == null)
+            .put("m.in_reply_to", JSONObject().put("event_id", reponseA ?: dernierDuFil ?: fil)))
+        else if (reponseA != null) contenu.put("m.relates_to", JSONObject().put("m.in_reply_to", JSONObject().put("event_id", reponseA)))
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
             "PUT", jeton, contenu.toString(), 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
@@ -238,6 +242,42 @@ class Matrix(private val cfg: Config) {
         connecter()
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/leave", "POST", jeton, "{}", 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "quitter le groupe")
+    }
+
+    /** Renomme le groupe pour tous (la passerelle transmet) — UNIQUEMENT après confirmation. */
+    fun renommer(salon: String, nom: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/state/m.room.name/", "PUT", jeton,
+            JSONObject().put("name", nom).toString(), 15_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit de renommer ce groupe")
+        if (r.code != 200) throw ErreurHttp(r.code, "renommer le groupe")
+    }
+
+    /** Crée un salon Matrix privé avec ces invités (avant « create » de la passerelle) — UNIQUEMENT après confirmation. */
+    fun creerSalon(nom: String, invites: List<String>): String {
+        connecter()
+        val d = JSONObject().put("name", nom).put("preset", "private_chat").put("is_direct", false).put("invite", JSONArray(invites))
+        val r = Http.requete("$base/_matrix/client/v3/createRoom", "POST", jeton, d.toString(), 30_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "création du salon")
+        return JSONObject(r.texte).optString("room_id").ifEmpty { throw Exception("salon créé sans identifiant") }
+    }
+
+    /** Ajoute un membre (invitation de son fantôme ; la passerelle l'ajoute au groupe) — UNIQUEMENT après confirmation. */
+    fun inviter(salon: String, utilisateur: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/invite", "POST", jeton,
+            JSONObject().put("user_id", utilisateur).toString(), 20_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit d'ajouter des membres (administrateur du groupe ?)")
+        if (r.code != 200) throw ErreurHttp(r.code, "ajouter le membre")
+    }
+
+    /** Retire un membre du groupe — UNIQUEMENT après confirmation. */
+    fun retirer(salon: String, utilisateur: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/kick", "POST", jeton,
+            JSONObject().put("user_id", utilisateur).toString(), 20_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit de retirer des membres (administrateur du groupe ?)")
+        if (r.code != 200) throw ErreurHttp(r.code, "retirer le membre")
     }
 
     /** Télécharge un média mxc://serveur/id (lecture seule). */
@@ -459,7 +499,8 @@ class SyncPont(
             val contacts = i.membres.filter { it.key.startsWith(pont.prefixe) && it.key != moi }
             val nom = (i.nom ?: contacts.values.sorted().joinToString(", ")).replace(" (WA)", "")
             val j = jid(id)
-            Conversation(cleConv(pont.source, j), pont.source, j, nom.ifEmpty { pont.source.id },
+            // Statuts WhatsApp (option de la passerelle) : une conversation à part, en lecture seule
+            Conversation(cleConv(pont.source, j), pont.source, j, if (j.startsWith("status@broadcast")) "Statuts WhatsApp" else nom.ifEmpty { pont.source.id },
                 if (correspondance != null) j.endsWith("@g.us") else contacts.size > 1, 0, emptyList())
         }
         archive.enregistrerConversations(convs, garderNoms = correspondance != null)
@@ -701,7 +742,11 @@ class SyncPont(
         val c = remplacement ?: brut
         val evType = e.optString("type")
         // Réponse : le message cité (la passerelle peut aussi ajouter l'ancien « > <@…> » en tête du texte)
-        val cite = brut.optJSONObject("m.relates_to")?.optJSONObject("m.in_reply_to")?.optString("event_id")
+        val relation = brut.optJSONObject("m.relates_to")
+        // Fil (m.thread) : sujet Telegram ou fil Element ; la réponse « de repli » au dernier message du fil n'est pas une vraie citation
+        val fil = relation?.takeIf { it.optString("rel_type") == "m.thread" }?.optString("event_id")?.takeIf { it.isNotEmpty() }?.let { "${pont.source.id}:$it" }
+        val cite = relation?.takeIf { fil == null || !it.optBoolean("is_falling_back") }
+            ?.optJSONObject("m.in_reply_to")?.optString("event_id")
             ?.takeIf { it.isNotEmpty() }?.let { "${pont.source.id}:$it" }
         val corps = if (cite != null) sansCitation(c.optString("body")) else c.optString("body")
         var type = "texte"; var texte = corps; var media: String? = null; var duree: Double? = null
@@ -770,7 +815,7 @@ class SyncPont(
                 ts > (mentionsMoi[conv] ?: 0)) mentionsMoi[conv] = ts
         }
         val auteur = if (deMoi) "Vous" else membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un"
-        val extra = Extra.de("cite" to cite, "html" to html, "geo" to geo, "sondage" to sondage, "modifie" to modifie)
+        val extra = Extra.de("cite" to cite, "html" to html, "geo" to geo, "sondage" to sondage, "modifie" to modifie, "fil" to fil)
         return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree, extra)
     }
 }

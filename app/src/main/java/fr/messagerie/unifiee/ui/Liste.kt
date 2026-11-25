@@ -517,7 +517,7 @@ private fun CarteConversation(e: Etat, c: Conversation, modifier: Modifier, ouvr
                     color = if (nb > 0) cs.primary else cs.onSurfaceVariant)
             }
             // Aperçu : le texte du dernier message (le résumé IA reste dans la conversation)
-            val apercu = c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe) "${m.auteur} : " else "") + apercuMessage(m) } ?: ""
+            val apercu = c.messages.lastOrNull()?.let { m -> (if (m.deMoi) "Vous : " else if (c.estGroupe || c.estStatuts) "${m.auteur} : " else "") + apercuMessage(m) } ?: ""
             // Brouillon en cours : montré à la place du dernier message, comme dans les applis officielles
             val brouillon = Moteur.brouillons.collectAsState().value[c.cle]
             Row {

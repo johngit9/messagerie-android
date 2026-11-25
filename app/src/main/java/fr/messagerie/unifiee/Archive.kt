@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Archive permanente de tous les messages (toutes sources), avec recherche plein texte,
  * et état local (lu / non lu, à traiter, sourdine, résumés IA). Fichier privé de l'appli.
  */
-class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 4) {
+class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 5) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
@@ -34,6 +34,12 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         creerReactions(db)
         creerAvatars(db)
         creerComplements(db)
+        creerProgrammes(db)
+    }
+
+    /** v5 : messages programmés (envoyés par l'appli à l'heure choisie). */
+    private fun creerProgrammes(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS programmes (id TEXT PRIMARY KEY, conv TEXT NOT NULL, texte TEXT NOT NULL, quand INTEGER NOT NULL, cite TEXT)")
     }
 
     /** v4 : brouillons, messages favoris, votes des sondages. */
@@ -60,6 +66,7 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             runCatching { db.execSQL("ALTER TABLE messages ADD COLUMN extra TEXT") }
             creerComplements(db)
         }
+        if (ancienne < 5) creerProgrammes(db)
     }
 
     private inline fun <T> Cursor.lignes(f: (Cursor) -> T): List<T> = use { c ->
@@ -514,4 +521,30 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
             Vote(c.s("cle") ?: "", c.s("sondage") ?: "", c.s("conv") ?: "", c.s("auteur") ?: "?", c.l("de_moi") == 1L,
                 (c.s("choix") ?: "").split('\u0001').filter { it.isNotEmpty() }, c.l("date"))
         }.groupBy { it.sondage }.mapValues { (_, l) -> l.groupBy { if (it.deMoi) "Vous" else it.auteur }.map { it.value.last() } }
+
+    // MARK: Messages programmés
+
+    data class Programme(val id: String, val conv: String, val texte: String, val quand: Long, val cite: String?)
+
+    fun programmes(conv: String? = null): List<Programme> =
+        readableDatabase.rawQuery("SELECT * FROM programmes" + (if (conv != null) " WHERE conv = ?" else "") + " ORDER BY quand",
+            if (conv != null) arrayOf(conv) else null).lignes { c ->
+            Programme(c.s("id") ?: "", c.s("conv") ?: "", c.s("texte") ?: "", c.l("quand"), c.s("cite"))
+        }
+
+    @Synchronized
+    fun ajouterProgramme(p: Programme) {
+        writableDatabase.insertWithOnConflict("programmes", null, ContentValues().apply {
+            put("id", p.id); put("conv", p.conv); put("texte", p.texte); put("quand", p.quand); put("cite", p.cite)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    @Synchronized
+    fun retirerProgramme(id: String) { writableDatabase.delete("programmes", "id = ?", arrayOf(id)) }
+
+    /** Une conversation de l'archive (pour un envoi programmé appli fermée). */
+    fun conversation(cle: String): Conversation? =
+        readableDatabase.rawQuery("SELECT * FROM conversations WHERE cle = ?", arrayOf(cle)).lignes { c ->
+            Source.depuis(c.s("source") ?: "")?.let { Conversation(cle, it, c.s("ident") ?: "", c.s("nom") ?: "?", c.l("est_groupe") == 1L, c.l("derniere"), emptyList()) }
+        }.firstOrNull()
 }
