@@ -253,6 +253,15 @@ class Matrix(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "renommer le groupe")
     }
 
+    /** Crée un salon Matrix privé avec ces invités (avant « create » de la passerelle) — UNIQUEMENT après confirmation. */
+    fun creerSalon(nom: String, invites: List<String>): String {
+        connecter()
+        val d = JSONObject().put("name", nom).put("preset", "private_chat").put("is_direct", false).put("invite", JSONArray(invites))
+        val r = Http.requete("$base/_matrix/client/v3/createRoom", "POST", jeton, d.toString(), 30_000)
+        if (r.code != 200) throw ErreurHttp(r.code, "création du salon")
+        return JSONObject(r.texte).optString("room_id").ifEmpty { throw Exception("salon créé sans identifiant") }
+    }
+
     /** Ajoute un membre (invitation de son fantôme ; la passerelle l'ajoute au groupe) — UNIQUEMENT après confirmation. */
     fun inviter(salon: String, utilisateur: String) {
         connecter()
@@ -490,7 +499,8 @@ class SyncPont(
             val contacts = i.membres.filter { it.key.startsWith(pont.prefixe) && it.key != moi }
             val nom = (i.nom ?: contacts.values.sorted().joinToString(", ")).replace(" (WA)", "")
             val j = jid(id)
-            Conversation(cleConv(pont.source, j), pont.source, j, nom.ifEmpty { pont.source.id },
+            // Statuts WhatsApp (option de la passerelle) : une conversation à part, en lecture seule
+            Conversation(cleConv(pont.source, j), pont.source, j, if (j.startsWith("status@broadcast")) "Statuts WhatsApp" else nom.ifEmpty { pont.source.id },
                 if (correspondance != null) j.endsWith("@g.us") else contacts.size > 1, 0, emptyList())
         }
         archive.enregistrerConversations(convs, garderNoms = correspondance != null)

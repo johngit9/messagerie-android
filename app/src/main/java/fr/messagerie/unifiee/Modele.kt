@@ -80,6 +80,8 @@ data class Conversation(
     val messages: List<Message>,  // derniers messages (ordre chronologique)
 ) {
     val dernierDeMoi: Boolean get() = messages.lastOrNull()?.deMoi ?: false
+    /** Statuts WhatsApp (lecture seule : on répond à un statut depuis WhatsApp). */
+    val estStatuts: Boolean get() = source == Source.WHATSAPP && jid.startsWith("status@broadcast")
 }
 
 /** Résumé IA, valable tant qu'aucun nouveau message n'arrive. */

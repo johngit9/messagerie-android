@@ -1475,17 +1475,20 @@ object Moteur {
 
     /**
      * Crée un groupe sur la messagerie (WhatsApp, Signal, Telegram) avec ces contacts — UNIQUEMENT après confirmation.
-     * Passe par le relais du serveur (POST /groupes/creer), qui le demande à la passerelle.
+     * Comme l'app Mac : salon Matrix avec les contacts et le robot, puis commande « create » de la passerelle.
      * Renvoie (clé de la conversation si déjà visible, message à afficher).
      */
     suspend fun creerGroupe(s: Source, nom: String, contacts: List<Conversation>): Pair<String?, String> = withContext(Dispatchers.IO) {
         try {
             if (!groupesGerables(s)) return@withContext null to "impossible pour ${s.libelle}"
-            if (!cfg.relaisConfigure) return@withContext null to "relais non configuré"
             val m = Matrix(cfg); m.connecter()
             val fantomes = contacts.mapNotNull { fantomeDe(m, it) }
             if (fantomes.isEmpty()) return@withContext null to "aucun contact trouvé sur la passerelle"
-            val salon = Relais(cfg).creerGroupe(s.id.lowercase(), nom.trim(), fantomes)
+            val (robot, _) = salonRobot(m, s) ?: return@withContext null to "robot de la passerelle ${s.libelle} introuvable"
+            val salon = m.creerSalon(nom.trim(), fantomes + robot)
+            delay(4000)   // le temps que le robot et les contacts rejoignent le salon
+            val prefixe = when (s) { Source.WHATSAPP -> "!wa"; Source.SIGNAL -> "!signal"; else -> "!tg" }
+            m.envoyerContenu(salon, org.json.JSONObject().put("msgtype", "m.text").put("body", "$prefixe create"))
             runCatching { m.rejoindre(salon) }
             repeat(6) {
                 actualiser(relancerSiOccupe = true)

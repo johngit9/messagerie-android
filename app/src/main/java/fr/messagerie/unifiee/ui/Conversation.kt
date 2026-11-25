@@ -633,6 +633,15 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             }
 
+            // --- Statuts WhatsApp : lecture seule
+            if (c.estStatuts) Surface(tonalElevation = 3.dp) {
+                val ctx = LocalContext.current
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Statuts de vos contacts, en lecture seule. Pour répondre à un statut, ouvrez WhatsApp.", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { runCatching { ctx.startActivity(ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")) } }) { Text("Ouvrir WhatsApp") }
+                }
+            } else
             // --- Compositeur (Teams : lecture seule, on répond depuis l'appli Teams)
             if (c.source == Source.TEAMS) Surface(tonalElevation = 3.dp) {
                 val ctx = LocalContext.current

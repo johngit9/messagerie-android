@@ -181,19 +181,6 @@ class Relais(private val cfg: Config) {
         return runCatching { JSONObject(r.texte).optString("event_id") }.getOrDefault("")
     }
 
-    /**
-     * Crée un groupe sur une messagerie relayée (passerelle = whatsapp, signal, telegram) avec ces membres
-     * (identifiants Matrix des contacts) — UNIQUEMENT après confirmation. Renvoie le salon Matrix créé.
-     */
-    fun creerGroupe(passerelle: String, nom: String, membres: List<String>): String {
-        connecter()
-        val d = JSONObject().put("passerelle", passerelle).put("nom", nom).put("membres", org.json.JSONArray(membres))
-        val r = Http.requete("$base/groupes/creer", "POST", jeton, d.toString(), 60_000)
-        if (r.code == 404) throw Exception("le relais du serveur ne sait pas encore créer de groupe")
-        if (r.code != 200) throw Exception(runCatching { JSONObject(r.texte).optString("erreur") }.getOrNull()?.ifEmpty { null } ?: "création refusée (${r.code})")
-        return JSONObject(r.texte).optString("salon").ifEmpty { throw Exception("réponse du relais sans salon") }
-    }
-
     /** Modifie un de VOS messages texte Element (m.replace) — UNIQUEMENT sur « Enregistrer la modification ». */
     fun modifier(salon: String, eventId: String, texte: String) {
         connecter()
