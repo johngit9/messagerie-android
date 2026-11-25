@@ -60,7 +60,8 @@ class Matrix(private val cfg: Config) {
 
     /** Envoie un message — UNIQUEMENT sur le bouton « Envoyer ». */
     /** Envoie un texte — UNIQUEMENT sur le bouton « Envoyer ». Renvoie l'identifiant de l'événement. */
-    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap(), formater: Boolean = false): String {
+    fun envoyer(salon: String, texte: String, reponseA: String?, mentions: Map<String, String> = emptyMap(), formater: Boolean = false,
+                fil: String? = null, dernierDuFil: String? = null): String {
         connecter()
         val txn = "messagerie-" + UUID.randomUUID()
         val contenu = JSONObject().put("msgtype", "m.text").put("body", texte)
@@ -79,7 +80,10 @@ class Matrix(private val cfg: Config) {
             contenu.put("format", "org.matrix.custom.html").put("formatted_body", html.replace("\n", "<br>"))
             contenu.put("m.mentions", JSONObject().put("user_ids", org.json.JSONArray(presentes.values.distinct())))
         }
-        if (reponseA != null) contenu.put("m.relates_to", JSONObject().put("m.in_reply_to", JSONObject().put("event_id", reponseA)))
+        if (fil != null) contenu.put("m.relates_to", JSONObject().put("rel_type", "m.thread").put("event_id", fil)
+            .put("is_falling_back", reponseA == null)
+            .put("m.in_reply_to", JSONObject().put("event_id", reponseA ?: dernierDuFil ?: fil)))
+        else if (reponseA != null) contenu.put("m.relates_to", JSONObject().put("m.in_reply_to", JSONObject().put("event_id", reponseA)))
         val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/send/m.room.message/${Http.enc(txn)}",
             "PUT", jeton, contenu.toString(), 15_000)
         if (r.code != 200) throw ErreurHttp(r.code, "envoi")
@@ -728,7 +732,11 @@ class SyncPont(
         val c = remplacement ?: brut
         val evType = e.optString("type")
         // Réponse : le message cité (la passerelle peut aussi ajouter l'ancien « > <@…> » en tête du texte)
-        val cite = brut.optJSONObject("m.relates_to")?.optJSONObject("m.in_reply_to")?.optString("event_id")
+        val relation = brut.optJSONObject("m.relates_to")
+        // Fil (m.thread) : sujet Telegram ou fil Element ; la réponse « de repli » au dernier message du fil n'est pas une vraie citation
+        val fil = relation?.takeIf { it.optString("rel_type") == "m.thread" }?.optString("event_id")?.takeIf { it.isNotEmpty() }?.let { "${pont.source.id}:$it" }
+        val cite = relation?.takeIf { fil == null || !it.optBoolean("is_falling_back") }
+            ?.optJSONObject("m.in_reply_to")?.optString("event_id")
             ?.takeIf { it.isNotEmpty() }?.let { "${pont.source.id}:$it" }
         val corps = if (cite != null) sansCitation(c.optString("body")) else c.optString("body")
         var type = "texte"; var texte = corps; var media: String? = null; var duree: Double? = null
@@ -797,7 +805,7 @@ class SyncPont(
                 ts > (mentionsMoi[conv] ?: 0)) mentionsMoi[conv] = ts
         }
         val auteur = if (deMoi) "Vous" else membres[exp]?.replace(" (WA)", "") ?: "Quelqu'un"
-        val extra = Extra.de("cite" to cite, "html" to html, "geo" to geo, "sondage" to sondage, "modifie" to modifie)
+        val extra = Extra.de("cite" to cite, "html" to html, "geo" to geo, "sondage" to sondage, "modifie" to modifie, "fil" to fil)
         return Message(cle, conv, ts, deMoi, auteur, texte, type, media, duree, extra)
     }
 }

@@ -657,10 +657,14 @@ object Moteur {
     // MARK: Envoi — uniquement sur le bouton « Envoyer »
 
     /** Renvoie null si envoyé, sinon le message d'erreur. */
-    suspend fun envoyer(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String> = emptyMap()): String? = withContext(Dispatchers.IO) {
+    suspend fun envoyer(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String> = emptyMap(),
+                        fil: String? = null, dernierDuFil: String? = null): String? = withContext(Dispatchers.IO) {
         val t = texte.trim()
         if (t.isEmpty()) return@withContext "message vide"
         val idCite = cite?.cle?.substringAfter(':')?.takeIf { it.startsWith("$") }
+        // Réponse dans un fil (sujet Telegram, fil Element…) : passerelles Matrix seulement
+        val idFil = fil?.substringAfter(':')?.takeIf { it.startsWith("$") && c.source != Source.ELEMENT }
+        val idDernier = dernierDuFil?.substringAfter(':')?.takeIf { it.startsWith("$") }
         try {
             val eid: String = when (c.source) {
                 Source.TEAMS -> return@withContext "Teams est en lecture seule : répondez depuis l'appli Teams"
@@ -673,11 +677,11 @@ object Moteur {
                         ?: return@withContext if (_etat.value.salonsWhatsApp.isEmpty())
                             "relais injoignable : impossible de trouver la discussion WhatsApp sur le serveur"
                         else "cette discussion WhatsApp n'est pas reliée au serveur (passerelle)"
-                    Matrix(cfg).envoyer(salon, t, idCite, mentions, formater = true)
+                    Matrix(cfg).envoyer(salon, t, idCite, mentions, formater = true, fil = idFil, dernierDuFil = idDernier)
                 }
-                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS)
+                else -> Matrix(cfg).envoyer(c.jid, t, idCite, mentions, formater = c.source != Source.SMS, fil = idFil, dernierDuFil = idDernier)
             }
-            afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle))
+            afficherEnvoye(c, eid, t, extra = Extra.de("cite" to cite?.cle, "fil" to fil?.takeIf { idFil != null }))
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
@@ -686,9 +690,10 @@ object Moteur {
      * Envoi sans attendre (appui sur « Envoyer ») : l'écran vide le champ tout de suite, l'envoi continue même si
      * vous quittez la conversation. En cas d'échec, apres(erreur) est appelé sur le fil d'affichage et un message s'affiche.
      */
-    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, apres: (String?) -> Unit) {
+    fun envoyerEnFond(texte: String, c: Conversation, cite: Message?, mentions: Map<String, String>, fil: String? = null,
+                      dernierDuFil: String? = null, apres: (String?) -> Unit) {
         portee.launch {
-            val err = envoyer(texte, c, cite, mentions)
+            val err = envoyer(texte, c, cite, mentions, fil, dernierDuFil)
             withContext(Dispatchers.Main) {
                 if (err != null) android.widget.Toast.makeText(app, "Message non envoyé : $err", android.widget.Toast.LENGTH_LONG).show()
                 runCatching { apres(err) }
@@ -1365,6 +1370,63 @@ object Moteur {
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
+
+    // MARK: Export d'une conversation (fichier texte, partagé seulement si vous le choisissez)
+
+    suspend fun exporter(c: Conversation): java.io.File = withContext(Dispatchers.IO) {
+        val msgs = archive.messages(c.cle, null, 1_000_000)
+        val fmt = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRANCE)
+        val dossier = java.io.File(app.cacheDir, "medias").apply { mkdirs() }
+        val nom = c.nom.replace(Regex("[\\\\/:*?\"<>|]"), "").take(60).ifBlank { "conversation" }
+        val f = java.io.File(dossier, "Discussion $nom.txt")
+        f.bufferedWriter().use { w ->
+            w.write("Discussion ${c.source.libelle} : ${c.nom}\n")
+            w.write("Exportée le ${fmt.format(java.util.Date())} · ${msgs.size} messages\n\n")
+            for (m in msgs) {
+                val texte = when (m.type) {
+                    "audio" -> transcriptionConnue(m)?.let { "[vocal] « $it »" } ?: "[vocal]"
+                    "image" -> "[photo]"; "video" -> "[vidéo]"; "autocollant" -> "[autocollant]"
+                    else -> m.texte
+                }
+                w.write("[${fmt.format(java.util.Date(m.date))}] ${m.auteur} : $texte\n")
+            }
+        }
+        f
+    }
+
+    // MARK: Messages programmés (écrits par vous, envoyés par l'appli à l'heure choisie)
+
+    private val _versionProgrammes = MutableStateFlow(0)
+    val versionProgrammes: StateFlow<Int> get() = _versionProgrammes
+    fun programmesChanges() { _versionProgrammes.update { it + 1 } }
+
+    fun programmer(c: Conversation, texte: String, quand: Long, cite: Message?) {
+        val id = java.util.UUID.randomUUID().toString()
+        archive.ajouterProgramme(Archive.Programme(id, c.cle, texte.trim(), quand, cite?.cle))
+        EnvoiProgramme.programmer(app, id, quand)
+        programmesChanges()
+    }
+
+    fun annulerProgramme(id: String) {
+        EnvoiProgramme.annuler(app, id)
+        archive.retirerProgramme(id)
+        programmesChanges()
+    }
+
+    // MARK: Traduction (Ollama, sur votre serveur ; gardée en mémoire)
+
+    private val _traductions = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Message → « traduction (langue) ». */
+    val traductions: StateFlow<Map<String, String>> get() = _traductions
+
+    suspend fun traduire(m: Message): String? = withContext(Dispatchers.IO) {
+        if (!cfg.ollamaConfigure) return@withContext "IA (Ollama) non configurée dans les Réglages"
+        val (t, langue) = Ollama(cfg).traduire(m.texte) ?: return@withContext "l'IA n'a pas répondu"
+        _traductions.update { it + (m.cle to (if (langue.isNotEmpty() && !langue.startsWith("fran", true)) "$t\u0000$langue" else "$t\u0000")) }
+        null
+    }
+
+    fun oublierTraduction(m: Message) = _traductions.update { it - m.cle }
 
     // MARK: Gestion des groupes — uniquement après confirmation de l'utilisateur
 

@@ -40,6 +40,8 @@ data class Message(
     /** Position partagée : « geo:lat,lon ». */
     val geo: String? get() = x?.optString("geo")?.takeIf { it.isNotEmpty() }
     val modifie: Boolean get() = x?.optBoolean("modifie") == true
+    /** Fil de discussion (Element) ou sujet (Telegram) : clé du premier message du fil. */
+    val fil: String? get() = x?.optString("fil")?.takeIf { it.isNotEmpty() }
     /** Sondage : question, réponses (id → texte), choix multiples, format (« msc3381 » ou « stable »). */
     val sondage: Sondage? get() = x?.optJSONObject("sondage")?.let { o ->
         val r = o.optJSONArray("reponses") ?: return@let null

@@ -38,6 +38,8 @@ class Ollama(private val cfg: Config) {
         COURT("Plus court", "Raccourcis ce brouillon au strict nécessaire, sans perdre d'information importante."),
         FORMEL("Plus formel", "Réécris ce brouillon sur un ton plus formel et professionnel (vouvoiement)."),
         CHALEUREUX("Plus chaleureux", "Réécris ce brouillon sur un ton plus chaleureux et amical, sans en faire trop."),
+        ANGLAIS("Traduire en anglais", "Traduis ce brouillon en anglais naturel, même ton, même sens. Rends le texte en anglais."),
+        ESPAGNOL("Traduire en espagnol", "Traduis ce brouillon en espagnol naturel, même ton, même sens. Rends le texte en espagnol."),
     }
 
     private fun chat(systeme: String, prompt: String, schema: JSONObject): JSONObject? {
@@ -109,6 +111,15 @@ class Ollama(private val cfg: Config) {
         val j = chat(INSTRUCTIONS, prompt, schema) ?: return null
         val a = j.optJSONArray("reponses") ?: return null
         return (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() }.distinct().take(4)
+    }
+
+    /** Traduit un message reçu en français (null si Ollama est injoignable). langue = langue d'origine détectée. */
+    fun traduire(texte: String): Pair<String, String>? {
+        val j = chat("Tu traduis des messages en français naturel. Garde le sens, le ton, les émojis et les noms propres. " +
+            "Si le message est déjà en français, rends-le tel quel. Réponds en JSON : traduction, langue (nom en français de la langue d'origine).",
+            texte.take(4000), schema("traduction" to "string", "langue" to "string")) ?: return null
+        val t = j.optString("traduction").trim().takeIf { it.isNotEmpty() } ?: return null
+        return t to j.optString("langue").trim()
     }
 
     /** Vérifie qu'Ollama répond et que le modèle est installé. */
