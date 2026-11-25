@@ -45,7 +45,7 @@ private fun sourceDe(reseau: String): Source? = when (reseau) {
     "gmessages" -> Source.SMS; "linkedin" -> Source.LINKEDIN; "signal" -> Source.SIGNAL; else -> null
 }
 
-/** Mon profil : votre nom affiché sur chaque messagerie ; modifiable là où le serveur le permet (Element pour l'instant). */
+/** Mon profil : votre nom affiché sur chaque messagerie ; modifiable là où le serveur le permet (champ « modifiable » de chaque réseau). */
 @Composable
 internal fun PageProfil() {
     val cfg = Moteur.cfg
@@ -68,7 +68,7 @@ internal fun PageProfil() {
     Explication("Le nom que vos contacts voient sur chaque messagerie. Il ne change que lorsque vous touchez « Enregistrer ».")
     erreur?.let { Text(it, color = cs.error, fontSize = 14.sp) }
     retour?.let { Text(it, color = cs.primary, fontSize = 14.sp) }
-    val (profils, max) = donnees ?: run { if (erreur == null) CircularProgressIndicator(Modifier.size(24.dp)); return }
+    val (profils, _) = donnees ?: run { if (erreur == null) CircularProgressIndicator(Modifier.size(24.dp)); return }
     profils.sortedBy { sourceDe(it.reseau)?.ordinal ?: 99 }.forEach { p ->
         val s = sourceDe(p.reseau)
         Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
@@ -101,14 +101,14 @@ internal fun PageProfil() {
             title = { Text("Mon nom sur $libelle") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(value = nom, onValueChange = { if (it.length <= max) nom = it }, singleLine = true,
-                        label = { Text("Nom affiché") }, supportingText = { Text("${nom.length} / $max") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = nom, onValueChange = { if (it.length <= p.max || it.length < nom.length) nom = it }, singleLine = true,
+                        label = { Text("Nom affiché") }, supportingText = { Text("${nom.length} / ${p.max}") }, modifier = Modifier.fillMaxWidth())
                     Text("Vos contacts $libelle verront ce nouveau nom.", fontSize = 13.sp, color = cs.onSurfaceVariant)
                     echec?.let { Text(it, color = cs.error, fontSize = 13.sp) }
                 }
             },
             confirmButton = {
-                TextButton(enabled = !enCours && nom.trim().isNotEmpty() && nom.trim() != p.nom, onClick = {
+                TextButton(enabled = !enCours && nom.trim().isNotEmpty() && nom.trim() != p.nom && nom.trim().length <= p.max, onClick = {
                     enCours = true; echec = null
                     portee.launch {
                         runCatching { withContext(Dispatchers.IO) { Relais(cfg).changerNomProfil(p.reseau, nom.trim()) } }

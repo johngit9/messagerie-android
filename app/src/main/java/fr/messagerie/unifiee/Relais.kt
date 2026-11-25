@@ -199,17 +199,20 @@ class Relais(private val cfg: Config) {
      */
     // MARK: Mon profil (nom affiché sur chaque réseau)
 
-    data class Profil(val reseau: String, val nom: String, val identifiant: String, val connecte: Boolean, val modifiable: Boolean, val raison: String)
+    data class Profil(val reseau: String, val nom: String, val identifiant: String, val connecte: Boolean, val modifiable: Boolean, val raison: String, val max: Int = 64)
 
     fun profils(): Pair<List<Profil>, Int> {
         connecter()
         val j = get("/profil", 15_000)
         val o = j.optJSONObject("profils") ?: JSONObject()
+        val maxGeneral = j.optInt("nom_max", 64)
         val l = o.keys().asSequence().map { k ->
             val p = o.optJSONObject(k) ?: JSONObject()
-            Profil(k, p.optString("nom"), p.optString("identifiant"), p.optBoolean("connecte"), p.optBoolean("modifiable"), p.optString("raison"))
+            // Longueur maximale propre à chaque réseau (25 WhatsApp, 26 Signal, 64 Element), sinon la valeur générale
+            Profil(k, p.optString("nom"), p.optString("identifiant"), p.optBoolean("connecte"), p.optBoolean("modifiable"), p.optString("raison"),
+                p.optInt("nom_max", maxGeneral))
         }.toList()
-        return l to j.optInt("nom_max", 64)
+        return l to maxGeneral
     }
 
     /** Change VOTRE nom affiché sur ce réseau — uniquement sur appui explicite. */
