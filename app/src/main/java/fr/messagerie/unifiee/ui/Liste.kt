@@ -111,6 +111,13 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
     val source by vm.source.collectAsState()
     val recherche by vm.recherche.collectAsState()
     val visibles by vm.visibles.collectAsState()
+    // Nouveau message : la conversation remonte en tête. Compose garde sinon la position sur l'ancienne première carte,
+    // et la nouvelle arrive au-dessus, hors de l'écran. Si l'on était en haut de la liste, on y reste.
+    val defilement = androidx.compose.foundation.lazy.rememberLazyListState()
+    val enTete = visibles.take(3).map { it.cle }
+    androidx.compose.runtime.LaunchedEffect(enTete) {
+        if (defilement.firstVisibleItemIndex <= 2) defilement.scrollToItem(0)
+    }
     val ailleurs by vm.ailleurs.collectAsState()
     val suggestions by vm.suggestions.collectAsState()
     var actionsPour by remember { mutableStateOf<Conversation?>(null) }
@@ -180,7 +187,7 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                     )
                 } else LazyColumn(
                     // La liste commence sous le bandeau, sans le chevaucher
-                    Modifier.fillMaxSize(),
+                    Modifier.fillMaxSize(), state = defilement,
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = if (fr.messagerie.unifiee.Affichage.haut == 1) 10.dp else 4.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(when (fr.messagerie.unifiee.Affichage.design) { 1 -> 0.dp; 3 -> 12.dp; else -> 8.dp }),
                 ) {
