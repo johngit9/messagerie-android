@@ -1004,7 +1004,7 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
     var association by remember { mutableStateOf<fr.messagerie.unifiee.Relais.Association?>(null) }
     var detail by remember { mutableStateOf("") }
     fun demander() {
-        val tel = numero.filter { it.isDigit() || it == '+' }
+        val tel = numeroInternational(numero)
         cfg.telephoneWhatsApp = tel
         etape = "demande"
         portee.launch {
@@ -1054,7 +1054,7 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
                     "saisie", "demande" -> {
                         Text("Votre numéro WhatsApp, au format international. Le serveur demande un code à WhatsApp ; " +
                             "vous le saisirez ensuite dans l'appli WhatsApp de ce téléphone.", fontSize = 14.sp)
-                        androidx.compose.material3.OutlinedTextField(value = numero, onValueChange = { numero = it.filter { c -> c.isDigit() || c == '+' || c == ' ' } },
+                        androidx.compose.material3.OutlinedTextField(value = numero, onValueChange = { numero = it.filter { c -> c.isDigit() || c in "+ .()-" } },
                             label = { Text("Numéro") }, singleLine = true, enabled = etape == "saisie",
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
                             modifier = Modifier.fillMaxWidth())
@@ -1095,6 +1095,19 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
         },
         dismissButton = { if (etape != "connecte") TextButton(onClick = { quitter() }) { Text("Annuler") } },
     )
+}
+
+/**
+ * Numéro au format international attendu par le relais (+33…) : retire espaces, points, tirets et « (0) »,
+ * 00 → +, et un numéro français 0 + 9 chiffres → +33.
+ */
+internal fun numeroInternational(saisie: String): String {
+    var t = saisie.replace("(0)", "").filter { it.isDigit() || it == '+' }
+    if (t.startsWith("00")) t = "+" + t.drop(2)
+    if (!t.startsWith("+") && t.length == 10 && t.startsWith("0")) t = "+33" + t.drop(1)
+    if (!t.startsWith("+") && t.isNotEmpty()) t = "+$t"
+    if (t.startsWith("+330") && t.length == 13) t = "+33" + t.drop(4)   // « +33 06… »
+    return t
 }
 
 /** Auto-complétion : contacts, groupes et membres de groupes dont le nom correspond ; toucher ouvre la conversation. */
