@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PersonRemove
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
@@ -93,7 +95,22 @@ fun FeuilleInfos(
         android.content.pm.PackageManager.PERMISSION_GRANTED) }
     val demandeContacts = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> accesContacts = ok }
-    val membres by produceState<List<Moteur.Membre>?>(null, c.cle, accesContacts) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
+    // Gestion du groupe (renommer, ajouter, retirer) : la passerelle transmet ; toujours après confirmation
+    var versionMembres by remember { mutableStateOf(0) }
+    val membres by produceState<List<Moteur.Membre>?>(null, c.cle, accesContacts, versionMembres) { value = if (c.estGroupe) Moteur.membresGroupe(c) else null }
+    var renommer by remember { mutableStateOf(false) }
+    var ajouter by remember { mutableStateOf(false) }
+    var aRetirer by remember { mutableStateOf<Moteur.Membre?>(null) }
+    var gestionEnCours by remember { mutableStateOf(false) }
+    fun gerer(action: suspend () -> String?, ok: String) {
+        gestionEnCours = true
+        portee.launch {
+            val err = action()
+            gestionEnCours = false
+            message(err?.let { "Échec : $it" } ?: ok)
+            if (err == null) { kotlinx.coroutines.delay(1500); versionMembres++ }
+        }
+    }
     var modifier by remember { mutableStateOf(false) }
     if (modifier) DialogueModifierContact(c) { modifier = false }
 
@@ -174,6 +191,12 @@ fun FeuilleInfos(
                     else -> {
                         var tous by remember { mutableStateOf(false) }
                         val liste = membres!!
+                        if (Moteur.peutGererGroupe(c)) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !gestionEnCours) { ajouter = true }
+                            .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.PersonAdd, null, tint = c.source.teinte())
+                            Spacer(Modifier.width(14.dp))
+                            Text(if (gestionEnCours) "Modification en cours…" else "Ajouter un membre", fontSize = 15.sp, color = c.source.teinte(), fontWeight = FontWeight.SemiBold)
+                        }
                         if (!accesContacts && liste.any { it.nom == null && it.numero != null }) TextButton(
                             onClick = { demandeContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                             modifier = Modifier.padding(start = 6.dp)) { Text("Afficher les noms de mes contacts") }
@@ -182,16 +205,30 @@ fun FeuilleInfos(
                             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Avatar(titre, c.source, false, taille = 34.dp, bordure = cs.surfaceContainerLow)
                                 Spacer(Modifier.width(12.dp))
-                                Column {
+                                Column(Modifier.weight(1f)) {
                                     Text(titre, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (mb.nom != null && mb.numero != null && !mb.moi) Text("+" + mb.numero, fontSize = 12.sp, color = cs.onSurfaceVariant)
                                 }
+                                if (Moteur.peutGererGroupe(c) && !mb.moi && mb.id.isNotEmpty())
+                                    IconButton(onClick = { aRetirer = mb }, enabled = !gestionEnCours) { Icon(Icons.Outlined.PersonRemove, "Retirer du groupe", tint = cs.onSurfaceVariant) }
                             }
                         }
                         if (liste.size > 12 && !tous) TextButton(onClick = { tous = true }, modifier = Modifier.padding(start = 6.dp)) {
                             Text("Voir tout (${liste.size - 12} de plus)")
                         }
                         Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+            // Renommer le groupe pour tous
+            if (Moteur.peutGererGroupe(c)) Carte {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(enabled = !gestionEnCours) { renommer = true }.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Edit, null, tint = c.source.teinte())
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text("Renommer le groupe", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Pour tous les membres, dans ${c.source.libelle}", fontSize = 12.sp, color = cs.onSurfaceVariant)
                     }
                 }
             }
@@ -209,6 +246,37 @@ fun FeuilleInfos(
         }
     }
 
+    if (renommer) {
+        var nom by remember { mutableStateOf(c.nom) }
+        AlertDialog(
+            onDismissRequest = { renommer = false },
+            title = { Text("Renommer le groupe") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Le nouveau nom sera visible par tous les membres dans ${c.source.libelle}.", fontSize = 13.sp)
+                androidx.compose.material3.OutlinedTextField(nom, { nom = it.take(100) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            } },
+            confirmButton = { TextButton(enabled = nom.isNotBlank() && nom.trim() != c.nom, onClick = {
+                renommer = false; gerer({ Moteur.renommerGroupe(c, nom) }, "Groupe renommé")
+            }) { Text("Renommer") } },
+            dismissButton = { TextButton(onClick = { renommer = false }) { Text("Annuler") } },
+        )
+    }
+    aRetirer?.let { mb ->
+        val qui = mb.nom ?: mb.numero?.let { "+$it" } ?: "ce membre"
+        AlertDialog(
+            onDismissRequest = { aRetirer = null },
+            title = { Text("Retirer $qui ?") },
+            text = { Text("$qui sera retiré du groupe « ${c.nom} » dans ${c.source.libelle}. Il faut être administrateur du groupe.") },
+            confirmButton = { TextButton(onClick = { aRetirer = null; gerer({ Moteur.retirerMembre(c, mb) }, "$qui retiré du groupe") }) {
+                Text("Retirer", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { aRetirer = null }) { Text("Annuler") } },
+        )
+    }
+    if (ajouter) ChoixContacts(e, c.source, "Ajouter au groupe", multiple = false,
+        exclus = membres.orEmpty().mapNotNull { it.numero }.toSet(), fermer = { ajouter = false }) { choisis ->
+        ajouter = false
+        choisis.firstOrNull()?.let { k -> gerer({ Moteur.ajouterMembre(c, k) }, "${k.nom} ajouté au groupe") }
+    }
     if (confirmerDepart) AlertDialog(
         onDismissRequest = { confirmerDepart = false },
         title = { Text("Quitter « ${c.nom} » ?") },
@@ -411,6 +479,52 @@ private fun DialogueModifierContact(c: Conversation, fermer: () -> Unit) {
                 fermer()
             }) { Text("Enregistrer") }
         },
+        dismissButton = { TextButton(onClick = fermer) { Text("Annuler") } },
+    )
+}
+
+
+/**
+ * Choix de contacts (discussions à deux d'une messagerie) : un seul ou plusieurs.
+ * Rien n'est fait ici : [valider] reçoit le choix, l'action est confirmée par la boîte de dialogue.
+ */
+@Composable
+internal fun ChoixContacts(e: Etat, s: Source, titre: String, multiple: Boolean, exclus: Set<String> = emptySet(),
+                           fermer: () -> Unit, valider: (List<Conversation>) -> Unit) {
+    var q by remember { mutableStateOf("") }
+    var choisis by remember { mutableStateOf(listOf<Conversation>()) }
+    val tous = remember(e.conversations, s) {
+        e.conversations.filter { it.source == s && !it.estGroupe }
+            .filter { k -> exclus.none { n -> n.length >= 6 && k.jid.filter(Char::isDigit).endsWith(n.takeLast(9)) } }
+            .sortedByDescending { it.derniere }
+    }
+    val liste = tous.filter { q.isBlank() || it.nom.contains(q.trim(), ignoreCase = true) }.take(80)
+    AlertDialog(
+        onDismissRequest = fermer,
+        title = { Text(titre) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(q, { q = it }, singleLine = true, placeholder = { Text("Rechercher un contact") },
+                    modifier = Modifier.fillMaxWidth())
+                Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                    if (liste.isEmpty()) Text("Aucun contact ${s.libelle}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    liste.forEach { k ->
+                        val pris = k in choisis
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (pris) s.teinte().copy(alpha = 0.14f) else Color.Transparent)
+                            .clickable { choisis = if (!multiple) listOf(k) else if (pris) choisis - k else choisis + k }.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(k.nom, k.source, false, taille = 32.dp, bordure = MaterialTheme.colorScheme.surface, cle = k.cle)
+                            Spacer(Modifier.width(10.dp))
+                            Text(k.nom, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (pris) Text("✓", color = s.teinte(), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = choisis.isNotEmpty(), onClick = { valider(choisis) }) {
+            Text(if (multiple) "Valider (${choisis.size})" else "Ajouter") } },
         dismissButton = { TextButton(onClick = fermer) { Text("Annuler") } },
     )
 }

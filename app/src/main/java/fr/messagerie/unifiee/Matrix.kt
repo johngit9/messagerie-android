@@ -240,6 +240,33 @@ class Matrix(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "quitter le groupe")
     }
 
+    /** Renomme le groupe pour tous (la passerelle transmet) — UNIQUEMENT après confirmation. */
+    fun renommer(salon: String, nom: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/state/m.room.name/", "PUT", jeton,
+            JSONObject().put("name", nom).toString(), 15_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit de renommer ce groupe")
+        if (r.code != 200) throw ErreurHttp(r.code, "renommer le groupe")
+    }
+
+    /** Ajoute un membre (invitation de son fantôme ; la passerelle l'ajoute au groupe) — UNIQUEMENT après confirmation. */
+    fun inviter(salon: String, utilisateur: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/invite", "POST", jeton,
+            JSONObject().put("user_id", utilisateur).toString(), 20_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit d'ajouter des membres (administrateur du groupe ?)")
+        if (r.code != 200) throw ErreurHttp(r.code, "ajouter le membre")
+    }
+
+    /** Retire un membre du groupe — UNIQUEMENT après confirmation. */
+    fun retirer(salon: String, utilisateur: String) {
+        connecter()
+        val r = Http.requete("$base/_matrix/client/v3/rooms/${Http.enc(salon)}/kick", "POST", jeton,
+            JSONObject().put("user_id", utilisateur).toString(), 20_000)
+        if (r.code == 403) throw Exception("vous n'avez pas le droit de retirer des membres (administrateur du groupe ?)")
+        if (r.code != 200) throw ErreurHttp(r.code, "retirer le membre")
+    }
+
     /** Télécharge un média mxc://serveur/id (lecture seule). */
     fun media(mxc: String): ByteArray {
         connecter()

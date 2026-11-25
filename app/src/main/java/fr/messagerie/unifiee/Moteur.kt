@@ -755,6 +755,27 @@ object Moteur {
         } catch (e: Exception) { e.message ?: e.toString() }
     }
 
+    /** Autocollant possible ? (passerelles qui transmettent m.sticker) */
+    fun autocollantPossible(c: Conversation) = cfg.matrixConfigure && c.source in listOf(Source.WHATSAPP, Source.TELEGRAM, Source.SIGNAL)
+
+    /** Envoie un autocollant (image .webp du clavier) — UNIQUEMENT sur « Envoyer » de l'aperçu. */
+    suspend fun envoyerAutocollant(octets: ByteArray, typeMime: String, c: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!autocollantPossible(c)) return@withContext "autocollants impossibles pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "discussion introuvable sur le serveur"
+            val bornes = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(octets, 0, octets.size, bornes)
+            val nom = "autocollant." + if (typeMime == "image/png") "png" else "webp"
+            val m = Matrix(cfg)
+            val mxc = m.televerser(octets, typeMime, nom)
+            val info = org.json.JSONObject().put("mimetype", typeMime).put("size", octets.size)
+            if (bornes.outWidth > 0) info.put("w", bornes.outWidth).put("h", bornes.outHeight)
+            val eid = m.envoyerEvenement(salon, "m.sticker", org.json.JSONObject().put("body", "Autocollant").put("url", mxc).put("info", info))
+            afficherEnvoye(c, eid, "[autocollant]", type = "autocollant", media = "$mxc#$typeMime#autocollant")
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
     /**
      * Envoie un fichier (vidéo, document, fiche contact .vcf…) — UNIQUEMENT sur le bouton « Envoyer » de l'aperçu.
      * Les images passent par [envoyerImage].
@@ -1343,6 +1364,77 @@ object Moteur {
             if (!_etat.value.estArchivee(c)) withContext(Dispatchers.Main) { basculerArchive(c) }
             null
         } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    // MARK: Gestion des groupes — uniquement après confirmation de l'utilisateur
+
+    /** Messageries où les groupes se gèrent depuis Messagerie (par la passerelle). */
+    fun groupesGerables(s: Source) = cfg.matrixConfigure && s in listOf(Source.WHATSAPP, Source.SIGNAL, Source.TELEGRAM)
+
+    fun peutGererGroupe(c: Conversation) = c.estGroupe && groupesGerables(c.source)
+
+    /** Fantôme (identifiant Matrix) du contact d'une discussion à deux. */
+    private fun fantomeDe(m: Matrix, dm: Conversation): String? {
+        val salon = salonPourEnvoi(dm) ?: return null
+        val moi = setOfNotNull(cfg.matrixUtilisateur, cfg.moiFantome.takeIf { it.isNotEmpty() }, SyncPont.moiDetecte(Pont.pour(dm.source)))
+        return m.membres(salon).keys.firstOrNull { it.startsWith(Pont.pour(dm.source).prefixe) && it !in moi && !it.contains("bot:") }
+    }
+
+    suspend fun renommerGroupe(c: Conversation, nom: String): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c)) return@withContext "impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            Matrix(cfg).renommer(salon, nom.trim())
+            archive.enregistrerConversations(listOf(c.copy(nom = nom.trim())))
+            recharger()
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    suspend fun ajouterMembre(c: Conversation, contact: Conversation): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c)) return@withContext "impossible pour ${c.source.libelle}"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            val m = Matrix(cfg); m.connecter()
+            val fantome = fantomeDe(m, contact) ?: return@withContext "contact introuvable sur la passerelle"
+            m.inviter(salon, fantome)
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    suspend fun retirerMembre(c: Conversation, membre: Membre): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!peutGererGroupe(c) || membre.moi || membre.id.isEmpty()) return@withContext "impossible de retirer ce membre"
+            val salon = salonPourEnvoi(c) ?: return@withContext "groupe introuvable sur le serveur"
+            Matrix(cfg).retirer(salon, membre.id)
+            null
+        } catch (e: Exception) { e.message ?: e.toString() }
+    }
+
+    /**
+     * Crée un groupe sur la messagerie (WhatsApp, Signal, Telegram) avec ces contacts — UNIQUEMENT après confirmation.
+     * Passe par le relais du serveur (POST /groupes/creer), qui le demande à la passerelle.
+     * Renvoie (clé de la conversation si déjà visible, message à afficher).
+     */
+    suspend fun creerGroupe(s: Source, nom: String, contacts: List<Conversation>): Pair<String?, String> = withContext(Dispatchers.IO) {
+        try {
+            if (!groupesGerables(s)) return@withContext null to "impossible pour ${s.libelle}"
+            if (!cfg.relaisConfigure) return@withContext null to "relais non configuré"
+            val m = Matrix(cfg); m.connecter()
+            val fantomes = contacts.mapNotNull { fantomeDe(m, it) }
+            if (fantomes.isEmpty()) return@withContext null to "aucun contact trouvé sur la passerelle"
+            val salon = Relais(cfg).creerGroupe(s.id.lowercase(), nom.trim(), fantomes)
+            runCatching { m.rejoindre(salon) }
+            repeat(6) {
+                actualiser(relancerSiOccupe = true)
+                val e = _etat.value
+                val jid = if (s == Source.WHATSAPP) e.salonsWhatsApp.entries.firstOrNull { it.value == salon }?.key else salon
+                e.conversations.firstOrNull { it.source == s && it.jid == jid }?.let { return@withContext it.cle to "Groupe créé" }
+                if (s == Source.WHATSAPP) runCatching { Relais(cfg).salonsWhatsApp() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { memoriserSalonsWhatsApp(it) }
+                delay(2500)
+            }
+            null to "Groupe créé : il apparaîtra dans la liste après le premier message"
+        } catch (e: Exception) { null to (e.message ?: e.toString()) }
     }
 
     // MARK: Transfert — uniquement après confirmation de l'utilisateur

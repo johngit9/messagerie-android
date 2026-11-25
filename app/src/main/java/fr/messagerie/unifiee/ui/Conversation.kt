@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,7 +142,7 @@ private sealed class Ligne(val cle: String) {
     class Msg(val m: Message, val auteur: Boolean, val dernier: Boolean = true) : Ligne(m.cle)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -> Unit,
     rechercheInitiale: String? = null, messageCible: String? = null, ouvrir: (String) -> Unit = {}) {
@@ -188,6 +189,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
     // Image collée depuis le presse-papiers (copie d'écran…) : envoyée seulement sur « Envoyer »
     var imageCollee by remember(c.cle) { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    // Image venue du clavier en .webp : envoyée comme autocollant (sans bulle chez le contact)
+    var commeAutocollant by remember(c.cle) { mutableStateOf(false) }
     var pieceJointe by remember(c.cle) { mutableStateOf<PieceJointe?>(null) }
     var menuJoindre by remember { mutableStateOf(false) }
     var imageDispo by remember { mutableStateOf(false) }
@@ -667,16 +670,21 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                 modifier = Modifier.size(72.dp).background(Color.White, RoundedCornerShape(10.dp))
                                     .then(Modifier.padding(0.dp)))
                             Column(Modifier.weight(1f)) {
-                                Text("Image à envoyer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text(if (commeAutocollant) "Autocollant à envoyer" else if (mime == "image/gif") "GIF à envoyer" else "Image à envoyer",
+                                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                 Text("${octets.size / 1024} Ko", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if ((mime == "image/webp" || mime == "image/png") && Moteur.autocollantPossible(c)) Text(
+                                    if (commeAutocollant) "☑ Comme autocollant" else "☐ Comme autocollant", fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
+                                    modifier = Modifier.clickable { commeAutocollant = !commeAutocollant }.padding(vertical = 4.dp))
                             }
-                            IconButton(onClick = { imageCollee = null }) { Icon(Icons.Outlined.Close, "Retirer l'image") }
+                            IconButton(onClick = { imageCollee = null; commeAutocollant = false }) { Icon(Icons.Outlined.Close, "Retirer l'image") }
                             Button(onClick = {
                                 envoi = true
                                 portee.launch {
-                                    val err = Moteur.envoyerImage(octets, mime, c)
+                                    val err = if (commeAutocollant) Moteur.envoyerAutocollant(octets, mime, c) else Moteur.envoyerImage(octets, mime, c)
                                     envoi = false
-                                    if (err == null) { imageCollee = null; afficher("Image envoyée") } else afficher("Échec : $err")
+                                    if (err == null) { imageCollee = null; commeAutocollant = false; afficher(if (mime == "image/gif") "GIF envoyé" else "Image envoyée") } else afficher("Échec : $err")
                                 }
                             }, enabled = !envoi, colors = ButtonDefaults.buttonColors(containerColor = c.source.teinte())) {
                                 if (envoi) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
@@ -853,7 +861,21 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                             androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
                                         },
                                     minLines = if (saisieAgrandie) 8 else 1, maxLines = if (saisieAgrandie) 16 else 6,
-                                    modifier = Modifier.weight(1f).padding(vertical = 13.dp),
+                                    // GIF et autocollants du clavier (Gboard…) : aperçu, envoyés seulement sur « Envoyer »
+                                    modifier = Modifier.weight(1f).padding(vertical = 13.dp).contentReceiver { contenu ->
+                                        val clip = contenu.clipEntry.clipData
+                                        val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri }
+                                        if (uri == null || !Moteur.imagePossible(c)) contenu
+                                        else {
+                                            runCatching {
+                                                val mime = ctxVocal.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/gif"
+                                                val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("illisible")
+                                                imageCollee = octets to mime
+                                                commeAutocollant = mime == "image/webp" && Moteur.autocollantPossible(c)
+                                            }.onFailure { afficher("Impossible d'ajouter l'image du clavier") }
+                                            null
+                                        }
+                                    },
                                     decorationBox = { champTexte ->
                                         Box {
                                             if (brouillon.isEmpty()) Text(if (c.source == Source.SMS) "Message SMS" else "Message ${c.source.id}",

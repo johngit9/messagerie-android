@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Dialpad
@@ -108,6 +109,18 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
     var demande by remember { mutableStateOf<Pair<Source, String>?>(null) }
     var enCours by remember { mutableStateOf(false) }
     var resultat by remember { mutableStateOf<String?>(null) }
+    // Nouveau groupe : messagerie, puis contacts, puis nom (création confirmée)
+    var groupeSource by remember { mutableStateOf<Source?>(null) }
+    var choixSourceGroupe by remember { mutableStateOf(false) }
+    var groupeMembres by remember { mutableStateOf<List<Conversation>?>(null) }
+    fun creerGroupe(s: Source, nom: String, membres: List<Conversation>) {
+        enCours = true; resultat = null
+        portee.launch {
+            val (cle, texte) = Moteur.creerGroupe(s, nom, membres)
+            enCours = false
+            if (cle != null) ouvrir(cle) else resultat = texte
+        }
+    }
     fun demarrer(s: Source, ident: String) {
         enCours = true; resultat = null
         portee.launch {
@@ -185,6 +198,11 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                         }
                     }
                 }
+                if (q.isEmpty() && Moteur.cfg.matrixConfigure) item(key = "groupe") {
+                    OutlinedButton(onClick = { choixSourceGroupe = true }, enabled = !enCours, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.GroupAdd, null); Spacer(Modifier.width(8.dp)); Text("Nouveau groupe")
+                    }
+                }
                 if (pseudoTelegram) item(key = "pseudo") {
                     OutlinedButton(onClick = { demande = Source.TELEGRAM to q.trim() }, enabled = !enCours, modifier = Modifier.fillMaxWidth()) {
                         LogoSource(Source.TELEGRAM, 20.dp); Spacer(Modifier.width(8.dp)); Text("Écrire à ${q.trim()} sur Telegram")
@@ -227,6 +245,39 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                 }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+    if (choixSourceGroupe) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { choixSourceGroupe = false },
+        title = { Text("Nouveau groupe sur…") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(Source.WHATSAPP, Source.SIGNAL, Source.TELEGRAM).filter { Moteur.groupesGerables(it) }.forEach { s ->
+                OutlinedButton(onClick = { choixSourceGroupe = false; groupeSource = s }, modifier = Modifier.fillMaxWidth()) {
+                    LogoSource(s, 20.dp); Spacer(Modifier.width(8.dp)); Text(s.libelle)
+                }
+            }
+        } },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { choixSourceGroupe = false }) { Text("Annuler") } },
+    )
+    groupeSource?.let { s ->
+        if (groupeMembres == null) ChoixContacts(e, s, "Membres du groupe ${s.libelle}", multiple = true,
+            fermer = { groupeSource = null }) { groupeMembres = it }
+        else {
+            var nom by remember { mutableStateOf("") }
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { groupeSource = null; groupeMembres = null },
+                title = { Text("Nom du groupe") },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(nom, { nom = it.take(100) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Nom du groupe") })
+                    Text("Le groupe sera créé dans ${s.libelle} avec " + groupeMembres!!.joinToString(", ") { it.nom } +
+                        ". Ils verront qu'ils ont été ajoutés ; aucun message n'est envoyé.", fontSize = 13.sp)
+                } },
+                confirmButton = { androidx.compose.material3.TextButton(enabled = nom.isNotBlank(), onClick = {
+                    val m = groupeMembres!!; groupeSource = null; groupeMembres = null; creerGroupe(s, nom, m)
+                }) { Text("Créer le groupe") } },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { groupeSource = null; groupeMembres = null }) { Text("Annuler") } },
+            )
         }
     }
     demande?.let { (src, ident) ->
