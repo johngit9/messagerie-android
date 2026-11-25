@@ -92,7 +92,7 @@ data class Etat(
     fun aTraiter(c: Conversation): Boolean {
         val e = etat(c)
         if (e.manuel) return true
-        if (c.dernierDeMoi || c.derniere < depuis) return false
+        if (c.dernierDeMoi || c.derniere < depuis || c.estStatuts) return false
         // Groupe : « À traiter » seulement si vous y êtes mentionné depuis votre dernier message
         if (c.estGroupe) {
             val mention = mentions[c.cle] ?: return false
@@ -1880,6 +1880,7 @@ object Moteur {
     }
 
     private fun notifierMessages(c: Conversation, msgs: List<Message>) {
+        if (c.estStatuts) return   // statuts WhatsApp : pas de notification, comme l'appli officielle
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val canal = canalMessages(c.source)

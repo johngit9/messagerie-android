@@ -600,7 +600,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             verticalAlignment = Alignment.Bottom) {
                             if (modeSelection) { Spacer(Modifier.width(4.dp)); PastilleSelection(l.m.cle in selection, c.source.teinte()); Spacer(Modifier.width(6.dp)) }
                             // Groupe : pastille de l'expéditeur au bas de son bloc de messages
-                            if (c.estGroupe && !l.m.deMoi) {
+                            if ((c.estGroupe || c.estStatuts) && !l.m.deMoi) {
                                 Box(Modifier.padding(bottom = 2.dp).size(30.dp)) { if (l.dernier) PastilleAuteur(l.m.auteur) }
                                 Spacer(Modifier.width(6.dp))
                             }
@@ -1160,7 +1160,7 @@ private fun Bulle(
     val monEmoji = maReaction?.emoji ?: reactions.firstOrNull { it.deMoi }?.emoji
     Column(Modifier.fillMaxWidth().padding(top = 2.dp),
         horizontalAlignment = if (moi) Alignment.End else Alignment.Start) {
-        if (c.estGroupe && !moi && afficherAuteur) {
+        if ((c.estGroupe || c.estStatuts) && !moi && afficherAuteur) {
             Text(m.auteur, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = couleurAuteur(m.auteur), modifier = Modifier.padding(start = 12.dp, bottom = 3.dp))
         }
         // Bloc de messages : coins resserrés du côté de l'expéditeur entre deux bulles du même bloc
@@ -1776,7 +1776,7 @@ private fun BandeauSalon(infos: Moteur.InfosSalon?, historique: List<Message>, c
         Column(Modifier.weight(1f)) {
             Text(if (infos.epingles.size > 1) "${infos.epingles.size} messages épinglés" else "Message épinglé",
                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte())
-            Text(m?.let { (if (it.deMoi) "Vous : " else if (c.estGroupe) it.auteur + " : " else "") + apercuMessage(it) } ?: "Message plus ancien",
+            Text(m?.let { (if (it.deMoi) "Vous : " else if (c.estGroupe || c.estStatuts) it.auteur + " : " else "") + apercuMessage(it) } ?: "Message plus ancien",
                 fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

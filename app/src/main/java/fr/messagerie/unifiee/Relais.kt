@@ -137,10 +137,13 @@ class Relais(private val cfg: Config) {
     fun salonsWhatsApp(): Map<String, String> {
         connecter()
         val r = HashMap<String, String>()
-        for (s in get("/whatsapp/salons").optJSONArray("salons")?.objets() ?: emptyList()) {
+        val j = get("/whatsapp/salons")
+        for (s in j.optJSONArray("salons")?.objets() ?: emptyList()) {
             val salon = s.optString("salon"); val jid = s.optString("jid")
             if (salon.isNotEmpty() && jid.isNotEmpty()) r[salon] = jid
         }
+        // Salon des statuts (absent tant qu'aucun statut n'est arrivé) : conversation en lecture seule
+        j.optString("statuts").takeIf { it.startsWith("!") }?.let { r[it] = "status@broadcast" }
         return r
     }
 
