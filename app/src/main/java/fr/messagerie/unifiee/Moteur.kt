@@ -1642,12 +1642,19 @@ object Moteur {
             f.outputStream().use { finale.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
         }
         photos.remove(cle)
+        sansPhoto.clear()
         _versionPhotos.value++
         recharger()
     }
 
     /** Photo de contact déjà téléchargée (sans réseau), pour les notifications et les bulles. */
     fun photoEnCache(conv: String): java.io.File? {
+        photoEnCacheDirecte(conv)?.let { return it }
+        val c = _etat.value.conversations.firstOrNull { it.cle == conv }?.takeIf { !it.estGroupe } ?: return null
+        return fichierCarnet(c) ?: runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { photoEnCacheDirecte(it.cle) }
+    }
+
+    private fun photoEnCacheDirecte(conv: String): java.io.File? {
         photoPerso(conv)?.let { return it }
         photos[conv]?.let { return it }
         val mxc = archive.avatar(conv) ?: return null
@@ -1659,21 +1666,61 @@ object Moteur {
     fun photoCarnet(c: Conversation): android.graphics.Bitmap? {
         if (c.estGroupe || androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) return null
-        val numero = c.jid.substringBefore('@').filter { it.isDigit() }.takeIf { it.length >= 6 }
+        val numero = c.jid.substringBefore('@').filter { it.isDigit() }.takeIf { it.length >= 6 && c.source != Source.SMS }
+            ?: numeros[c.cle]?.filter { it.isDigit() }?.takeIf { it.length >= 6 }
             ?: nomsCarnet.entries.firstOrNull { it.value == c.nom }?.key?.filter { it.isDigit() }?.takeIf { it.length >= 6 }
             ?: c.nom.filter { it.isDigit() }.takeIf { it.length >= 6 && c.nom.none { ch -> ch.isLetter() } }
-            ?: return null
         return runCatching {
-            val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode("+$numero"))
-            val photo = app.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.PHOTO_URI), null, null, null)?.use { cur ->
-                if (cur.moveToFirst()) cur.getString(0) else null
-            } ?: return null
-            app.contentResolver.openInputStream(android.net.Uri.parse(photo))?.use { android.graphics.BitmapFactory.decodeStream(it) }
+            val cr = app.contentResolver
+            val parNumero = numero?.let {
+                val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode("+$it"))
+                cr.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.PHOTO_URI), null, null, null)?.use { cur ->
+                    if (cur.moveToFirst()) cur.getString(0) else null
+                }
+            }
+            // SMS/RCS : la passerelle ne transmet pas le numéro, mais le nom vient de ce même carnet → recherche par nom exact
+            val photo = parNumero ?: listOfNotNull(c.nom.trim(), c.nom.replace(" (WA)", "").trim()).distinct()
+                .filter { it.isNotEmpty() && !estUnNumero(it) }.firstNotNullOfOrNull { nom ->
+                    cr.query(android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf(android.provider.ContactsContract.Contacts.PHOTO_URI),
+                        "${android.provider.ContactsContract.Contacts.DISPLAY_NAME} = ? AND ${android.provider.ContactsContract.Contacts.PHOTO_URI} IS NOT NULL",
+                        arrayOf(nom), null)?.use { cur -> if (cur.moveToFirst()) cur.getString(0) else null }
+                } ?: return null
+            cr.openInputStream(android.net.Uri.parse(photo))?.use { android.graphics.BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
+
+    /** Photo du carnet d'adresses enregistrée en miniature locale (renouvelée chaque jour), pour l'afficher comme les autres. */
+    private fun fichierCarnet(c: Conversation): java.io.File? {
+        if (c.estGroupe) return null
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(("carnet:" + c.cle).toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        val f = java.io.File(java.io.File(app.cacheDir, "avatars"), "carnet-$hash.jpg")
+        if (f.exists() && f.length() > 0 && System.currentTimeMillis() - f.lastModified() < 24 * 3_600_000L) return f
+        val image = photoCarnet(c) ?: return null.also { f.delete() }
+        return runCatching {
+            f.parentFile?.mkdirs()
+            f.outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+            f
         }.getOrNull()
     }
 
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
     suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
+        photoDirecte(conv)?.let { return@withContext it }
+        // Pas de photo transmise (ex. SMS/RCS : Google Messages n'en envoie pas toujours) : photo du carnet d'adresses
+        // du téléphone (lecture locale), sinon celle de la même personne sur une autre messagerie (fiche contact unifiée).
+        sansPhoto[conv]?.let { if (System.currentTimeMillis() - it < 10 * 60_000L) return@withContext null }
+        val c = _etat.value.conversations.firstOrNull { it.cle == conv } ?: return@withContext null
+        if (c.estGroupe) return@withContext null
+        (fichierCarnet(c) ?: runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { photoDirecte(it.cle) })
+            ?.also { photos[conv] = it }
+            ?: null.also { sansPhoto[conv] = System.currentTimeMillis() }
+    }
+
+    /** Conversations sans photo, ni ici ni ailleurs (évite de refaire le rapprochement à chaque affichage ; 10 min). */
+    private val sansPhoto = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Photo propre à la conversation : choisie par vous, sinon celle de la messagerie (téléchargée une fois). */
+    private suspend fun photoDirecte(conv: String): java.io.File? = withContext(Dispatchers.IO) {
         photoPerso(conv)?.let { return@withContext it }
         photos[conv]?.let { return@withContext it }
         val mxc = archive.avatar(conv) ?: return@withContext null
