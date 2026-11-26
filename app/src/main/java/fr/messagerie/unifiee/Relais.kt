@@ -19,10 +19,17 @@ class Relais(private val cfg: Config) {
     fun connecter() {
         if (!cfg.relaisConfigure) throw Injoignable("relais non configuré")
         derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
-        for (u in (listOfNotNull(derniereBonne) + Config.liste(cfg.relaisUrls)).distinct()) {
-            try {
-                if (Http.requete("$u/etat", jeton = jeton, delaiMs = 5_000).code == 200) { base = u; derniereBonne = u; verifieLe = System.currentTimeMillis(); return }
-            } catch (_: Exception) {}
+        synchronized(Relais::class.java) {
+            derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
+            val toutes = (listOfNotNull(derniereBonne, cfg.dernierRelais.ifEmpty { null }) + Config.liste(cfg.relaisUrls)).distinct()
+                .filter { it in Config.liste(cfg.relaisUrls) || it == derniereBonne }
+            // Toutes les adresses en même temps : la première qui répond gagne
+            val u = Http.premiereQuiRepond(toutes) { Http.requete("$it/etat", jeton = jeton, delaiMs = 5_000).code == 200 }
+            if (u != null) {
+                base = u; derniereBonne = u; verifieLe = System.currentTimeMillis()
+                if (cfg.dernierRelais != u) cfg.dernierRelais = u
+                return
+            }
         }
         derniereBonne = null
         throw Injoignable("relais injoignable : le serveur est-il allumé ?")

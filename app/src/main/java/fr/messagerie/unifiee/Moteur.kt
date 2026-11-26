@@ -132,7 +132,7 @@ object Moteur {
     private val gardien = CoroutineExceptionHandler { _, t -> Plantages.noter(t, fatal = false) }
     private val portee = CoroutineScope(SupervisorJob() + Dispatchers.IO + gardien)
     /** Au plus 2 passerelles importent en même temps (mémoire et base de données). */
-    private val passerelles = Semaphore(2)
+    private val passerelles = Semaphore(5)   // toutes les passerelles à la fois (une seule connexion au serveur)
     private val _etat = MutableStateFlow(Etat())
     val etat: StateFlow<Etat> = _etat
     private val verrou = Mutex()
@@ -293,7 +293,7 @@ object Moteur {
                         val n = Relais(cfg).synchroniser(archive)
                         runCatching { Relais(cfg).lus() }.getOrNull()?.let { appliquerLectures(it.second) }
                         if (n >= Relais.MAX_PAR_PASSAGE) _etat.update { it.copy(importEnCours = "Import de l'historique Element…") }
-                        EtatSource.Ok(0)
+                        EtatSource.Ok(0).also { progres(Source.ELEMENT, it) }
                     } catch (e: Exception) { EtatSource.Erreur(e.message ?: e.toString()) }
                 }
                 val teams = async {
@@ -318,11 +318,10 @@ object Moteur {
                     val telegram = async { synchroniserPont(Pont.TELEGRAM, null, sources[Source.TELEGRAM]) }
                     val linkedin = async { synchroniserPont(Pont.LINKEDIN, null, sources[Source.LINKEDIN]) }
                     val signal = async { synchroniserPont(Pont.SIGNAL, null, sources[Source.SIGNAL]) }
-                    sources[Source.SMS] = sms.await()
-                    sources[Source.TELEGRAM] = telegram.await()
-                    sources[Source.LINKEDIN] = linkedin.await()
-                    sources[Source.SIGNAL] = signal.await()
-                    sources[Source.WHATSAPP] = whatsapp.await()
+                    // Affichage au fur et à mesure : chaque messagerie apparaît dès qu'elle a fini, sans attendre les autres
+                    val enCours = mapOf(Source.SMS to sms, Source.TELEGRAM to telegram, Source.LINKEDIN to linkedin, Source.SIGNAL to signal, Source.WHATSAPP to whatsapp)
+                    enCours.map { (s, d) -> async { val r = d.await(); progres(s, r) } }.forEach { it.await() }
+                    enCours.forEach { (s, d) -> sources[s] = d.await() }
                     _etat.update { it.copy(sources = sources.toMap()) }
                     recharger()
                 } else {
@@ -354,6 +353,15 @@ object Moteur {
         }
         // Un envoi a eu lieu pendant l'actualisation : on repasse pour récupérer son écho.
         if (relanceDemandee) { relanceDemandee = false; portee.launch { actualiser() } }
+    }
+
+    private val verrouProgres = Any()
+    /** Une messagerie vient de finir sa synchro : on affiche tout de suite ce qu'elle a apporté. */
+    private fun progres(s: Source, r: EtatSource) {
+        synchronized(verrouProgres) {
+            _etat.update { it.copy(sources = it.sources + (s to r)) }
+            runCatching { recharger() }
+        }
     }
 
     private suspend fun synchroniserPont(pont: Pont, correspondance: Map<String, String>?, avant: EtatSource?, avecRcs: Boolean = false): EtatSource =

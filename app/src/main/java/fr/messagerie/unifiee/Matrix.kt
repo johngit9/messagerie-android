@@ -28,18 +28,22 @@ class Matrix(private val cfg: Config) {
     val presence get() = cfg.presence
     private val jeton get() = cfg.matrixJeton
 
-    /** Essaie la dernière adresse qui a marché, puis les autres dans l'ordre saisi. */
+    /** Essaie toutes les adresses saisies en même temps et garde la plus rapide (mémorisée pour le lancement suivant). */
     fun connecter() {
         if (!cfg.matrixConfigure) throw Injoignable("serveur Matrix non configuré")
         // Adresse vérifiée il y a moins de 2 min : pas de nouvelle sonde (plus rapide).
         derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
-        val toutes = (listOfNotNull(derniereBonne) + Config.liste(cfg.matrixUrls)).distinct()
-        for (u in toutes) {
-            try {
-                if (Http.requete("$u/_matrix/client/v3/account/whoami", jeton = jeton, delaiMs = 5_000).code == 200) {
-                    base = u; derniereBonne = u; verifieLe = System.currentTimeMillis(); return
-                }
-            } catch (_: Exception) {}
+        synchronized(Matrix::class.java) {
+            // Une autre synchro vient de trouver l'adresse pendant qu'on attendait : on la reprend
+            derniereBonne?.let { if (System.currentTimeMillis() - verifieLe < 120_000) { base = it; return } }
+            val toutes = (listOfNotNull(derniereBonne, cfg.derniereMatrix.ifEmpty { null }) + Config.liste(cfg.matrixUrls)).distinct()
+                .filter { it in Config.liste(cfg.matrixUrls) || it == derniereBonne }
+            val u = Http.premiereQuiRepond(toutes) { Http.requete("$it/_matrix/client/v3/account/whoami", jeton = jeton, delaiMs = 5_000).code == 200 }
+            if (u != null) {
+                base = u; derniereBonne = u; verifieLe = System.currentTimeMillis()
+                if (cfg.derniereMatrix != u) cfg.derniereMatrix = u
+                return
+            }
         }
         derniereBonne = null
         throw Injoignable("serveur Matrix injoignable : le serveur est-il allumé et joignable depuis ce téléphone ?")

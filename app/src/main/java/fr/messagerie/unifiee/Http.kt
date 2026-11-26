@@ -8,6 +8,24 @@ class ErreurHttp(val code: Int, val chemin: String) : Exception("erreur $code su
 class Injoignable(message: String) : Exception(message)
 
 object Http {
+    private val sondes = java.util.concurrent.Executors.newCachedThreadPool()
+
+    /**
+     * Essaie toutes les adresses EN MÊME TEMPS et renvoie la première qui répond (test vrai), sinon null.
+     * Au démarrage, une adresse injoignable (réseau local hors de chez vous…) ne fait plus attendre les autres.
+     */
+    fun premiereQuiRepond(adresses: List<String>, test: (String) -> Boolean): String? {
+        if (adresses.isEmpty()) return null
+        if (adresses.size == 1) return adresses[0].takeIf { runCatching { test(it) }.getOrDefault(false) }
+        val file = java.util.concurrent.LinkedBlockingQueue<Pair<String, Boolean>>()
+        adresses.forEach { u -> sondes.execute { file.put(u to runCatching { test(u) }.getOrDefault(false)) } }
+        repeat(adresses.size) {
+            val (u, ok) = file.poll(15, java.util.concurrent.TimeUnit.SECONDS) ?: return null
+            if (ok) return u
+        }
+        return null
+    }
+
     data class Reponse(val code: Int, val corps: ByteArray) {
         val texte get() = String(corps, Charsets.UTF_8)
     }
