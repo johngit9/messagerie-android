@@ -248,7 +248,11 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     // Le presse-papiers contient-il une image ? (on lit seulement sa description ; l'image n'est lue que sur appui)
     val pressePapiers = remember { ctxVocal.getSystemService(ClipboardManager::class.java) }
     fun verifierPressePapiers() {
-        imageDispo = runCatching { pressePapiers.primaryClipDescription?.hasMimeType("image/*") == true }.getOrDefault(false)
+        // Image, ou tout autre fichier copié (PDF, document…) : pas du simple texte
+        imageDispo = runCatching {
+            val d = pressePapiers.primaryClipDescription ?: return@runCatching false
+            (0 until d.mimeTypeCount).any { i -> val m = d.getMimeType(i); !m.startsWith("text/") }
+        }.getOrDefault(false)
     }
     androidx.compose.runtime.DisposableEffect(Unit) {
         val l = ClipboardManager.OnPrimaryClipChangedListener { verifierPressePapiers() }
@@ -257,16 +261,6 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     }
     val fenetreActive = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
     LaunchedEffect(fenetreActive) { if (fenetreActive) verifierPressePapiers() }
-    fun collerImage() {
-        runCatching {
-            val clip = pressePapiers.primaryClip ?: error("presse-papiers vide")
-            val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri } ?: error("aucune image")
-            val mime = ctxVocal.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/png"
-            val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("image illisible")
-            if (octets.size > 20_000_000) error("image trop lourde")
-            imageCollee = octets to mime
-        }.onFailure { portee.launch { snack.showSnackbar("Impossible de coller l'image : ${it.message}") } }
-    }
     LaunchedEffect(vocal) { while (vocal == 1) { tempsVocal = enregistreur.ecoule(); kotlinx.coroutines.delay(200) } }
     val demandeMicro = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
@@ -359,6 +353,19 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
             if (mime.startsWith("image/") && mime != "image/svg+xml") imageCollee = octets to mime
             else pieceJointe = PieceJointe(octets, mime, nom)
         }.onFailure { afficher("Impossible de joindre le fichier : ${it.message}") }
+    }
+    fun collerImage() {
+        runCatching {
+            val clip = pressePapiers.primaryClip ?: error("presse-papiers vide")
+            val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri } ?: error("aucune image")
+            val type = ctxVocal.contentResolver.getType(uri)
+            // Autre chose qu'une image : même aperçu que « Joindre un fichier »
+            if (type != null && !type.startsWith("image/")) { chargerFichier(uri); return@runCatching }
+            val mime = type ?: "image/png"
+            val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("image illisible")
+            if (octets.size > 20_000_000) error("image trop lourde")
+            imageCollee = octets to mime
+        }.onFailure { portee.launch { snack.showSnackbar("Impossible de coller l'image : ${it.message}") } }
     }
     fun chargerContact(uri: android.net.Uri) {
         runCatching {
@@ -791,7 +798,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             }
                         }
                     }
-                    if (imageCollee == null && imageDispo && Moteur.imagePossible(c)) Text("📋 Coller l'image copiée",
+                    if (imageCollee == null && imageDispo && Moteur.imagePossible(c)) Text("📋 Coller ce qui a été copié",
                         fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.source.teinte(),
                         modifier = Modifier.background(c.source.teinte().copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                             .clickable { collerImage() }.padding(horizontal = 12.dp, vertical = 8.dp))
@@ -928,14 +935,18 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                             androidx.compose.ui.text.input.TransformedText(a, androidx.compose.ui.text.input.OffsetMapping.Identity)
                                         },
                                     minLines = if (saisieAgrandie) 8 else 1, maxLines = if (saisieAgrandie) 16 else 6,
-                                    // GIF et autocollants du clavier (Gboard…) : aperçu, envoyés seulement sur « Envoyer »
+                                    // Collé, glissé-déposé ou venu du clavier (GIF, autocollants) : image ou fichier, aperçu,
+                                    // envoyé seulement sur « Envoyer »
                                     modifier = Modifier.weight(1f).padding(vertical = 13.dp).contentReceiver { contenu ->
                                         val clip = contenu.clipEntry.clipData
                                         val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri }
                                         if (uri == null || !Moteur.imagePossible(c)) contenu
                                         else {
                                             runCatching {
-                                                val mime = ctxVocal.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/gif"
+                                                val type = ctxVocal.contentResolver.getType(uri)
+                                                // Fichier collé ou glissé (PDF, document…) : aperçu de pièce jointe
+                                                if (type != null && !type.startsWith("image/")) { chargerFichier(uri); return@runCatching }
+                                                val mime = type ?: "image/gif"
                                                 val octets = ctxVocal.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("illisible")
                                                 imageCollee = octets to mime
                                                 commeAutocollant = mime == "image/webp" && Moteur.autocollantPossible(c)
