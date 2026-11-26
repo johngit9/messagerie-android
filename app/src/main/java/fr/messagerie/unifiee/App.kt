@@ -19,6 +19,7 @@ class App : Application() {
         Plantages.installer(this)
         Moteur.init(this)
         SynchroArrierePlan.programmer(this)
+        Surveillance.ecouterReseau(this)
     }
 }
 
