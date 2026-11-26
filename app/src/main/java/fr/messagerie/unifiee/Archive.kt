@@ -274,6 +274,13 @@ class Archive(context: Context) : SQLiteOpenHelper(context, "archive.db", null, 
         } finally { db.endTransaction() }
     }
 
+    /** Par conversation : date du message reçu le plus récent auquel vous avez réagi (dans l'appli ou ailleurs). */
+    fun datesMesReactions(): Map<String, Long> = try {
+        readableDatabase.rawQuery("""SELECT m.conv, MAX(m.date) FROM messages m WHERE m.de_moi = 0 AND (
+                m.cle IN (SELECT cible FROM mes_reactions) OR m.cle IN (SELECT cible FROM reactions WHERE de_moi = 1))
+            GROUP BY m.conv""", null).lignes { it.getString(0) to it.getLong(1) }.toMap()
+    } catch (e: Exception) { emptyMap() }
+
     /** Réactions reçues d'une conversation, par message visé. */
     fun reactions(conv: String): Map<String, List<Reaction>> =
         readableDatabase.rawQuery("SELECT * FROM reactions WHERE conv = ?", arrayOf(conv)).lignes { c ->

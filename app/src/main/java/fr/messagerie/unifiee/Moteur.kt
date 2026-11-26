@@ -46,6 +46,8 @@ data class Etat(
     val lusParContacts: Map<String, Long> = emptyMap(),
     /** Date du dernier « distribué » (reçu sur le téléphone du contact) par conversation, si la passerelle le transmet. */
     val recusParContacts: Map<String, Long> = emptyMap(),
+    /** Date du dernier message reçu auquel vous avez réagi, par conversation : une réaction vaut réponse. */
+    val mesReactions: Map<String, Long> = emptyMap(),
     /** Date de la dernière mention de vous (@) par conversation. */
     val mentions: Map<String, Long> = emptyMap(),
     val salonsWhatsApp: Map<String, String> = emptyMap(),   // jid WhatsApp → salon Matrix
@@ -93,6 +95,11 @@ data class Etat(
         val e = etat(c)
         if (e.manuel) return true
         if (c.dernierDeMoi || c.derniere < depuis || c.estStatuts) return false
+        // Une réaction de votre part au dernier message reçu vaut réponse
+        val dernierRecu = c.messages.lastOrNull { !it.deMoi }?.date ?: c.derniere
+        if ((mesReactions[c.cle] ?: 0) >= dernierRecu) return false
+        // Messages automatiques (robots Telegram, copilote quotidien) : aucune réponse attendue
+        if (estAutomatique(c)) return false
         // Groupe : « À traiter » seulement si vous y êtes mentionné depuis votre dernier message
         if (c.estGroupe) {
             val mention = mentions[c.cle] ?: return false
@@ -107,6 +114,13 @@ data class Etat(
     fun nombreATraiter(s: Source?, pro: Boolean?) =
         conversations.count { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && compte(it, pro) && aTraiter(it) && !estArchivee(it) && !estSpam(it) }
     fun libelleSource(c: Conversation) = if (c.cle in rcs) "RCS" else c.source.id
+
+    /** Expéditeur automatique : robot Telegram (nom en « bot ») ou copilote qui envoie un message chaque jour. */
+    fun estAutomatique(c: Conversation): Boolean {
+        if (c.estGroupe) return false
+        val n = java.text.Normalizer.normalize(c.nom.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").trim()
+        return "copilot" in n || (c.source == Source.TELEGRAM && (n.endsWith("bot") || n.endsWith("robot")))
+    }
 }
 
 object Moteur {
@@ -407,7 +421,8 @@ object Moteur {
             etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
             recusParContacts = archive.curseurs("recuPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
-            mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap()) }
+            mentions = archive.curseurs("mention.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
+            mesReactions = archive.datesMesReactions()) }
     }
 
     // MARK: Anti-spam (local)
@@ -1030,7 +1045,7 @@ object Moteur {
                 else Matrix(cfg).retirerReaction(avant.salon, avant.idEnvoi)
                 archive.oublierReaction(avant.idEnvoi)
             }
-            if (emoji == null) { archive.definirMaReaction(m.cle, null); return@withContext null }
+            if (emoji == null) { archive.definirMaReaction(m.cle, null); _etat.update { it.copy(mesReactions = archive.datesMesReactions()) }; return@withContext null }
             var salon: String? = null; var id: String? = null
             if (reactionTransmissible(m, c)) {
                 salon = salonDe(c)
@@ -1038,6 +1053,7 @@ object Moteur {
                     else Matrix(cfg).reagir(salon!!, m.cle.substringAfter(':'), emoji)).takeIf { it.isNotEmpty() }
             }
             archive.definirMaReaction(m.cle, MaReaction(m.cle, c.cle, emoji, salon, id))
+            _etat.update { it.copy(mesReactions = archive.datesMesReactions()) }
             null
         } catch (e: Exception) { e.message ?: e.toString() }
     }
