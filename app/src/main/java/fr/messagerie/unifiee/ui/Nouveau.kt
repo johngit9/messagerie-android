@@ -127,6 +127,19 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                 .sortedBy { normaliser(it.first) }.take(30)
         }
     }
+    // Element : personnes de vos groupes et de l'annuaire du serveur, sans discussion à deux
+    var annuaire by remember { mutableStateOf<List<fr.messagerie.unifiee.Relais.Personne>>(emptyList()) }
+    LaunchedEffect(q, filtre) {
+        annuaire = emptyList()
+        if (r.length < 2 || r.any { it.isDigit() } || (filtre != null && filtre != Source.ELEMENT.id) || !Moteur.cfg.relaisConfigure) return@LaunchedEffect
+        kotlinx.coroutines.delay(400)
+        annuaire = Moteur.chercherElement(q)
+    }
+    val personnes = remember(annuaire, contacts) {
+        val connus = contacts.filter { k -> k.convs.any { it.source == Source.ELEMENT } }.map { normaliser(it.nom) }.toSet()
+        annuaire.filter { normaliser(it.nom) !in connus }
+    }
+    var demandeElement by remember { mutableStateOf<fr.messagerie.unifiee.Relais.Personne?>(null) }
     val tel = numero(q)
     // Pseudo Telegram (@nom) : discussion ouverte par la passerelle Telegram
     val pseudoTelegram = Regex("^@[A-Za-z][A-Za-z0-9_]{4,31}$").matches(q.trim()) && Moteur.cfg.matrixConfigure
@@ -142,6 +155,14 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
         enCours = true; resultat = null
         portee.launch {
             val (cle, texte) = Moteur.creerGroupe(s, nom, membres)
+            enCours = false
+            if (cle != null) ouvrir(cle) else resultat = texte
+        }
+    }
+    fun demarrerElement(p: fr.messagerie.unifiee.Relais.Personne) {
+        enCours = true; resultat = null
+        portee.launch {
+            val (cle, texte) = Moteur.nouvelleDiscussionElement(p)
             enCours = false
             if (cle != null) ouvrir(cle) else resultat = texte
         }
@@ -247,11 +268,26 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                 }
                 if (groupes.isNotEmpty()) item(key = "t-groupes") { Titre("Groupes") }
                 items(groupes, key = { "g-" + it.cle }) { c -> LigneContact(c.nom, c, listOf(c.source)) { ouvrir(c.cle) } }
+                if (personnes.isNotEmpty()) item(key = "t-element") { Titre("Element : vos groupes et l'annuaire") }
+                items(personnes, key = { "e-" + it.id }) { p ->
+                    Row(
+                        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+                            .clickable(enabled = !enCours) { demandeElement = p }.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        LogoSource(Source.ELEMENT, 42.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(p.nom, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Pas encore de discussion à deux", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
                 if (fiches.isNotEmpty()) item(key = "t-carnet") { Titre("Carnet du téléphone") }
                 items(fiches, key = { "f-" + it.first }) { (nom, numeros) ->
                     LigneCarnet(nom, numeros) { num -> q = num; nomCarnet = nom }
                 }
-                if (contacts.isEmpty() && groupes.isEmpty() && fiches.isEmpty() && tel == null) item(key = "vide") {
+                if (contacts.isEmpty() && groupes.isEmpty() && fiches.isEmpty() && personnes.isEmpty() && tel == null) item(key = "vide") {
                     Text("Aucun contact ne correspond. Tapez un numéro pour écrire par WhatsApp ou SMS.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
                 }
@@ -308,6 +344,16 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                 dismissButton = { androidx.compose.material3.TextButton(onClick = { groupeSource = null; groupeMembres = null }) { Text("Annuler") } },
             )
         }
+    }
+    demandeElement?.let { p ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { demandeElement = null },
+            title = { Text("Discussion Element") },
+            text = { Text("Ouvrir une discussion à deux avec ${p.nom} ? S'il n'y en a pas encore, il reçoit une invitation " +
+                "à la discussion ; aucun message n'est envoyé : vous écrirez ensuite le premier message.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { demandeElement = null; demarrerElement(p) }) { Text("Ouvrir la discussion") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { demandeElement = null }) { Text("Annuler") } },
+        )
     }
     demande?.let { (src, ident) ->
         androidx.compose.material3.AlertDialog(
