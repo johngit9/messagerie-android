@@ -330,6 +330,34 @@ class Relais(private val cfg: Config) {
         if (r.code != 200) throw ErreurHttp(r.code, "retrait de réaction")
     }
 
+    /** Personne Element trouvée dans l'annuaire (membres de vos salons + annuaire du serveur). */
+    data class Personne(val id: String, val nom: String)
+
+    /** Recherche une personne Element par nom (lecture seule). Liste vide si le relais ne connaît pas la route. */
+    fun annuaire(q: String): List<Personne> {
+        connecter()
+        val r = Http.requete("$base/annuaire?q=" + Http.enc(q), jeton = jeton, delaiMs = 10_000)
+        if (r.code != 200) return emptyList()
+        return JSONObject(r.texte).optJSONArray("utilisateurs")?.objets()?.mapNotNull { o ->
+            val id = o.optString("id").takeIf { it.startsWith("@") } ?: return@mapNotNull null
+            Personne(id, o.optString("nom").takeIf { it.isNotEmpty() && it != "null" } ?: id)
+        } ?: emptyList()
+    }
+
+    /**
+     * Discussion à deux avec cette personne : la reprend si elle existe, sinon la crée (la personne reçoit
+     * une invitation, aucun message). Appelé seulement sur un appui de l'utilisateur. Renvoie (salon, nom).
+     */
+    fun discussion(utilisateur: String): Pair<String, String> {
+        connecter()
+        val r = Http.requete("$base/discussion", "POST", jeton, JSONObject().put("utilisateur", utilisateur).toString(), 30_000)
+        if (r.code == 404) throw Exception("le relais ne sait pas encore ouvrir de discussion (mettre à jour le relais)")
+        if (r.code != 200) throw ErreurHttp(r.code, "discussion")
+        val j = JSONObject(r.texte)
+        val salon = j.optString("salon").takeIf { it.startsWith("!") } ?: throw Exception("réponse du relais incomplète")
+        return salon to (j.optString("nom").takeIf { it.isNotEmpty() && it != "null" } ?: utilisateur)
+    }
+
     /** Présence de l'autre membre de chaque salon Element à deux (lecture seule) : salon → online / unavailable / offline. */
     fun presences(): Map<String, String> {
         connecter()

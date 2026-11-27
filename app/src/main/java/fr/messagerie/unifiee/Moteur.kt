@@ -415,16 +415,19 @@ object Moteur {
     fun recharger() {
         val e = _etat.value
         val connus = HashSet<String>()
-        val convs = archive.conversations(e.depuis, 60).map { c ->
+        val convsArchive = archive.conversations(e.depuis, 60).map { c ->
             if (c.source != Source.TEAMS && !c.estGroupe && estUnNumero(c.nom)) numeros[c.cle] = c.nom.trim()
             if (c.source == Source.TEAMS || !estUnNumero(c.nom)) c
             else (nomsCarnet[c.nom] ?: nomContactTelephone(c.nom.filter { it.isDigit() })?.also { nomsCarnet[c.nom] = it })?.let { connus += c.cle; c.copy(nom = it) } ?: c
         }.map { c -> nomPerso(c.cle)?.let { n -> connus += c.cle; c.copy(nom = n) } ?: c }   // nom choisi par vous
         carnetConnus = connus
-        val risques = if (!cfg.antiSpam) emptyMap() else convs.mapNotNull { c -> Spam.evaluer(c, c.cle in connus).takeIf { it.score >= 30 }?.let { c.cle to it } }.toMap()
+        // Discussions Element tout juste ouvertes, sans message : visibles jusqu'au premier message
+        discussionsVides.keys.removeAll { k -> convsArchive.any { it.cle == k } }
+        val convs = convsArchive + discussionsVides.values
+        val risques = if (!cfg.antiSpam) emptyMap() else convsArchive.mapNotNull { c -> Spam.evaluer(c, c.cle in connus).takeIf { it.score >= 30 }?.let { c.cle to it } }.toMap()
         val stats = archive.statistiques()
         val sources = e.sources.mapValues { (s, st) -> if (st is EtatSource.Ok) EtatSource.Ok(stats[s]?.first ?: 0) else st }
-        verifierSpamIA(convs, risques)
+        verifierSpamIA(convsArchive, risques)
         _etat.update { it.copy(conversations = convs, statistiques = stats, sources = sources, risques = risques,
             etats = etatsActuels(), syntheses = archive.syntheses(),
             lusParContacts = archive.curseurs("luPar.").mapNotNull { (k, v) -> v.toLongOrNull()?.let { k to it } }.toMap(),
@@ -951,6 +954,27 @@ object Moteur {
      * Envoie seulement la commande au robot de VOTRE serveur ; rien n'est envoyé au contact.
      * Renvoie (clé de la conversation si elle est déjà visible, message à afficher).
      */
+    /** Discussions Element ouvertes depuis « Nouveau message » et encore vides (mémoire seulement). */
+    private val discussionsVides = java.util.concurrent.ConcurrentHashMap<String, Conversation>()
+
+    /** Recherche Element dans l'annuaire (membres de vos groupes + annuaire du serveur). Lecture seule. */
+    suspend fun chercherElement(q: String): List<Relais.Personne> = withContext(Dispatchers.IO) {
+        if (!cfg.relaisConfigure || q.trim().length < 2) emptyList() else runCatching { Relais(cfg).annuaire(q.trim()) }.getOrDefault(emptyList())
+    }
+
+    /** Ouvre (ou crée) la discussion Element à deux avec cette personne. Aucun message n'est envoyé. */
+    suspend fun nouvelleDiscussionElement(p: Relais.Personne): Pair<String?, String> = withContext(Dispatchers.IO) {
+        try {
+            val (salon, nom) = Relais(cfg).discussion(p.id)
+            val cle = cleConv(Source.ELEMENT, salon)
+            if (_etat.value.conversations.none { it.cle == cle }) {
+                discussionsVides[cle] = Conversation(cle, Source.ELEMENT, salon, nom, false, System.currentTimeMillis(), emptyList())
+                recharger()
+            }
+            cle to "Discussion ouverte"
+        } catch (e: Exception) { null to (e.message ?: e.toString()) }
+    }
+
     suspend fun nouvelleDiscussion(s: Source, ident: String): Pair<String?, String> = withContext(Dispatchers.IO) {
         if (!cfg.matrixConfigure || s !in sourcesNouvelleDiscussion) return@withContext null to "impossible pour ${s.libelle}"
         try {
@@ -1267,6 +1291,28 @@ object Moteur {
     }
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
+
+    /**
+     * Carnet du téléphone (nom, numéro) pour « Nouveau message » : on peut écrire à quelqu'un
+     * qui n'a encore aucune discussion dans Messagerie. Lecture locale, rien n'est envoyé.
+     */
+    suspend fun carnetTelephone(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return@withContext emptyList()
+        runCatching {
+            val l = mutableListOf<Pair<String, String>>()
+            app.contentResolver.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cur ->
+                while (cur.moveToNext()) {
+                    val nom = cur.getString(0)?.trim().orEmpty()
+                    val num = cur.getString(1)?.trim().orEmpty()
+                    if (nom.isNotEmpty() && num.count { it.isDigit() } >= 6) l += nom to num
+                }
+            }
+            l.distinctBy { it.first + "|" + it.second.filter { c -> c.isDigit() } }
+        }.getOrDefault(emptyList())
+    }
 
     /** Nom d'un numéro dans les contacts du téléphone (lecture locale, rien n'est envoyé). */
     private fun nomContactTelephone(numero: String): String? {

@@ -3,7 +3,9 @@ package fr.messagerie.unifiee.ui
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,8 +68,9 @@ private fun nomMedia(m: Message) = m.media?.split('#')?.getOrNull(2)?.takeIf { i
     ?: m.texte.removePrefix("[fichier] ").ifBlank { "fichier" }
 
 /** Photo dans la bulle : téléchargée une fois (cache), affichée par Coil, plein écran au toucher. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PhotoMessage(m: Message, couleur: Color) {
+fun PhotoMessage(m: Message, couleur: Color, appuiLong: () -> Unit = {}) {
     if (m.media == null) { Text("🖼 Photo", color = couleur); return }
     val fichier by produceState<Result<File>?>(null, m.cle) { value = runCatching { Moteur.fichierMedia(m) } }
     var pleinEcran by remember { mutableStateOf(false) }
@@ -75,7 +78,7 @@ fun PhotoMessage(m: Message, couleur: Color) {
     Box(
         Modifier.widthIn(min = 160.dp, max = 260.dp).heightIn(min = 120.dp, max = 340.dp)
             .clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.08f))
-            .clickable(enabled = f?.isSuccess == true) { pleinEcran = true },
+            .combinedClickable(onLongClick = appuiLong) { if (f?.isSuccess == true) pleinEcran = true },
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -107,14 +110,16 @@ fun AutocollantMessage(m: Message, couleur: Color) {
 }
 
 /** Position partagée : carte avec le lieu, ouverte dans l'appli de cartes au toucher. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PositionMessage(m: Message, couleur: Color) {
+fun PositionMessage(m: Message, couleur: Color, appuiLong: () -> Unit = {}) {
     val ctx = LocalContext.current
     val geo = m.geo
     val coords = geo?.removePrefix("geo:")?.substringBefore(';')?.split(',')?.mapNotNull { it.trim().toDoubleOrNull() }
     Row(
         Modifier.widthIn(min = 200.dp, max = 260.dp).clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.10f))
-            .clickable(enabled = geo != null) {
+            .combinedClickable(onLongClick = appuiLong) {
+                if (geo == null) return@combinedClickable
                 val lieu = m.texte.removePrefix("📍").trim()
                 val uri = if (coords != null && coords.size >= 2) "geo:${coords[0]},${coords[1]}?q=${coords[0]},${coords[1]}(" + android.net.Uri.encode(lieu) + ")" else geo!!
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri))) }
@@ -161,8 +166,9 @@ private fun VisionneusePhoto(f: File, m: Message, fermer: () -> Unit) {
 }
 
 /** Vidéo ou document : téléchargé au toucher puis ouvert avec l'appli de votre choix. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FichierMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
+fun FichierMessage(m: Message, couleur: Color, afficher: (String) -> Unit, appuiLong: () -> Unit = {}) {
     val ctx = LocalContext.current
     val portee = rememberCoroutineScope()
     var enCours by remember { mutableStateOf(false) }
@@ -175,7 +181,8 @@ fun FichierMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
         ?: m.media?.split('#')?.getOrNull(1)?.substringAfter('/')?.take(4)?.uppercase() ?: "FICHIER"
     Column(
         Modifier.width(250.dp).clip(RoundedCornerShape(12.dp)).background(couleur.copy(alpha = 0.10f))
-            .clickable(enabled = m.media != null && !enCours) {
+            .combinedClickable(onLongClick = appuiLong) {
+                if (m.media == null || enCours) return@combinedClickable
                 enCours = true
                 portee.launch {
                     runCatching { Moteur.fichierMedia(m) }
@@ -228,9 +235,10 @@ private fun ouvrirAvec(ctx: Context, f: File, m: Message) {
 }
 
 /** Vidéo dans la bulle : aperçu (vignette) avec bouton lecture ; lecture dans l'appli au toucher. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun VideoMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
-    if (m.media == null) { FichierMessage(m, couleur, afficher); return }
+fun VideoMessage(m: Message, couleur: Color, afficher: (String) -> Unit, appuiLong: () -> Unit = {}) {
+    if (m.media == null) { FichierMessage(m, couleur, afficher, appuiLong); return }
     val portee = rememberCoroutineScope()
     var essai by remember { mutableStateOf(0) }
     val apercu by produceState<File?>(null, m.cle, essai) { value = Moteur.vignetteVideo(m, telecharger = essai > 0) }
@@ -238,7 +246,8 @@ fun VideoMessage(m: Message, couleur: Color, afficher: (String) -> Unit) {
     var lecture by remember { mutableStateOf<File?>(null) }
     Box(
         Modifier.width(240.dp).heightIn(min = 140.dp, max = 320.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF15171C))
-            .clickable(enabled = !chargement) {
+            .combinedClickable(onLongClick = appuiLong) {
+                if (chargement) return@combinedClickable
                 chargement = true
                 portee.launch {
                     runCatching { Moteur.fichierMedia(m) }
