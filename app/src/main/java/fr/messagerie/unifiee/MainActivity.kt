@@ -47,6 +47,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.first
 
 open class MainActivity : ComponentActivity() {
     private val cleDemandee = mutableStateOf<String?>(null)
@@ -80,8 +81,14 @@ open class MainActivity : ComponentActivity() {
     /** Raccourci « messagerie » de l'icône : ouvre la liste filtrée sur cette messagerie. */
     private fun lireRaccourci(i: Intent?) {
         if (i?.getStringExtra("reconnecter") == Source.WHATSAPP.name) { i.removeExtra("reconnecter"); Surveillance.reconnexionDemandee.value = true }
+        // Notification ou widget « non lus » : extra retiré pour ne pas rejouer l'ouverture si l'activité est recréée
+        i?.getStringExtra("nonlus")?.let { n ->
+            i.removeExtra("nonlus")
+            Raccourcis.nonLusDemandes.value = Raccourcis.NonLusDemandes(Source.entries.firstOrNull { it.name == n })
+            return
+        }
         val s = i?.getStringExtra("source")?.let { n -> Source.entries.firstOrNull { it.name == n } } ?: return
-        Raccourcis.sourceDemandee.value = s
+        Raccourcis.filtreDemande.value = Raccourcis.FiltreDemande(s, nonLus = false)
     }
 
     override fun onPause() {
@@ -173,10 +180,23 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     val nav = rememberNavController()
     val depart = remember { if (Moteur.cfg.configure) "liste" else "accueil" }
 
-    val raccourci by Raccourcis.sourceDemandee.collectAsState()
+    val raccourci by Raccourcis.filtreDemande.collectAsState()
     androidx.compose.runtime.LaunchedEffect(raccourci) {
         if (raccourci != null && Moteur.cfg.configure && nav.currentDestination?.route != "liste")
             nav.navigate("liste") { popUpTo("liste") { inclusive = false }; launchSingleTop = true }
+    }
+
+    // Notification « N messages non lus » : la conversation s'il n'y en a qu'une, sinon la liste sur « Non lues »
+    val nonLus by Raccourcis.nonLusDemandes.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(nonLus) {
+        val d = nonLus ?: return@LaunchedEffect
+        Raccourcis.nonLusDemandes.value = null
+        if (!Moteur.cfg.configure) return@LaunchedEffect
+        // Appli tout juste lancée : on laisse à l'archive le temps de charger les conversations
+        val e = kotlinx.coroutines.withTimeoutOrNull(3000) { Moteur.etat.first { it.conversations.isNotEmpty() } } ?: Moteur.etat.value
+        val convs = e.conversationsNonLues(d.source)
+        if (convs.size == 1) cleDemandee.value = convs[0].cle
+        else Raccourcis.filtreDemande.value = Raccourcis.FiltreDemande(d.source ?: convs.map { it.source }.distinct().singleOrNull(), nonLus = true)
     }
 
     // Ouverture depuis une notification
@@ -199,9 +219,17 @@ private fun Racine(cleDemandee: androidx.compose.runtime.MutableState<String?>) 
     ) {
         composable("liste") {
             val vm: ListeVM = viewModel()
-            val demandee by Raccourcis.sourceDemandee.collectAsState()
+            val demandee by Raccourcis.filtreDemande.collectAsState()
             androidx.compose.runtime.LaunchedEffect(demandee) {
-                demandee?.let { vm.source.value = it; vm.vue.value = fr.messagerie.unifiee.ui.Vue.Toutes; Raccourcis.sourceDemandee.value = null }
+                demandee?.let { f ->
+                    vm.source.value = f.source
+                    if (f.nonLus) {
+                        // Rien ne doit cacher les non-lus : ni la recherche, ni Pro/Perso, ni Discussions/Groupes
+                        vm.vue.value = fr.messagerie.unifiee.ui.Vue.NonLus
+                        vm.recherche.value = ""; vm.genre.value = fr.messagerie.unifiee.ui.Genre.Tous; vm.espace.value = fr.messagerie.unifiee.ui.Espace.Tout
+                    } else vm.vue.value = fr.messagerie.unifiee.ui.Vue.Toutes
+                    Raccourcis.filtreDemande.value = null
+                }
             }
             EcranListe(etat, vm,
                 ouvrir = { nav.navigate("conversation/" + Uri.encode(it)) { launchSingleTop = true } },

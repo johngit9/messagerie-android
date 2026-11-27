@@ -80,7 +80,9 @@ object Pastille {
         nm.createNotificationChannel(NotificationChannel(CANAL, "Nombre de messages non lus", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(true) })
         // Tout est lu : la notification permanente passe sur un canal sans point sur l'icône
         nm.createNotificationChannel(NotificationChannel(CANAL_SANS_POINT, "Réception en arrière-plan", NotificationManager.IMPORTANCE_MIN).apply { setShowBadge(false) })
-        val pi = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        // Toucher la notification : directement les non-lus (la conversation s'il n'y en a qu'une)
+        val pi = PendingIntent.getActivity(ctx, "nonlus.tout".hashCode(), Raccourcis.intentionNonLus(ctx, null),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val texte = when (n) { 0 -> "Tout est lu"; 1 -> "1 message non lu"; else -> "$n messages non lus" }
         val liste = if (n > 0) parSource() else emptyList()
         val resume = liste.joinToString(" · ") { "${it.first.libelle} ${it.second}" }
@@ -88,16 +90,14 @@ object Pastille {
         val vue = if (liste.isEmpty()) null else runCatching {
             RemoteViews(ctx.packageName, R.layout.notif_compteurs).apply {
                 setTextViewText(R.id.notif_titre, titre)
-                // Une pastille par messagerie, chacune ouvre la liste filtrée sur sa messagerie
+                // Une pastille par messagerie, chacune ouvre les non-lus de sa messagerie (ou la conversation s'il n'y en a qu'une)
                 removeAllViews(R.id.notif_bande)
                 liste.forEach { (s, nb) ->
                     val bulle = RemoteViews(ctx.packageName, R.layout.notif_bulle).apply {
                         setImageViewBitmap(R.id.notif_bulle, bande(ctx, listOf(s to nb)))
                         setContentDescription(R.id.notif_bulle, "${s.libelle} : $nb non lus")
-                        setOnClickPendingIntent(R.id.notif_bulle, PendingIntent.getActivity(ctx, ("source." + s.name).hashCode(),
-                            Intent(ctx, MainActivity::class.java).putExtra("source", s.name)
-                                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                        setOnClickPendingIntent(R.id.notif_bulle, PendingIntent.getActivity(ctx, ("nonlus." + s.name).hashCode(),
+                            Raccourcis.intentionNonLus(ctx, s), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
                     }
                     addView(R.id.notif_bande, bulle)
                 }

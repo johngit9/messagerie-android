@@ -16,8 +16,24 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * donc chaque messagerie devient un raccourci (appui long sur l'icône) « WhatsApp · 3 non lus ».
  */
 object Raccourcis {
-    /** Messagerie demandée par un raccourci (lue par l'écran Liste). */
-    val sourceDemandee = MutableStateFlow<Source?>(null)
+    /** Filtre demandé par un raccourci ou une notification (lu par l'écran Liste). */
+    val filtreDemande = MutableStateFlow<FiltreDemande?>(null)
+    /** Appui sur une notification ou un widget « non lus » : résolu à l'ouverture de l'appli (voir MainActivity). */
+    val nonLusDemandes = MutableStateFlow<NonLusDemandes?>(null)
+
+    /** Messagerie (null = toutes) et vue « Non lues » ou « Toutes » à afficher dans la liste. */
+    data class FiltreDemande(val source: Source?, val nonLus: Boolean)
+    /** Non-lus d'une messagerie (null = toutes) ; l'horodatage distingue deux appuis de suite. */
+    data class NonLusDemandes(val source: Source?, val quand: Long = System.currentTimeMillis())
+
+    /**
+     * Intention « ouvrir les non-lus » : la conversation elle-même s'il n'y en a qu'une, sinon la liste
+     * filtrée sur « Non lues » (et sur la messagerie). Calculé au moment de l'appui, pas à l'affichage de la notification.
+     */
+    fun intentionNonLus(ctx: Context, source: Source?): Intent =
+        Intent(ctx, MainActivity::class.java).setAction("nonlus." + (source?.name ?: "tout"))
+            .putExtra("nonlus", source?.name ?: "")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     private var dernier: String? = null
 
     /** Republie tout (raccourcis de messagerie et de conversation) : Android les retire quand l'entrée d'icône change. */

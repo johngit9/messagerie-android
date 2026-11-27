@@ -87,6 +87,9 @@ data class Etat(
     fun nombreMessagesNonLus(s: Source?, pro: Boolean? = null) =
         conversations.filter { (s == null || it.source == s) && (pro == null || estPro(it) == pro) && compte(it, pro) && !estArchivee(it) && !estSpam(it) }
             .sumOf { maxOf(nombreNonLus(it), if (estForcee(it)) 1 else 0) }
+    /** Conversations non lues d'une messagerie (toutes si null), comptées comme dans [nombreMessagesNonLus]. */
+    fun conversationsNonLues(s: Source?) =
+        conversations.filter { (s == null || it.source == s) && compte(it, null) && !estArchivee(it) && !estSpam(it) && estNonLue(it) }
 
     val depuis get() = System.currentTimeMillis() - jours * 86_400_000L
 
