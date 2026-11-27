@@ -22,6 +22,8 @@ import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Deselect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.content.contentReceiver
@@ -435,20 +437,14 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         topBar = {
             if (modeSelection) TopAppBar(
                 navigationIcon = { IconButton(onClick = { quitterSelection() }) { Icon(Icons.Outlined.Close, "Annuler la sélection") } },
-                title = { Text("${selection.size} sélectionné" + if (selection.size > 1) "s" else "") },
+                title = { Text(when (selection.size) { 0 -> "Touchez les messages"; 1 -> "1 message sélectionné"; else -> "${selection.size} messages sélectionnés" },
+                    maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
-                    val ctxSel = LocalContext.current
-                    val choisis = historique.filter { it.cle in selection }
-                    IconButton(onClick = {
-                        val texte = choisis.joinToString("\n") { m ->
-                            (if (choisis.size > 1) "[${heure(m.date)}] ${m.auteur} : " else "") + m.texteUtile
-                        }
-                        copier(ctxSel, texte); afficher(if (choisis.size > 1) "${choisis.size} messages copiés" else "Texte copié"); quitterSelection()
-                    }, enabled = choisis.isNotEmpty()) { Icon(Icons.Outlined.ContentCopy, "Copier") }
-                    IconButton(onClick = { aSupprimer = selection }, enabled = choisis.isNotEmpty()) { Icon(Icons.Outlined.DeleteOutline, "Supprimer") }
-                    IconButton(onClick = { transfert = true }, enabled = choisis.isNotEmpty() && !transfertEnCours) {
-                        if (transfertEnCours) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.AutoMirrored.Outlined.Forward, "Transférer")
+                    val tous = historique.isNotEmpty() && historique.all { it.cle in selection }
+                    TextButton(onClick = { selection = if (tous) emptySet() else historique.map { it.cle }.toSet() }) {
+                        Icon(if (tous) Icons.Outlined.Deselect else Icons.Outlined.SelectAll, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (tous) "Tout décocher" else "Tout")
                     }
                 },
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -626,6 +622,7 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                             modeSelection = modeSelection, choisi = l.m.cle in selection,
                             basculer = { basculerSelection(l.m) },
                             supprimer = { aSupprimer = setOf(l.m.cle) },
+                            transferer = { selection = setOf(l.m.cle); modeSelection = true; transfert = true },
                             votes = vote[l.m.cle].orEmpty(),
                             voter = { choix -> vm.voter(l.m, c, choix) { afficher(it) } },
                             favori = l.m.cle in favoris,
@@ -644,6 +641,23 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                 }
             }
 
+            // --- Sélection : actions avec libellés (pas d'icônes seules à deviner)
+            if (modeSelection) Surface(tonalElevation = 3.dp) {
+                val ctxSel = LocalContext.current
+                val choisis = historique.filter { it.cle in selection }
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly) {
+                    ActionSelection(Icons.Outlined.ContentCopy, "Copier", choisis.isNotEmpty()) {
+                        val texte = choisis.joinToString("\n") { m ->
+                            (if (choisis.size > 1) "[${heure(m.date)}] ${m.auteur} : " else "") + m.texteUtile
+                        }
+                        copier(ctxSel, texte); afficher(if (choisis.size > 1) "${choisis.size} messages copiés" else "Texte copié"); quitterSelection()
+                    }
+                    ActionSelection(Icons.AutoMirrored.Outlined.Forward, if (transfertEnCours) "Envoi…" else "Transférer", choisis.isNotEmpty() && !transfertEnCours) { transfert = true }
+                    ActionSelection(Icons.Outlined.DeleteOutline, "Supprimer", choisis.isNotEmpty()) { aSupprimer = selection }
+                    ActionSelection(Icons.Outlined.Close, "Terminé", true) { quitterSelection() }
+                }
+            } else
             // --- Statuts WhatsApp : lecture seule
             if (c.estStatuts) Surface(tonalElevation = 3.dp) {
                 val ctx = LocalContext.current
@@ -1172,6 +1186,7 @@ private fun Bulle(
     recuParContact: Long = 0,
     modeSelection: Boolean = false, choisi: Boolean = false, basculer: () -> Unit = {},
     supprimer: () -> Unit = {},
+    transferer: () -> Unit = {},
     votes: List<fr.messagerie.unifiee.Vote> = emptyList(),
     voter: (List<String>) -> Unit = {},
     favori: Boolean = false,
@@ -1298,6 +1313,7 @@ private fun Bulle(
     if (menu) FeuilleMessage(m, c, monEmoji, fermer = { menu = false },
         reagir = { menu = false; reagir(it) }, repondre = { menu = false; repondre() }, copier = { menu = false; copier(ctx) },
         selectionner = { menu = false; basculer() }, supprimer = { menu = false; supprimer() },
+        transferer = { menu = false; transferer() },
         favori = favori, basculerFavori = { menu = false; basculerFavori() },
         modifier = modifier?.let { f -> { menu = false; f() } }, traduire = { menu = false; traduire() })
 }
@@ -1306,7 +1322,8 @@ private fun Bulle(
 @Composable
 private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, fermer: () -> Unit,
                            reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit,
-                           favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null, traduire: () -> Unit = {}) {
+                           favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null, traduire: () -> Unit = {},
+                           transferer: () -> Unit = {}) {
     var partie by remember { mutableStateOf(false) }
     var toutes by remember { mutableStateOf(false) }
     if (partie) { DialogueSelectionTexte(m.texte) { partie = false; fermer() }; return }
@@ -1344,14 +1361,18 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             if (monEmoji != null) ElementAction(Icons.Outlined.DeleteOutline, "Retirer ma réaction $monEmoji") { reagir(null) }
             ElementAction(Icons.AutoMirrored.Outlined.Reply, "Répondre") { repondre() }
-            if (modifier != null) ElementAction(Icons.Outlined.Edit, "Modifier") { modifier() }
+            ElementAction(Icons.AutoMirrored.Outlined.Forward, "Transférer à quelqu'un…") { transferer() }
+            if (modifier != null) ElementAction(Icons.Outlined.Edit, "Modifier le message") { modifier() }
+            TitreGroupeActions("Copier")
+            if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier le texte") { copier() }
+            if (m.type != "audio" && m.texte.isNotBlank()) ElementAction(Icons.Outlined.TextFields, "Copier une partie du texte…") { partie = true }
+            TitreGroupeActions("Autres actions")
             if (m.type == "texte" && m.texte.isNotBlank() && !m.deMoi) ElementAction(Icons.Outlined.Translate, "Traduire en français") { traduire() }
             ElementAction(if (favori) Icons.Outlined.Star else Icons.Outlined.StarOutline,
                 if (favori) "Retirer des favoris" else "Ajouter aux favoris") { basculerFavori() }
-            if (m.type != "audio") ElementAction(Icons.Outlined.ContentCopy, "Copier tout le texte") { copier() }
-            if (m.type != "audio" && m.texte.isNotBlank()) ElementAction(Icons.Outlined.TextFields, "Copier une partie du texte") { partie = true }
-            ElementAction(Icons.Outlined.Checklist, "Sélectionner (plusieurs messages)") { selectionner() }
-            ElementAction(Icons.Outlined.DeleteOutline, "Supprimer") { supprimer() }
+            ElementAction(Icons.Outlined.Checklist, "Sélectionner plusieurs messages…") { selectionner() }
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            ElementAction(Icons.Outlined.DeleteOutline, "Supprimer…") { supprimer() }
         }
     }
 }
@@ -1901,4 +1922,27 @@ private fun DialogueHeure(fermer: () -> Unit, choisir: (Long) -> Unit) {
         },
         confirmButton = { TextButton(onClick = fermer) { Text("Annuler") } },
     )
+}
+
+/** Petit titre qui sépare les groupes d'actions de la feuille d'appui long. */
+@Composable
+private fun TitreGroupeActions(titre: String) {
+    HorizontalDivider(Modifier.padding(top = 6.dp))
+    Text(titre, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 2.dp))
+}
+
+/** Bouton de la barre de sélection : icône + libellé, zone de toucher ≥ 44 dp. */
+@Composable
+private fun ActionSelection(icone: androidx.compose.ui.graphics.vector.ImageVector, libelle: String, actif: Boolean, clic: () -> Unit) {
+    val couleur = if (actif) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = actif, onClick = clic)
+            .widthIn(min = 64.dp).heightIn(min = 52.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icone, null, tint = couleur)
+        Spacer(Modifier.size(2.dp))
+        Text(libelle, fontSize = 12.sp, color = couleur, maxLines = 1)
+    }
 }
