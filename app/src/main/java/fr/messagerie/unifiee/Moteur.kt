@@ -1725,12 +1725,11 @@ object Moteur {
     fun contactTelephone(c: Conversation): ContactTel? {
         if (c.estGroupe || !accesCarnet()) return null
         val cr = app.contentResolver
-        val CC = android.provider.ContactsContract.Contacts
         return runCatching {
             // 1) Lien choisi à la main
             prefsContacts.getString("carnet.${c.cle}", null)?.let { lien ->
-                val actuel = CC.lookupContact(cr, android.net.Uri.parse(lien))
-                    ?.let { u -> cr.query(u, arrayOf(CC._ID), null, null, null)?.use { cur -> if (cur.moveToFirst()) cur.getLong(0) else null } }
+                val actuel = android.provider.ContactsContract.Contacts.lookupContact(cr, android.net.Uri.parse(lien))
+                    ?.let { u -> cr.query(u, arrayOf(android.provider.ContactsContract.Contacts._ID), null, null, null)?.use { cur -> if (cur.moveToFirst()) cur.getLong(0) else null } }
                 return@runCatching actuel?.let { detailsContact(it, true) }
             }
             // 2) Par numéro
@@ -1750,7 +1749,7 @@ object Moteur {
             val noms = (listOf(c) + (runCatching { autresComptes(c) }.getOrNull() ?: emptyList()))
                 .map { it.nom.replace(" (WA)", "").trim() }.filter { it.isNotEmpty() && !estUnNumero(it) }.distinct()
             for (nom in noms) {
-                val id = cr.query(CC.CONTENT_URI, arrayOf(CC._ID), "${CC.DISPLAY_NAME} = ?", arrayOf(nom), null)
+                val id = cr.query(android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf(android.provider.ContactsContract.Contacts._ID), "${android.provider.ContactsContract.Contacts.DISPLAY_NAME} = ?", arrayOf(nom), null)
                     ?.use { cur -> if (cur.count == 1 && cur.moveToFirst()) cur.getLong(0) else null }   // homonymes : pas de choix au hasard
                 if (id != null) return@runCatching detailsContact(id, false)
             }
@@ -1760,9 +1759,8 @@ object Moteur {
 
     private fun detailsContact(id: Long, manuel: Boolean): ContactTel? {
         val cr = app.contentResolver
-        val CC = android.provider.ContactsContract.Contacts
-        val (nom, photo, cle) = cr.query(android.content.ContentUris.withAppendedId(CC.CONTENT_URI, id),
-            arrayOf(CC.DISPLAY_NAME, CC.PHOTO_URI, CC.LOOKUP_KEY), null, null, null)?.use { cur ->
+        val (nom, photo, cle) = cr.query(android.content.ContentUris.withAppendedId(android.provider.ContactsContract.Contacts.CONTENT_URI, id),
+            arrayOf(android.provider.ContactsContract.Contacts.DISPLAY_NAME, android.provider.ContactsContract.Contacts.PHOTO_URI, android.provider.ContactsContract.Contacts.LOOKUP_KEY), null, null, null)?.use { cur ->
             if (cur.moveToFirst()) Triple(cur.getString(0) ?: "", cur.getString(1), cur.getString(2)) else null
         } ?: return null
         val tel = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
@@ -1775,7 +1773,7 @@ object Moteur {
             "${android.provider.ContactsContract.CommonDataKinds.Email.CONTACT_ID} = ?", arrayOf(id.toString()), null)?.use { cur ->
             buildList { while (cur.moveToNext()) cur.getString(0)?.let { add(it.trim()) } }
         }.orEmpty().distinct()
-        return ContactTel(CC.getLookupUri(id, cle).toString(), nom, photo, numeros, emails, manuel)
+        return ContactTel(android.provider.ContactsContract.Contacts.getLookupUri(id, cle).toString(), nom, photo, numeros, emails, manuel)
     }
 
     /** Photo du contact dans le carnet d'adresses du téléphone, lecture locale. */
