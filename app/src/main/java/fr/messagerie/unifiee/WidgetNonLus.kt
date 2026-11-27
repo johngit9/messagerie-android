@@ -33,8 +33,9 @@ class WidgetNonLus : AppWidgetProvider() {
             v.setTextViewText(R.id.widget_total, if (total > 999) "999+" else total.toString())
             v.setTextViewText(R.id.widget_libelle, when (total) { 0 -> "Tout est lu"; 1 -> "message non lu"; else -> "messages non lus" })
             Moteur.cfg.accent.takeIf { it != 0L }?.let { v.setTextColor(R.id.widget_total, it.toInt()) }
+            // Toucher le widget : directement les non-lus (la conversation s'il n'y en a qu'une)
             v.setOnClickPendingIntent(R.id.widget_racine, PendingIntent.getActivity(ctx, 0,
-                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+                Raccourcis.intentionNonLus(ctx, null), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             pastilles.forEachIndexed { i, id ->
                 val p = parSource.getOrNull(i)
                 if (p == null) { v.setViewVisibility(id, View.GONE); return@forEachIndexed }
@@ -42,11 +43,9 @@ class WidgetNonLus : AppWidgetProvider() {
                 v.setViewVisibility(id, View.VISIBLE)
                 v.setTextViewText(id, "${s.id} $n")
                 v.setTextColor(id, Moteur.cfg.couleurEffective(s).toInt())
-                // Toucher une messagerie ouvre la liste filtrée sur elle
+                // Toucher une messagerie ouvre ses non-lus (la conversation s'il n'y en a qu'une)
                 v.setOnClickPendingIntent(id, PendingIntent.getActivity(ctx, 100 + i,
-                    Intent(ctx, MainActivity::class.java).setAction("widget.${s.name}").putExtra("source", s.name)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                    Raccourcis.intentionNonLus(ctx, s), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             }
             gm.updateAppWidget(ids, v)
         }
