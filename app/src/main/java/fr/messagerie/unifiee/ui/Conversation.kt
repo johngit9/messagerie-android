@@ -53,6 +53,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Movie
@@ -209,6 +211,8 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
     var menu by remember { mutableStateOf(false) }
     var menuIA by remember { mutableStateOf(false) }
     var reponsesRapides by remember { mutableStateOf(false) }
+    // Choix d'émoticônes de la saisie (insérées à la position du curseur)
+    var choixEmojis by remember { mutableStateOf(false) }
     var menuAppel by remember { mutableStateOf(false) }
     var menuPlus by remember { mutableStateOf(false) }
     // « En train d'écrire » : reçu seulement, l'appli n'envoie jamais le sien
@@ -962,6 +966,10 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
                                         }
                                     },
                                 )
+                                // Émoticônes : insérées là où se trouve le curseur
+                                IconButton(onClick = { choixEmojis = true }, enabled = !iaEnCours) {
+                                    Icon(Icons.Outlined.EmojiEmotions, "Insérer une émoticône", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                                 // Texte long : agrandir / réduire la zone
                                 if (saisieAgrandie || brouillon.length > 120 || brouillon.count { it == '\n' } >= 3)
                                     IconButton(onClick = { saisieAgrandie = !saisieAgrandie }) {
@@ -1045,6 +1053,16 @@ fun EcranConversation(e: Etat, c: Conversation, vm: ConversationVM, retour: () -
         afficher("Message programmé pour " + jourComplet(quand) + " à " + heure(quand))
     }
     if (listeFavoris) DialogueFavoris(c, fermer = { listeFavoris = false }) { listeFavoris = false; allerAuMessage(it) }
+    if (choixEmojis) FeuilleEmojis("Insérer une émoticône", fermer = { choixEmojis = false }, teinte = c.source.teinte()) { e ->
+        // Remplace la sélection éventuelle, sinon insère au curseur (à la fin si le champ n'a pas encore servi)
+        val v = if (champ.text == brouillon) champ
+            else androidx.compose.ui.text.input.TextFieldValue(brouillon, androidx.compose.ui.text.TextRange(brouillon.length))
+        val debut = v.selection.min.coerceIn(0, brouillon.length); val fin = v.selection.max.coerceIn(debut, brouillon.length)
+        val nouveau = brouillon.substring(0, debut) + e + brouillon.substring(fin)
+        brouillon = nouveau
+        champ = androidx.compose.ui.text.input.TextFieldValue(nouveau, androidx.compose.ui.text.TextRange(debut + e.length))
+        choixEmojis = false
+    }
     if (reponsesRapides) FeuilleReponsesRapides(c, fermer = { reponsesRapides = false }) { t -> brouillon = t }
     if (infos) FeuilleInfos(e, c, historique, fermer = { infos = false },
         appeler = { menuAppel = true }, rechercher = { rechercheOuverte = true }, selectionner = { modeSelection = true },
@@ -1141,7 +1159,7 @@ private fun PastilleAuteur(nom: String) {
     }
 }
 
-private val emojisRapides = listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "✅", "👀")
+private val emojisRapides = listOf("👍", "❤️", "😂", "😮", "😢", "🙏", "✅")
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -1185,18 +1203,20 @@ private fun Bulle(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             val couleur = if (moi && m.type != "autocollant") Color.White else MaterialTheme.colorScheme.onSurface
+            // Photos, vidéos, fichiers, positions : leur toucher ouvre le média ; l'appui long ouvre le menu (réagir, répondre…)
+            val appuiLong = { if (modeSelection) basculer() else menu = true }
             // Réponse : le message cité, touché = on y remonte
             m.cite?.let { k -> Citation(k, moi, couleur, c) { allerA(k) } }
             when (m.type) {
                 "autocollant" -> AutocollantMessage(m, couleur)
-                "position" -> PositionMessage(m, couleur)
+                "position" -> PositionMessage(m, couleur, appuiLong)
                 "sondage" -> m.sondage?.let { CarteSondage(it, votes, couleur, Moteur.votePossible(c), voter) } ?: Text(m.texte, color = couleur)
                 "audio" -> if (m.media != null) LecteurVocal(m, couleur) else
                     Text("🎤 Message vocal" + (m.duree?.let { d -> " · " + minSec(d.toInt() * 1000) } ?: ""),
                         color = couleur, fontStyle = FontStyle.Italic)
-                "image" -> PhotoMessage(m, couleur)
-                "video" -> VideoMessage(m, couleur, afficherMessage)
-                "fichier" -> FichierMessage(m, couleur, afficherMessage)
+                "image" -> PhotoMessage(m, couleur, appuiLong)
+                "video" -> VideoMessage(m, couleur, afficherMessage, appuiLong)
+                "fichier" -> FichierMessage(m, couleur, afficherMessage, appuiLong)
                 else -> {
                     Text(m.html?.let { texteMisEnForme(it, m.texte, couleur) } ?: avecLiens(m.texte, couleur), color = couleur)
                     // Aperçu du premier lien (titre, description, image de la page)
@@ -1288,7 +1308,10 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
                            reagir: (String?) -> Unit, repondre: () -> Unit, copier: () -> Unit, selectionner: () -> Unit, supprimer: () -> Unit,
                            favori: Boolean = false, basculerFavori: () -> Unit = {}, modifier: (() -> Unit)? = null, traduire: () -> Unit = {}) {
     var partie by remember { mutableStateOf(false) }
+    var toutes by remember { mutableStateOf(false) }
     if (partie) { DialogueSelectionTexte(m.texte) { partie = false; fermer() }; return }
+    // Toutes les émoticônes, pour réagir avec une autre que les rapides
+    if (toutes) { FeuilleEmojis("Réagir", fermer = fermer, actuelle = monEmoji, teinte = c.source.teinte()) { e -> reagir(if (e == monEmoji) null else e) }; return }
     ModalBottomSheet(onDismissRequest = fermer) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Text("Réagir", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1303,6 +1326,15 @@ private fun FeuilleMessage(m: Message, c: Conversation, monEmoji: String?, ferme
                         contentAlignment = Alignment.Center,
                     ) { Text(emoji, fontSize = 24.sp) }
                 }
+                // Votre réaction actuelle si elle n'est pas parmi les rapides, sinon « + » pour toutes les émoticônes
+                val autre = monEmoji?.takeIf { it !in emojisRapides }
+                Box(
+                    Modifier.size(42.dp)
+                        .background(if (autre != null) c.source.teinte().copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        .clickable { toutes = true }
+                        .semantics { contentDescription = "Plus d'émoticônes" },
+                    contentAlignment = Alignment.Center,
+                ) { if (autre != null) Text(autre, fontSize = 24.sp) else Icon(Icons.Outlined.Add, null) }
             }
             Text(
                 if (Moteur.reactionTransmissible(m, c)) "Votre réaction sera envoyée au contact."
