@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContactPhone
 import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,6 +80,17 @@ private fun numero(q: String): String? {
     return if (chiffres.startsWith("0") && chiffres.length == 10) "33" + chiffres.drop(1) else chiffres
 }
 
+/** Numéro du carnet au format international avec « + » : 06… → +336…, 0044… → +44… */
+private fun international(num: String): String {
+    val chiffres = num.filter { it.isDigit() }
+    return "+" + when {
+        num.trim().startsWith("+") -> chiffres
+        chiffres.startsWith("00") -> chiffres.drop(2)
+        chiffres.startsWith("0") && chiffres.length == 10 -> "33" + chiffres.drop(1)
+        else -> chiffres
+    }
+}
+
 /** Nouveau message : choisir un contact (toutes messageries) ou saisir un numéro. Rien n'est envoyé ici. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +113,19 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
     }
     val groupes = remember(base, r) {
         base.filter { it.estGroupe && (r.isEmpty() || normaliser(it.nom).contains(r)) }.sortedByDescending { it.derniere }.take(60)
+    }
+    // Carnet du téléphone : les personnes sans discussion dans Messagerie (ex. jamais écrit depuis l'appli)
+    var carnet by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    LaunchedEffect(Unit) { carnet = Moteur.carnetTelephone() }
+    var nomCarnet by rememberSaveable { mutableStateOf<String?>(null) }
+    val fiches = remember(carnet, r, contacts, filtre) {
+        if (r.length < 2 || filtre != null) emptyList()
+        else {
+            val connus = contacts.map { normaliser(it.nom) }.toSet()
+            carnet.filter { (nom, _) -> normaliser(nom).let { it.contains(r) && it !in connus } }
+                .groupBy { it.first }.map { (nom, l) -> nom to l.map { international(it.second) }.distinct() }
+                .sortedBy { normaliser(it.first) }.take(30)
+        }
     }
     val tel = numero(q)
     // Pseudo Telegram (@nom) : discussion ouverte par la passerelle Telegram
@@ -153,12 +178,12 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                     Spacer(Modifier.width(10.dp))
                     Box(Modifier.weight(1f)) {
                         if (q.isEmpty()) Text("Nom ou numéro", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
-                        BasicTextField(q, { q = it }, singleLine = true,
+                        BasicTextField(q, { q = it; nomCarnet = null }, singleLine = true,
                             textStyle = TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             modifier = Modifier.fillMaxWidth().focusRequester(focus))
                     }
-                    if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Outlined.Close, "Effacer") }
+                    if (q.isNotEmpty()) IconButton(onClick = { q = ""; nomCarnet = null }) { Icon(Icons.Outlined.Close, "Effacer") }
                 }
                 if (sources.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Puce("Toutes", null, filtre == null) { filtre = null }
@@ -172,7 +197,7 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Outlined.Dialpad, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(10.dp))
-                            Text("+$tel", fontWeight = FontWeight.SemiBold)
+                            Text((nomCarnet?.let { "$it · " } ?: "") + "+$tel", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(Modifier.height(10.dp))
                         if (Moteur.cfg.matrixConfigure) {
@@ -222,7 +247,11 @@ fun EcranNouveau(e: Etat, retour: () -> Unit, ouvrir: (String) -> Unit) {
                 }
                 if (groupes.isNotEmpty()) item(key = "t-groupes") { Titre("Groupes") }
                 items(groupes, key = { "g-" + it.cle }) { c -> LigneContact(c.nom, c, listOf(c.source)) { ouvrir(c.cle) } }
-                if (contacts.isEmpty() && groupes.isEmpty() && tel == null) item(key = "vide") {
+                if (fiches.isNotEmpty()) item(key = "t-carnet") { Titre("Carnet du téléphone") }
+                items(fiches, key = { "f-" + it.first }) { (nom, numeros) ->
+                    LigneCarnet(nom, numeros) { num -> q = num; nomCarnet = nom }
+                }
+                if (contacts.isEmpty() && groupes.isEmpty() && fiches.isEmpty() && tel == null) item(key = "vide") {
                     Text("Aucun contact ne correspond. Tapez un numéro pour écrire par WhatsApp ou SMS.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
                 }
@@ -307,6 +336,29 @@ private fun Puce(libelle: String, s: Source?, choisie: Boolean, clic: () -> Unit
     ) {
         if (s != null) { LogoSource(s, 18.dp); Spacer(Modifier.width(6.dp)) }
         Text(libelle, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (choisie) cs.surface else cs.onSurface)
+    }
+}
+
+/** Fiche du carnet sans discussion : un appui sur un numéro propose WhatsApp, Signal, SMS ou Telegram. */
+@Composable
+private fun LigneCarnet(nom: String, numeros: List<String>, clic: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().background(cs.surfaceContainerLow, RoundedCornerShape(16.dp))) {
+        numeros.forEachIndexed { i, num ->
+            Row(
+                Modifier.fillMaxWidth().clickable { clic(num) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(42.dp).background(cs.surfaceContainerHigh, RoundedCornerShape(21.dp)), contentAlignment = Alignment.Center) {
+                    if (i == 0) Icon(Icons.Outlined.ContactPhone, null, tint = cs.primary)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    if (i == 0) Text(nom, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(num + if (i == 0) " · pas encore de discussion" else "", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 

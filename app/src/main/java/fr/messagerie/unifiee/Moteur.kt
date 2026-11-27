@@ -1268,6 +1268,28 @@ object Moteur {
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
 
+    /**
+     * Carnet du téléphone (nom, numéro) pour « Nouveau message » : on peut écrire à quelqu'un
+     * qui n'a encore aucune discussion dans Messagerie. Lecture locale, rien n'est envoyé.
+     */
+    suspend fun carnetTelephone(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return@withContext emptyList()
+        runCatching {
+            val l = mutableListOf<Pair<String, String>>()
+            app.contentResolver.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cur ->
+                while (cur.moveToNext()) {
+                    val nom = cur.getString(0)?.trim().orEmpty()
+                    val num = cur.getString(1)?.trim().orEmpty()
+                    if (nom.isNotEmpty() && num.count { it.isDigit() } >= 6) l += nom to num
+                }
+            }
+            l.distinctBy { it.first + "|" + it.second.filter { c -> c.isDigit() } }
+        }.getOrDefault(emptyList())
+    }
+
     /** Nom d'un numéro dans les contacts du téléphone (lecture locale, rien n'est envoyé). */
     private fun nomContactTelephone(numero: String): String? {
         if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
