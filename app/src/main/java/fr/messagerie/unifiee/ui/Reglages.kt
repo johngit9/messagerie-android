@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Hub
@@ -130,6 +131,7 @@ private enum class Page(val titre: String, val icone: ImageVector, val couleur: 
     Notifications("Notifications et réception", Icons.Outlined.Notifications, 0xFFE8590C, "bulle son vibration batterie temps réel arrière-plan économie silence verrouillage vacances"),
     Confidentialite("Confidentialité", Icons.Outlined.Shield, 0xFF2F9E44, "lu accusé lecture présence réaction google messages vie privée"),
     Statistiques("Réception et statistiques", Icons.Outlined.Insights, 0xFF1971C2, "latence délai archive messages"),
+    Appairage("Connecter un appareil", Icons.Outlined.QrCode2, 0xFF2B8A3E, "qr code nouveau téléphone tablette appareil scanner connexion transférer"),
     Fichier("Fichier de configuration", Icons.Outlined.Description, 0xFF5C677D, "importer exporter json sauvegarde"),
     MiseAJour("Mise à jour de l'appli", Icons.Outlined.SystemUpdate, 0xFF6741D9, "version apk installer"),
 }
@@ -191,6 +193,7 @@ fun EcranReglages(e: Etat, accueil: Boolean, retour: () -> Unit) {
                     Page.Notifications -> PageNotifications(version)
                     Page.Confidentialite -> PageConfidentialite(version)
                     Page.Fichier -> PageFichier { version++; connexionsModifiees = true }
+                    Page.Appairage -> PageAppairage { version++; connexionsModifiees = true }
                     Page.MiseAJour -> PageMiseAJour()
                     Page.Statistiques -> PageStatistiques(e) { aller(it) }
                 }
@@ -236,6 +239,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
     val okMatrix = sourcesMatrix.filter { e.sources[it] is EtatSource.Ok }
     val actives = Source.entries.filter { e.statistiques[it] != null }
     val n = cfg.imports.size
+    var recu by remember { mutableIntStateOf(0) }      // +1 après un QR code : « Commencer » relit la configuration
 
     val entrees = mapOf(
         Page.Messageries to Entree(Page.Messageries, if (actives.isEmpty()) "Pro / Perso, couleurs, délai de réception"
@@ -259,6 +263,7 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
         Page.Profil to Entree(Page.Profil, "Votre nom affiché sur chaque messagerie"),
         Page.IA to Entree(Page.IA, if (cfg.ollamaConfigure) "Résumés et suggestions · ${cfg.ollamaModele}" else "Désactivée"),
         Page.Statistiques to Entree(Page.Statistiques, "${e.statistiques.values.sumOf { it.second }} messages archivés · délai de réception"),
+        Page.Appairage to Entree(Page.Appairage, "Nouveau téléphone ou tablette par QR code"),
         Page.Fichier to Entree(Page.Fichier, "Importer, exporter" + if (n > 0) " · $n import(s) mémorisé(s)" else ""),
         Page.MiseAJour to Entree(Page.MiseAJour, when {
             majDisponible(ctx) -> "Version ${EtatMaj.derniere!!.nom} disponible"
@@ -302,9 +307,12 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
                         Text("Bienvenue", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Spacer(Modifier.height(4.dp))
-                        Text("Le plus simple : « Fichier de configuration » puis « Importer… ». " +
-                            "Sinon, renseignez le serveur Matrix et/ou le relais Element. Rien n'est envoyé ailleurs que vers vos serveurs.",
+                        Text("Le plus simple : sur un appareil déjà configuré (téléphone ou app Mac), affichez le QR code de connexion " +
+                            "(Réglages > Connecter un appareil), puis scannez-le ici. Sinon : « Fichier de configuration » puis « Importer… », " +
+                            "ou renseignez le serveur Matrix et/ou le relais Element. Rien n'est envoyé ailleurs que vers vos serveurs.",
                             color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 14.sp)
+                        Spacer(Modifier.height(12.dp))
+                        ScannerAppairage { recu++ }
                     }
                 }
             }
@@ -343,15 +351,17 @@ private fun Menu(e: Etat, accueil: Boolean, quitter: () -> Unit, ouvrir: (Page) 
             }
             Groupe("Appli") {
                 Rubrique(entrees.getValue(Page.Statistiques), ouvrir)
+                Rubrique(entrees.getValue(Page.Appairage), ouvrir, separateur = true)
                 Rubrique(entrees.getValue(Page.Fichier), ouvrir, separateur = true)
                 Rubrique(entrees.getValue(Page.MiseAJour), ouvrir, separateur = true)
             }
 
+            val pret = recu >= 0 && cfg.configure
             if (accueil) Button(
                 onClick = { Moteur.redemarrer(); quitter() },
-                enabled = cfg.configure,
+                enabled = pret,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp), shape = RoundedCornerShape(14.dp),
-            ) { Text(if (cfg.configure) "Commencer" else "Renseignez d'abord une connexion") }
+            ) { Text(if (pret) "Commencer" else "Renseignez d'abord une connexion") }
             Spacer(Modifier.navigationBarsPadding().height(16.dp))
         }
     }

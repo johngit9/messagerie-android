@@ -65,4 +65,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
     implementation(libs.androidx.work.runtime)
+    // QR code de connexion d'un nouvel appareil : création (ZXing) et lecture (lecteur des services Google Play, sans permission caméra)
+    implementation(libs.zxing.core)
+    implementation(libs.play.services.code.scanner)
 }
