@@ -29,6 +29,10 @@ import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Contacts
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.AddAPhoto
 import androidx.compose.material.icons.outlined.Checklist
@@ -165,7 +169,8 @@ fun FeuilleInfos(
             }
             Carte { Box(Modifier.padding(10.dp)) { ChoixStatut(e, c) } }
             // Fiche contact : la même personne sur d'autres messageries
-            if (!c.estGroupe) FicheContact(e, c, ouvrir = { fermer(); ouvrir(it) })
+            if (!c.estGroupe) FicheContact(e, c, ouvrir = { fermer(); ouvrir(it) }, accesContacts = accesContacts,
+                demanderAcces = { demandeContacts.launch(android.Manifest.permission.READ_CONTACTS) })
             // Réglages de la conversation (notifications, Pro/Perso, épingler, archiver…)
             Carte {
                 actionsConversation(e, c).forEachIndexed { i, a ->
@@ -376,11 +381,12 @@ fun PastilleSelection(choisi: Boolean, teinte: Color) {
  * ou reliée à la main). Tout reste sur ce téléphone.
  */
 @Composable
-private fun FicheContact(e: Etat, c: Conversation, ouvrir: (String) -> Unit) {
+private fun FicheContact(e: Etat, c: Conversation, ouvrir: (String) -> Unit, accesContacts: Boolean, demanderAcces: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var version by remember { mutableStateOf(0) }
     var relier by remember { mutableStateOf(false) }
     val autres = remember(e.conversations, version) { Moteur.autresComptes(c, e) }
+    Carte { CarnetTelephone(c, accesContacts, demanderAcces) }
     Carte {
         Text(if (autres.isEmpty()) "Fiche contact" else "Fiche contact · ${autres.size + 1} messageries",
             fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp))
@@ -527,4 +533,68 @@ internal fun ChoixContacts(e: Etat, s: Source, titre: String, multiple: Boolean,
             Text(if (multiple) "Valider (${choisis.size})" else "Ajouter") } },
         dismissButton = { TextButton(onClick = fermer) { Text("Annuler") } },
     )
+}
+
+/**
+ * Fiche du carnet d'adresses du téléphone liée à la conversation (trouvée par numéro ou nom exact, ou choisie à la main) :
+ * photo, numéros, e-mails, ouverture dans Contacts. Lecture locale ; toucher un numéro ouvre le clavier d'appel sans appeler.
+ */
+@Composable
+private fun CarnetTelephone(c: Conversation, accesContacts: Boolean, demanderAcces: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var version by remember { mutableStateOf(0) }
+    val fiche by produceState<Moteur.ContactTel?>(null, c.cle, accesContacts, version) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Moteur.contactTelephone(c) }
+    }
+    val choisir = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickContact()) { u -> if (u != null) { Moteur.lierCarnet(c, u); version++ } }
+    fun lancer(i: android.content.Intent) { runCatching { ctx.startActivity(i) } }
+    Text("Carnet du téléphone", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp))
+    when {
+        !accesContacts -> Ligne(Icons.Outlined.Contacts, "Autoriser l'accès aux contacts pour afficher sa fiche", cs.primary, demanderAcces)
+        fiche == null -> Ligne(Icons.Outlined.Link, "Lier à un contact du téléphone…", cs.primary) { choisir.launch(null) }
+        else -> {
+            val f = fiche!!
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+                lancer(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(f.uri)))
+            }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (f.photo != null) AsyncImage(model = f.photo, contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(36.dp).clip(CircleShape))
+                else Box(Modifier.size(36.dp).background(cs.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.Person, null, tint = cs.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(f.nom, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (f.manuel) "Contact du téléphone · lié par vous" else "Contact du téléphone", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                }
+                Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Ouvrir dans Contacts", tint = cs.onSurfaceVariant)
+            }
+            f.numeros.forEach { n ->
+                Ligne(Icons.Outlined.Call, n, cs.onSurface) {
+                    lancer(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + android.net.Uri.encode(n))))
+                }
+            }
+            f.emails.forEach { m ->
+                Ligne(Icons.Outlined.Email, m, cs.onSurface) {
+                    lancer(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:$m")))
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                TextButton(onClick = { choisir.launch(null) }) { Text("Choisir un autre contact") }
+                if (f.manuel) TextButton(onClick = { Moteur.lierCarnet(c, null); version++ }) { Text("Délier") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Ligne(icone: ImageVector, texte: String, teinte: Color, clic: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = clic).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icone, null, tint = if (teinte == MaterialTheme.colorScheme.onSurface) MaterialTheme.colorScheme.onSurfaceVariant else teinte)
+        Spacer(Modifier.width(14.dp))
+        Text(texte, fontSize = 14.sp, color = teinte, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }

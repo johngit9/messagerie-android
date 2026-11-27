@@ -1279,15 +1279,7 @@ object Moteur {
             ?: x.jid.substringBefore('@').substringBefore(':').takeIf { x.source == Source.WHATSAPP && it.length >= 8 && it.all(Char::isDigit) }?.let { "+$it" }
         direct(c)?.let { return it }
         runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { direct(it) }?.let { return it }
-        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED) return null
-        return runCatching {
-            app.contentResolver.query(android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
-                "${android.provider.ContactsContract.Contacts.DISPLAY_NAME} = ?", arrayOf(c.nom.trim()), null)?.use { cur ->
-                if (cur.moveToFirst()) cur.getString(0) else null
-            }
-        }.getOrNull()
+        return contactTelephone(c)?.numeros?.firstOrNull()
     }
 
     private fun estUnNumero(t: String) = t.count { it.isDigit() } >= 6 && t.none { it.isLetter() }
@@ -1688,12 +1680,19 @@ object Moteur {
             f.outputStream().use { finale.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
         }
         photos.remove(cle)
+        sansPhoto.clear()
         _versionPhotos.value++
         recharger()
     }
 
     /** Photo de contact déjà téléchargée (sans réseau), pour les notifications et les bulles. */
     fun photoEnCache(conv: String): java.io.File? {
+        photoEnCacheDirecte(conv)?.let { return it }
+        val c = _etat.value.conversations.firstOrNull { it.cle == conv }?.takeIf { !it.estGroupe } ?: return null
+        return fichierCarnet(c) ?: runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { photoEnCacheDirecte(it.cle) }
+    }
+
+    private fun photoEnCacheDirecte(conv: String): java.io.File? {
         photoPerso(conv)?.let { return it }
         photos[conv]?.let { return it }
         val mxc = archive.avatar(conv) ?: return null
@@ -1701,25 +1700,121 @@ object Moteur {
         return java.io.File(java.io.File(app.cacheDir, "avatars"), "$hash.img").takeIf { it.exists() && it.length() > 0 }
     }
 
-    /** Photo du contact dans le carnet d'adresses du téléphone (numéro tiré de la conversation), lecture locale. */
-    fun photoCarnet(c: Conversation): android.graphics.Bitmap? {
-        if (c.estGroupe || androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED) return null
-        val numero = c.jid.substringBefore('@').filter { it.isDigit() }.takeIf { it.length >= 6 }
-            ?: nomsCarnet.entries.firstOrNull { it.value == c.nom }?.key?.filter { it.isDigit() }?.takeIf { it.length >= 6 }
-            ?: c.nom.filter { it.isDigit() }.takeIf { it.length >= 6 && c.nom.none { ch -> ch.isLetter() } }
-            ?: return null
+    // MARK: Fiche du carnet d'adresses du téléphone (lecture locale, rien n'est envoyé)
+
+    /** Fiche du carnet liée à une conversation. uri = lien de la fiche (ouvre l'appli Contacts) ; manuel = lien choisi par vous. */
+    data class ContactTel(val uri: String, val nom: String, val photo: String?, val numeros: List<String>, val emails: List<String>, val manuel: Boolean)
+
+    private fun accesCarnet() = ContextCompat.checkSelfPermission(app, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+
+    /** Lie une conversation à une fiche du carnet (choisie dans Contacts) ; null = revenir au rapprochement automatique. */
+    fun lierCarnet(c: Conversation, uri: android.net.Uri?) {
+        prefsContacts.edit().apply { if (uri == null) remove("carnet.${c.cle}") else putString("carnet.${c.cle}", uri.toString()) }.apply()
+        photos.remove(c.cle); sansPhoto.clear()
+        java.io.File(java.io.File(app.cacheDir, "avatars"), "carnet-${hashCle("carnet:" + c.cle)}.jpg").delete()
+        _versionPhotos.value++
+    }
+
+    private fun hashCle(t: String) = java.security.MessageDigest.getInstance("SHA-256").digest(t.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+
+    /**
+     * Fiche du carnet du téléphone pour cette conversation, si elle existe : lien choisi à la main, sinon numéro
+     * (WhatsApp, conversation nommée par un numéro, même personne ailleurs), sinon nom exact (SMS/RCS : la passerelle
+     * ne transmet pas le numéro, mais le nom vient de ce même carnet via Google Messages).
+     */
+    fun contactTelephone(c: Conversation): ContactTel? {
+        if (c.estGroupe || !accesCarnet()) return null
+        val cr = app.contentResolver
         return runCatching {
-            val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode("+$numero"))
-            val photo = app.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.PHOTO_URI), null, null, null)?.use { cur ->
-                if (cur.moveToFirst()) cur.getString(0) else null
-            } ?: return null
+            // 1) Lien choisi à la main
+            prefsContacts.getString("carnet.${c.cle}", null)?.let { lien ->
+                val actuel = android.provider.ContactsContract.Contacts.lookupContact(cr, android.net.Uri.parse(lien))
+                    ?.let { u -> cr.query(u, arrayOf(android.provider.ContactsContract.Contacts._ID), null, null, null)?.use { cur -> if (cur.moveToFirst()) cur.getLong(0) else null } }
+                return@runCatching actuel?.let { detailsContact(it, true) }
+            }
+            // 2) Par numéro
+            fun numerosDe(x: Conversation): List<String> = listOfNotNull(
+                numeros[x.cle],
+                x.nom.trim().takeIf { estUnNumero(it) },
+                x.jid.substringBefore('@').substringBefore(':').takeIf { x.source == Source.WHATSAPP && it.length >= 8 && it.all(Char::isDigit) }?.let { "+$it" },
+            )
+            val candidats = (numerosDe(c) + (runCatching { autresComptes(c) }.getOrNull() ?: emptyList()).flatMap { numerosDe(it) }).distinct()
+            for (n in candidats) {
+                val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode(n))
+                val id = cr.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup._ID), null, null, null)
+                    ?.use { cur -> if (cur.moveToFirst()) cur.getLong(0) else null }
+                if (id != null) return@runCatching detailsContact(id, false)
+            }
+            // 3) Par nom exact (aussi celui de la même personne sur une autre messagerie)
+            val noms = (listOf(c) + (runCatching { autresComptes(c) }.getOrNull() ?: emptyList()))
+                .map { it.nom.replace(" (WA)", "").trim() }.filter { it.isNotEmpty() && !estUnNumero(it) }.distinct()
+            for (nom in noms) {
+                val id = cr.query(android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf(android.provider.ContactsContract.Contacts._ID), "${android.provider.ContactsContract.Contacts.DISPLAY_NAME} = ?", arrayOf(nom), null)
+                    ?.use { cur -> if (cur.count == 1 && cur.moveToFirst()) cur.getLong(0) else null }   // homonymes : pas de choix au hasard
+                if (id != null) return@runCatching detailsContact(id, false)
+            }
+            null
+        }.getOrNull()
+    }
+
+    private fun detailsContact(id: Long, manuel: Boolean): ContactTel? {
+        val cr = app.contentResolver
+        val (nom, photo, cle) = cr.query(android.content.ContentUris.withAppendedId(android.provider.ContactsContract.Contacts.CONTENT_URI, id),
+            arrayOf(android.provider.ContactsContract.Contacts.DISPLAY_NAME, android.provider.ContactsContract.Contacts.PHOTO_URI, android.provider.ContactsContract.Contacts.LOOKUP_KEY), null, null, null)?.use { cur ->
+            if (cur.moveToFirst()) Triple(cur.getString(0) ?: "", cur.getString(1), cur.getString(2)) else null
+        } ?: return null
+        val tel = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val numeros = cr.query(tel, arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
+            "${android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?", arrayOf(id.toString()), null)?.use { cur ->
+            buildList { while (cur.moveToNext()) cur.getString(0)?.let { add(it.trim()) } }
+        }.orEmpty().distinctBy { it.filter { ch -> ch.isDigit() }.takeLast(9) }
+        val mel = android.provider.ContactsContract.CommonDataKinds.Email.CONTENT_URI
+        val emails = cr.query(mel, arrayOf(android.provider.ContactsContract.CommonDataKinds.Email.ADDRESS),
+            "${android.provider.ContactsContract.CommonDataKinds.Email.CONTACT_ID} = ?", arrayOf(id.toString()), null)?.use { cur ->
+            buildList { while (cur.moveToNext()) cur.getString(0)?.let { add(it.trim()) } }
+        }.orEmpty().distinct()
+        return ContactTel(android.provider.ContactsContract.Contacts.getLookupUri(id, cle).toString(), nom, photo, numeros, emails, manuel)
+    }
+
+    /** Photo du contact dans le carnet d'adresses du téléphone, lecture locale. */
+    fun photoCarnet(c: Conversation): android.graphics.Bitmap? {
+        val photo = contactTelephone(c)?.photo ?: return null
+        return runCatching {
             app.contentResolver.openInputStream(android.net.Uri.parse(photo))?.use { android.graphics.BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
+
+    /** Photo du carnet d'adresses enregistrée en miniature locale (renouvelée chaque jour), pour l'afficher comme les autres. */
+    private fun fichierCarnet(c: Conversation): java.io.File? {
+        if (c.estGroupe) return null
+        val f = java.io.File(java.io.File(app.cacheDir, "avatars"), "carnet-${hashCle("carnet:" + c.cle)}.jpg")
+        if (f.exists() && f.length() > 0 && System.currentTimeMillis() - f.lastModified() < 24 * 3_600_000L) return f
+        val image = photoCarnet(c) ?: return null.also { f.delete() }
+        return runCatching {
+            f.parentFile?.mkdirs()
+            f.outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+            f
         }.getOrNull()
     }
 
     /** Photo de contact d'une conversation (miniature en cache), ou null s'il n'y en a pas. */
     suspend fun photoContact(conv: String): java.io.File? = withContext(Dispatchers.IO) {
+        photoDirecte(conv)?.let { return@withContext it }
+        // Pas de photo transmise (ex. SMS/RCS : Google Messages n'en envoie pas toujours) : photo du carnet d'adresses
+        // du téléphone (lecture locale), sinon celle de la même personne sur une autre messagerie (fiche contact unifiée).
+        sansPhoto[conv]?.let { if (System.currentTimeMillis() - it < 10 * 60_000L) return@withContext null }
+        val c = _etat.value.conversations.firstOrNull { it.cle == conv } ?: return@withContext null
+        if (c.estGroupe) return@withContext null
+        (fichierCarnet(c) ?: runCatching { autresComptes(c) }.getOrNull()?.firstNotNullOfOrNull { photoDirecte(it.cle) })
+            ?.also { photos[conv] = it }
+            ?: null.also { sansPhoto[conv] = System.currentTimeMillis() }
+    }
+
+    /** Conversations sans photo, ni ici ni ailleurs (évite de refaire le rapprochement à chaque affichage ; 10 min). */
+    private val sansPhoto = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Photo propre à la conversation : choisie par vous, sinon celle de la messagerie (téléchargée une fois). */
+    private suspend fun photoDirecte(conv: String): java.io.File? = withContext(Dispatchers.IO) {
         photoPerso(conv)?.let { return@withContext it }
         photos[conv]?.let { return@withContext it }
         val mxc = archive.avatar(conv) ?: return@withContext null
