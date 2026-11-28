@@ -245,7 +245,7 @@ class Relais(private val cfg: Config) {
     /** Demande un code d'association pour ce numéro (à saisir dans WhatsApp > Appareils connectés > Lier avec le numéro). */
     fun demarrerConnexionWhatsApp(telephone: String): Association {
         connecter()
-        val r = Http.requete("$base/whatsapp/connexion/demarrer", "POST", jeton, JSONObject().put("telephone", telephone).toString(), 100_000)   // jusqu'à ~60 s côté WhatsApp
+        val r = Http.requete("$base/whatsapp/connexion/demarrer", "POST", jeton, JSONObject().put("telephone", telephone).toString(), 150_000)   // le relais peut mettre jusqu'à 45 + 90 s
         val j = runCatching { JSONObject(r.texte) }.getOrNull()
         if (r.code != 200 || j == null) throw Exception(listOfNotNull(j?.optString("erreur")?.ifBlank { null }, j?.optString("detail")?.ifBlank { null }).joinToString(" : ").ifBlank { null }
             ?: if (r.code == 404) "le relais du serveur ne gère pas encore la reconnexion" else "erreur ${r.code}")

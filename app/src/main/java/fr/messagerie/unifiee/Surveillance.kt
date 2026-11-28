@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -38,12 +39,51 @@ object Surveillance {
     private const val CANAL = "pannes"
     private val verrou = Mutex()
     @Volatile private var derniere = 0L
+    private val portee = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
-    /** Vérifie au plus toutes les 5 minutes (sauf si force). */
+    /** Déconnexion du compte : seule la reconnexion par code (ou QR) la répare. */
+    fun reconnexionUtile(p: Panne): Boolean {
+        val d = p.detail.lowercase()
+        return p.source == Source.WHATSAPP && listOf("main-device-gone", "main device gone", "logged out", "logged_out", "bad_credentials", "bad credentials", "not logged in").any { it in d }
+    }
+
+    /** Simple coupure de réseau (serveur ou passerelle) : la passerelle se reconnecte d'elle-même. */
+    fun coupureReseau(p: Panne): Boolean {
+        if (reconnexionUtile(p)) return false
+        val d = p.detail.lowercase()
+        return listOf("lookup", "dial tcp", "no route", "transient", "timeout", "timed out", "keepalive", "stuck", "network", "réseau",
+            "injoignable", "unreachable", "synchro error", "connection reset", "connection refused", "eof").any { it in d }
+    }
+
+    /**
+     * Retour du réseau sur le téléphone : on revérifie tout de suite les passerelles et on relance la synchro,
+     * pour que l'alerte disparaisse sans attendre.
+     */
+    fun ecouterReseau(ctx: android.content.Context) {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                @Volatile var perdu = false
+                override fun onLost(network: android.net.Network) { perdu = true }
+                override fun onAvailable(network: android.net.Network) {
+                    if (!perdu) return
+                    perdu = false
+                    portee.launch {
+                        kotlinx.coroutines.delay(3_000)   // le temps que le VPN et le DNS reviennent
+                        runCatching { verifier(force = true) }
+                        Moteur.actualiserMaintenant()
+                    }
+                }
+            })
+        }
+    }
+
+    /** Vérifie au plus toutes les 5 minutes, toutes les 30 s tant qu'une alerte est affichée (sauf si force). */
     suspend fun verifier(force: Boolean = false) = withContext(Dispatchers.IO) {
         if (!verrou.tryLock()) return@withContext
         try {
-            if (!force && System.currentTimeMillis() - derniere < 5 * 60_000) return@withContext
+            val intervalle = if (_pannes.value.isEmpty()) 5 * 60_000L else 30_000L
+            if (!force && System.currentTimeMillis() - derniere < intervalle) return@withContext
             derniere = System.currentTimeMillis()
             val cfg = Moteur.cfg
             val e = Moteur.etat.value
@@ -91,7 +131,7 @@ object Surveillance {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         for (p in nouvelles) {
             // WhatsApp : toucher la notification lance directement la reconnexion par code
-            val piP = if (p.source == Source.WHATSAPP && Moteur.cfg.relaisConfigure) PendingIntent.getActivity(app, "reco.whatsapp".hashCode(),
+            val piP = if (reconnexionUtile(p) && Moteur.cfg.relaisConfigure) PendingIntent.getActivity(app, "reco.whatsapp".hashCode(),
                 Intent(app, MainActivity::class.java).putExtra("reconnecter", Source.WHATSAPP.name)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) else pi

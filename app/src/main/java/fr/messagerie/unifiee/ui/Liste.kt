@@ -167,6 +167,10 @@ fun EcranListe(e: Etat, vm: ListeVM, ouvrir: (String) -> Unit, ouvrirReglages: (
                 if (choisies.isEmpty() && recherche.isNotBlank()) SuggestionsContacts(suggestions) { c -> vm.recherche.value = ""; ouvrir(c.cle) }
                 val pannes by fr.messagerie.unifiee.Surveillance.pannes.collectAsState()
                 if (choisies.isEmpty() && pannes.isNotEmpty()) BandeauPannes(pannes, ouvrirReglages)
+                // Alerte affichée : revérifiée toutes les 30 s, indépendamment de la synchro (qui peut rester bloquée)
+                androidx.compose.runtime.LaunchedEffect(pannes.isNotEmpty()) {
+                    while (pannes.isNotEmpty()) { kotlinx.coroutines.delay(30_000); runCatching { fr.messagerie.unifiee.Surveillance.verifier(force = true) } }
+                }
                 val reconnexion by fr.messagerie.unifiee.Surveillance.reconnexionDemandee.collectAsState()
                 if (reconnexion) DialogueReconnexionWhatsApp { fr.messagerie.unifiee.Surveillance.reconnexionDemandee.value = false }
                 val vacances by Moteur.vacances.collectAsState()
@@ -920,6 +924,12 @@ private fun expliquerPanne(p: fr.messagerie.unifiee.Surveillance.Panne): Pair<St
     val nom = p.source.libelle
     val panneau = "Sur le serveur, ouvrez le panneau de gestion > Comptes > $nom"
     return when {
+        fr.messagerie.unifiee.Surveillance.coupureReseau(p) ->
+            "Le serveur a perdu sa connexion à Internet ou à $nom, sans doute une coupure passagère. Le compte n'est pas déconnecté." to listOf(
+                "Rien à faire : la passerelle se reconnecte toute seule dès que le réseau revient.",
+                "L'alerte disparaît d'elle-même dans les 30 secondes qui suivent ; touchez « Vérifier maintenant » pour ne pas attendre.",
+                "Si elle reste plus d'un quart d'heure, vérifiez que le serveur est allumé et connecté.",
+            )
         p.source == Source.WHATSAPP && ("main-device-gone" in d || "logged out" in d || "bad_credentials" in d || "logged_out" in d) ->
             "Votre téléphone a retiré la connexion du serveur de la liste des appareils liés de WhatsApp " +
                 "(WhatsApp > Appareils connectés), ou WhatsApp l'a déconnectée. Les messages WhatsApp n'arrivent plus dans Messagerie." to listOf(
@@ -982,7 +992,21 @@ private fun FichePannes(pannes: List<fr.messagerie.unifiee.Surveillance.Panne>, 
                 }
                 if (pannes.size > 1) HorizontalDivider()
             }
-            if (pannes.any { it.source == Source.WHATSAPP } && Moteur.cfg.relaisConfigure) {
+            var verification by remember { mutableStateOf(false) }
+            val portee = rememberCoroutineScope()
+            OutlinedButton(enabled = !verification, onClick = {
+                verification = true
+                portee.launch {
+                    runCatching { fr.messagerie.unifiee.Surveillance.verifier(force = true) }
+                    Moteur.actualiserMaintenant()
+                    verification = false
+                    if (fr.messagerie.unifiee.Surveillance.pannes.value.isEmpty()) fermer()
+                }
+            }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                if (verification) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("Vérification…") }
+                else Text("Vérifier maintenant")
+            }
+            if (pannes.any { fr.messagerie.unifiee.Surveillance.reconnexionUtile(it) } && Moteur.cfg.relaisConfigure) {
                 androidx.compose.material3.Button(onClick = { reconnexion = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
                     Text("Reconnecter WhatsApp depuis ce téléphone")
                 }
@@ -1039,10 +1063,18 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
     androidx.compose.runtime.LaunchedEffect(association) {
         val a = association ?: return@LaunchedEffect
         val fin = System.currentTimeMillis() + 5 * 60_000L
+        var echecs = 0
         while (etape == "code" && System.currentTimeMillis() < fin) {
             val (e, d) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { fr.messagerie.unifiee.Relais(cfg).etatConnexionWhatsApp(a.id) }.getOrElse { "attente" to "" }
+                runCatching { fr.messagerie.unifiee.Relais(cfg).etatConnexionWhatsApp(a.id) }.getOrElse { "injoignable" to (it.message ?: "") }
             }
+            if (e == "injoignable") {
+                // Serveur injoignable : on ne tourne pas dans le vide plus d'une minute environ
+                if (++echecs >= 4) { etape = "erreur"; detail = "Le serveur ne répond plus. Vérifiez la connexion du téléphone et du serveur, puis réessayez." }
+                else kotlinx.coroutines.delay(5_000)
+                continue
+            }
+            echecs = 0
             when (e) {
                 "connecte" -> { etape = "connecte"; Moteur.actualiserMaintenant(); runCatching { fr.messagerie.unifiee.Surveillance.verifier(force = true) } }
                 "erreur" -> { etape = "erreur"; detail = d.ifBlank { "La liaison a échoué." } }
@@ -1080,8 +1112,12 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
                             "Revenez ici : la fenêtre se met à jour toute seule.", fontSize = 14.sp, lineHeight = 20.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp))
-                            Text("En attente de WhatsApp…", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                            Text("En attente de WhatsApp…", fontSize = 13.sp, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                            // WhatsApp a refusé le code sur le téléphone : le serveur ne le sait pas toujours, on en redemande un
+                            // (le relais annule de lui-même la demande précédente)
+                            TextButton(onClick = { association = null; demander() }) { Text("Nouveau code") }
                         }
+                        Text("Si WhatsApp affiche une erreur sur le téléphone, touchez « Nouveau code ».", fontSize = 12.sp, color = cs.onSurfaceVariant)
                     }
                     "connecte" -> Text("Les messages WhatsApp arrivent de nouveau dans Messagerie (rattrapage en cours).", fontSize = 14.sp)
                     else -> Text(detail, fontSize = 14.sp, color = cs.error)
@@ -1096,7 +1132,10 @@ private fun DialogueReconnexionWhatsApp(fermer: () -> Unit) {
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Code WhatsApp", association?.code.orEmpty()))
                     ctx.packageManager.getLaunchIntentForPackage("com.whatsapp")?.let { runCatching { ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
                 }) { Text("Copier et ouvrir WhatsApp") }
-                "erreur" -> TextButton(onClick = { association = null; etape = "saisie" }) { Text("Réessayer") }
+                "erreur" -> TextButton(onClick = {
+                    association = null
+                    if (numero.count { it.isDigit() } >= 8) demander() else etape = "saisie"
+                }) { Text("Réessayer") }
                 else -> TextButton(onClick = fermer) { Text("Terminé") }
             }
         },
